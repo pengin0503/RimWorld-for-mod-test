@@ -4,7 +4,9 @@ RimWorld 1.7 ベータの MOD を、Linux x86_64 上で公式のヘッドレス�
 
 ## 現在の状態
 
-**設計レビュー前です。実行可能な検証ツール、検証用 MOD、リリースはまだありません。**
+**入力の静的監査 CLI を利用できます。ゲームを起動する検証ツール・検証用 MOD・リリースはまだありません。** headless 検証の本体は設計レビュー前です。
+
+Linux のゲーム一式がなくても、[入力監査 CLI](docs/offline-input-audit.md) で ZIP・XML 構文・manifest を検査できます。Python 3.12 以上、外部パッケージ不要です。`auditStatus=passed` とゲームの検証成功は別で、`gameVerification` は常に `notRun` です。
 
 最初の対象は、次の二つです。
 

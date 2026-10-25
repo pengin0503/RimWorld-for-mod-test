@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "gameDir": "C:/Program Files (x86)/Steam/steamapps/common/RimWorld",
+  "saveDataDir": "C:/Users/YOUR_NAME/AppData/LocalLow/Ludeon Studios/RimWorld by Ludeon Studios",
+  "modRoots": [
+    "C:/Program Files (x86)/Steam/steamapps/workshop/content/294100"
+  ],
+  "gameVersion": "1.7"
+}

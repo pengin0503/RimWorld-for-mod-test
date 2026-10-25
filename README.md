@@ -1,10 +1,12 @@
 # RimWorld-for-mod-test
 
-RimWorld 1.7 ベータの MOD を、Linux x86_64 上で公式のヘッドレス起動を使って検証するためのプロジェクトです。画面・入力・プレイ機能は作りません。
+RimWorld 1.7 ベータの MOD を、Linux 上の AI に検査させる使い方と、Windows の PC で自分がプレイ前に検査する使い方の両方へ対応させるプロジェクトです。
 
 ## 現在の状態
 
-**入力の静的監査 CLI を利用できます。ゲームを起動する検証ツール・検証用 MOD・リリースはまだありません。** headless 検証の本体は設計レビュー前です。
+**入力監査 CLI、有効 MOD の事前検査 CLI、Windows 用の画面と明示的な通常起動の入口を利用できます。** 公式 headless によるロード検証の本体・観測 MOD・リリースはまだありません。
+
+[二つの使い方と現在の検査範囲](docs/dual-use.md)を参照してください。Windows では `Start-Windows.cmd`、AI は `python tools/mod_preflight.py check --profile ...` を入口にします。両方で同じ検査処理と結果 JSON を使います。
 
 Linux のゲーム一式がなくても、[入力監査 CLI](docs/offline-input-audit.md) で ZIP・XML 構文・manifest を検査できます。Python 3.12 以上、外部パッケージ不要です。`auditStatus=passed` とゲームの検証成功は別で、`gameVerification` は常に `notRun` です。
 

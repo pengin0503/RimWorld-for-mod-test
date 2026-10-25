@@ -30,7 +30,7 @@ Worker は今回から、ゲームが件数しか出さない翻訳エラーの�
 - `Couldn't inject SchoolDesk.comps.CompStatEntrySchoolDesk.reportText ...`
 - `Couldn't inject SchoolDesk.comps.CompStatEntrySchoolDesk.statLabel ...`
 
-原因は VEF の `1.7/Patches/Biotech/LearningBonusPatches.xml` です。黒板と学校机から統計表示の comp を意図的に削除し、独自の StatDef に置き換えています。そのため、公式の日本語翻訳がその comp に書く文字列は、注入先がなくなります。ゲームの動作を壊すものではなく、VEF の設計による結果です。ただしログには警告が出るので、現在の判定規則（新しい警告は failed）では failed になります。既知の警告を許可する規則はまだありません。
+原因は VEF の `1.7/Patches/Biotech/LearningBonusPatches.xml` です。黒板と学校机から統計表示の comp を意図的に削除し、独自の StatDef に置き換えています。そのため、公式の日本語翻訳がその comp に書く文字列は、注入先がなくなります。ゲームの動作を壊すものではなく、VEF の設計による結果です。ただしログには警告が出るので、現在の判定規則（新しい警告は failed）では failed になります。要求の `allow.translationErrors` に、この 3 件に一致する正規表現と理由を書くと、件数の警告は判定から外れます。配布された ZIP 2 個を `mods[].path` に直接指定した構成で、passed（`allowedInTarget: 1`）になることを確認しました。展開後の内容 sha256 は、手作業で展開したフォルダと一致しています。ほかの翻訳エラーが 1 件でも増えれば、警告は外れず failed のままです。
 
 ## 公式 headless との突き合わせ（開発用）
 

@@ -27,6 +27,10 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
       "kind": "postfix", "patchType": "MyMod.ToSpaceListPatch", "patchMethod": "Postfix"
     }]
   },
+  "allow": {
+    "diagnostics": [{"level": "warning", "match": "^Some known message", "reason": "why it is harmless"}],
+    "translationErrors": [{"match": "^Couldn't inject SchoolDesk\\.comps\\.", "reason": "the mod removes this comp on purpose"}]
+  },
   "limits": {"timeoutSeconds": 180, "memoryMiB": 4096, "logMiB": 32, "diagnostics": 2000, "messageKiB": 16}
 }
 ```
@@ -36,13 +40,15 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 | 未知のフィールド | 全階層で拒否（`blocked` / `invalidRequest`） |
 | `levels` | `A` 必須。`B`（DLL・Harmony）と `C`（指定動作）は A の完了が前提。`C` は v1 では未実装で `blocked` |
 | `official` | 既定 `["Core"]`。先頭は Core。Royalty/Ideology/Biotech/Odyssey から選ぶ。Anomaly は対象外（スナップショットにないため `officialContentMissing`） |
-| `mods` | 読み込み順。公式コンテンツの後に並ぶ。`path` は要求ファイルからの相対パス可。`packageId` は任意で、指定時は About.xml と一致必須。`target: true` を 1 個以上 |
+| `mods` | 読み込み順。公式コンテンツの後に並ぶ。`path` は要求ファイルからの相対パス可。`packageId` は任意で、指定時は About.xml と一致必須。`target: true` を 1 個以上。`path` が `.zip` で終わる場合は ZIP を `--out` の下へ展開して使う（下記） |
 | `target` | 検証対象。ベースライン（同じ構成から対象だけ外した実行）との差分で、対象が持ち込んだ診断を判定する |
 | `language` | Core の言語フォルダ名またはアーカイブ名（例 `Japanese (日本語)`）。括弧の前の英語名が一意なら受け付け、実名へ解決して結果に記録する |
 | `expectations.defs` | `type` は Def の型名（一意でなければ完全名）。`exists` は真偽 |
 | `expectations.defValues` | `path` はメンバー名の `.` 連結、`[n]`、`[key=value]`（Def は defName で比較）。`equals` は文字列。数値は相対 1e-6 で比較 |
 | `expectations.keyed` | 選択言語での Keyed 翻訳。`equals` を省くと存在だけを見る |
 | `expectations.harmonyPatches` | `B` 必須。対象メソッドは assembly・型・名前・引数型（`Type.ToString()` 形式）・任意の generic arity で一意に指定。`kind` は prefix/postfix/transpiler/finalizer |
+| `allow.diagnostics` | 対象で新たに出た error/warning のうち、`level` が一致し、本文 1 行目に正規表現 `match`（Python の `re.search`）が一致するものを判定から外す。`reason` 必須。最大 200 件、`match` は 500 文字まで |
+| `allow.translationErrors` | 件数だけの翻訳警告（`Translation data for language X has N errors`）を判定から外す条件。内訳が上限で切り詰められておらず、対象で増えた個々の翻訳エラーが全ていずれかの `match` に一致する場合だけ外す。1 件でも一致しなければ外さない |
 | `limits` | 既定値は上記。範囲外は拒否。`timeoutSeconds` は Worker 1 回あたり（ベースラインと対象で別々に適用） |
 
 ## 結果 `modValidationResult`
@@ -52,7 +58,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 - `status`、`executionStatus`（`completed` / `failed` / `notStarted` / `interrupted`）、`fidelity`（`qualified` / `experimental`）、`reasons[]`（`code` と `detail`）。
 - `stages.A/B/C`：`completed` / `failed` / `incomplete` / `blocked` / `notRequested`。
 - `request`（sha256、正規化後の levels/official/language/limits）、`game`（版、fingerprint、adapter、照合方法）、`platform`、`runtime`（実際の CLR 記述と WaylithClr 設定）、`tool.workerSha256`。
-- `mods[]`（packageId、元パス、ファイル数、内容 sha256、同梱 0Harmony.dll）、`modOrder`（要求と実際）、`runningMods`、`modClasses`、`activeLanguage`、`loadedAssemblies`（mvid）。
+- `mods[]`（packageId、元パス、ZIP 入力なら `archive` の元パスと sha256、ファイル数、内容 sha256、同梱 0Harmony.dll）、`modOrder`（要求と実際）、`runningMods`、`modClasses`、`activeLanguage`、`loadedAssemblies`（mvid）。
 - `checks`：期待値ごとの実値と `match` / `mismatch` / `missing` / `error`。Harmony は登録一覧、期待外の登録、読み込まれた Harmony の版も含む。
 - `diagnostics.newInTarget`：ベースラインにない error/warning（多重集合の差）。`mentionsTargets` は本文に対象の packageId/フォルダ名が出るものの目安で、責任の確定ではない。
 - `diagnostics.translationErrors`：ゲームが「Translation data for language X has N errors」と件数だけ出す翻訳エラーの中身。`targetCount`・`baselineCount`・`newInTarget`（ベースラインにない個々のエラー、多重集合の差）・`complete`（上限 `limits.diagnostics` で切り詰めていなければ true）。判定は件数の警告そのもの（`newWarnings`）で行い、この項目は原因の説明に使う。読めなかった場合は `translationErrorsError` で incomplete。
@@ -66,7 +72,11 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 3. **failed**：上記がなく、qualified な範囲で期待値の不一致、期待パッチの未登録、ロード例外、対象で新たに出た error/warning のいずれかを確認。
 4. **passed**：上記のいずれもない。限定範囲の合格で、`scope.notChecked` は未検証。
 
-incomplete でも、確認できた不一致や新しい診断は `reasons` と `diagnostics` に残します（例：`experimental` と `newErrors` の併記）。警告も初版では合格の障害です。既知の無害な警告を除外する規則は未実装です。
+incomplete でも、確認できた不一致や新しい診断は `reasons` と `diagnostics` に残します（例：`experimental` と `newErrors` の併記）。警告も合格の障害です。要求の `allow` で明示した場合だけ、個々の診断を判定から外します。外した診断も `diagnostics.newInTarget` に `allowedBy`（一致した規則と理由）付きで残り、件数は `diagnostics.allowedInTarget` に出ます。ツール側に組み込みの許可リストはありません。
+
+## ZIP 入力
+
+`mods[].path` に `.zip` を指定すると、Controller が `--out/inputs/` に展開して使います（`--keep-run-dirs` がなければ終了時に削除）。次の ZIP は `blocked`（`modInvalid`）です：絶対パス・ドライブ名・`..` を含む項目、シンボリックリンク、重複項目、10 万項目超、読めない ZIP、MOD が 1 個に定まらないもの。MOD の根は、ZIP の最上位に `About/About.xml` があればそこ、なければそれを持つ唯一の最上位フォルダです（`__MACOSX/` は無視）。展開後の合計は MOD 全体の 4 GiB 上限に含めます。
 
 ## 終了コード
 

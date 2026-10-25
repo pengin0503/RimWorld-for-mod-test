@@ -14,7 +14,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform as platform_module
 import re
 import secrets
@@ -25,6 +25,7 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+import zipfile
 
 TOOL_VERSION = '0.1.0'
 WORKER_NAME = 'RimWorldValidationWorker'
@@ -78,6 +79,7 @@ LIMIT_RANGES = {
 }
 MAX_MOD_BYTES = 4 * 1024 ** 3
 MAX_REQUEST_BYTES = 1024 ** 2
+MAX_ARCHIVE_ENTRIES = 100_000
 SAFE_LANGUAGE = re.compile(r'[^\x00-\x1f/\\:*?"<>|]{1,64}')
 
 
@@ -227,7 +229,16 @@ def load_snapshot(snapshot, *, full=False, official=()):
 # ---------------------------------------------------------------------------
 # Request
 
-REQUEST_KEYS = {'recordType', 'schemaVersion', 'levels', 'official', 'mods', 'language', 'expectations', 'limits', 'tests'}
+REQUEST_KEYS = {'recordType', 'schemaVersion', 'levels', 'official', 'mods', 'language', 'expectations', 'allow', 'limits',
+                'tests'}
+ALLOW_KEYS = {
+    'diagnostics': ({'level', 'match', 'reason'}, set()),
+    'translationErrors': ({'match', 'reason'}, set()),
+}
+MAX_ALLOW_ENTRIES = 200
+MAX_MATCH_LENGTH = 500
+# The game's count-only summary of translation load errors (LoadedLanguage.InjectIntoData_AfterImpliedDefs).
+TRANSLATION_SUMMARY = re.compile(r'^Translation data for language .+ has \d+ errors\. Generate translation report for more info\.$')
 MOD_KEYS = {'path', 'packageId', 'target'}
 EXPECTATION_KEYS = {
     'defs': ({'type', 'defName', 'exists'}, set()),
@@ -325,6 +336,26 @@ def validate_request(request, base):
     if expectations.get('harmonyPatches'):
         _require('B' in levels, 'harmonyPatches expectations need level B')
 
+    allow = request.get('allow', {})
+    _require(isinstance(allow, dict), 'allow must be an object')
+    unknown = set(allow) - set(ALLOW_KEYS)
+    _require(not unknown, f'unknown allow kinds: {", ".join(sorted(unknown))}')
+    for kind, items in allow.items():
+        required, _ = ALLOW_KEYS[kind]
+        _require(isinstance(items, list) and len(items) <= MAX_ALLOW_ENTRIES,
+                 f'allow.{kind} must be an array of at most {MAX_ALLOW_ENTRIES} entries')
+        for index, item in enumerate(items):
+            where = f'allow.{kind}[{index}]'
+            _require(isinstance(item, dict) and set(item) == required, f'{where} needs exactly {", ".join(sorted(required))}')
+            _require(all(isinstance(v, str) and v.strip() for v in item.values()), f'{where} values must be nonempty strings')
+            if kind == 'diagnostics':
+                _require(item['level'] in ('error', 'warning'), f'{where}.level must be error or warning')
+            _require(len(item['match']) <= MAX_MATCH_LENGTH, f'{where}.match is longer than {MAX_MATCH_LENGTH} characters')
+            try:
+                re.compile(item['match'])
+            except re.error as error:
+                raise RequestError(f'{where}.match is not a valid regular expression: {error}') from None
+
     tests = request.get('tests', [])
     _require(isinstance(tests, list), 'tests must be an array')
     if 'C' in levels:
@@ -342,7 +373,8 @@ def validate_request(request, base):
                  f'limits.{key} must be an integer in [{low}, {high}]')
         limits[key] = value
     return {'levels': levels, 'official': official, 'mods': resolved, 'language': language,
-            'expectations': {k: expectations.get(k, []) for k in EXPECTATION_KEYS}, 'tests': tests, 'limits': limits}
+            'expectations': {k: expectations.get(k, []) for k in EXPECTATION_KEYS},
+            'allow': {k: allow.get(k, []) for k in ALLOW_KEYS}, 'tests': tests, 'limits': limits}
 
 
 def resolve_language(game, language):
@@ -382,11 +414,66 @@ def _tree_files(root):
     return files, [l for l in links if not l.startswith('.git')]
 
 
-def inspect_mods(request):
-    """Resolve mod folders, packageIds and content hashes before anything starts."""
+def extract_mod_archive(archive, dest, max_bytes):
+    """Extract a mod ZIP into dest (a new directory) and return the mod's root folder.
+
+    Entries with absolute paths, drive letters, "..", or symbolic links are refused
+    rather than skipped, as are archives over the entry and size limits. The root
+    is the archive's top level when it holds About/About.xml, otherwise its single
+    top-level folder that does (macOS "__MACOSX" metadata is ignored).
+    """
+    try:
+        bundle = zipfile.ZipFile(archive)
+    except (zipfile.BadZipFile, OSError) as error:
+        raise Blocked('modInvalid', f'{archive} is not a readable ZIP: {error}') from None
+    top = dest / Path(archive).stem
+    with bundle:
+        infos = [i for i in bundle.infolist() if not i.filename.replace('\\', '/').startswith('__MACOSX/')]
+        if len(infos) > MAX_ARCHIVE_ENTRIES:
+            raise Blocked('modInvalid', f'{archive} has more than {MAX_ARCHIVE_ENTRIES} entries')
+        if sum(i.file_size for i in infos) > max_bytes:
+            raise Blocked('modTooLarge', f'{archive} expands beyond the remaining mod size limit')
+        for info in infos:
+            name = info.filename.replace('\\', '/')
+            parts = PurePosixPath(name).parts
+            if (name.startswith('/') or not parts or any(part in ('', '.', '..') for part in parts)
+                    or ':' in parts[0]):
+                raise Blocked('modInvalid', f'{archive} has an unsafe entry path: {info.filename!r}')
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise Blocked('modInvalid', f'{archive} contains a symbolic link: {info.filename!r}')
+            target = top.joinpath(*parts)
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with bundle.open(info) as source, open(target, 'xb') as sink:
+                    shutil.copyfileobj(source, sink)
+            except FileExistsError:
+                raise Blocked('modInvalid', f'{archive} has a duplicate entry: {info.filename!r}') from None
+            except (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError) as error:
+                raise Blocked('modInvalid', f'{archive}: cannot extract {info.filename!r}: {error}') from None
+    if (top / 'About' / 'About.xml').is_file():
+        return top
+    candidates = [d for d in top.iterdir() if d.is_dir() and (d / 'About' / 'About.xml').is_file()] if top.is_dir() else []
+    if len(candidates) != 1:
+        raise Blocked('modInvalid', f'{archive} must hold one mod: About/About.xml at the top level or in a single top-level folder')
+    return candidates[0]
+
+
+def inspect_mods(request, inputs_dir=None):
+    """Resolve mod folders (extracting ZIPs into inputs_dir), packageIds and content hashes before anything starts."""
     mods, folders, ids, total = [], set(), set(), 0
-    for mod in request['mods']:
+    for index, mod in enumerate(request['mods']):
         root = Path(mod['path'])
+        archive = None
+        if root.suffix.lower() == '.zip':
+            if not root.is_file():
+                raise Blocked('modMissing', f'mod archive not found: {root}')
+            if inputs_dir is None:
+                raise Blocked('modInvalid', f'{root}: archives need an output directory to extract into')
+            archive = {'path': str(root), 'sha256': sha256_file(root)}
+            root = extract_mod_archive(root, Path(inputs_dir) / f'{index:02d}', MAX_MOD_BYTES - total)
         if not root.is_dir():
             raise Blocked('modMissing', f'mod folder not found: {root}')
         package_id = _about_package_id(root)
@@ -411,6 +498,7 @@ def inspect_mods(request):
         ids.add(package_id)
         folders.add(root.name)
         mods.append({'packageId': package_id, 'target': mod['target'], 'sourcePath': str(root), 'folderName': root.name,
+                     'archive': archive,
                      'files': len(files), 'bytes': size, 'sha256': digest.hexdigest(), 'fileHashes': entries,
                      'harmonyAssemblies': sorted(rel for rel in files if rel.lower().endswith('/0harmony.dll'))})
     return mods
@@ -696,6 +784,34 @@ def new_translation_errors(target_worker, baseline_worker):
             'complete': not target['dropped'] and not baseline['dropped']}
 
 
+def _first_line(event):
+    return (event.get('message') or '').split('\n', 1)[0]
+
+
+def mark_allowed(fresh, allow, translation):
+    """Set "allowedBy" on new diagnostics the request explicitly allows; they stay in the result.
+
+    A diagnostic is allowed when its level matches and its first line matches the
+    regular expression of an allow.diagnostics entry. The game's count-only
+    translation warning is allowed only when the individual errors behind it are
+    fully known and every new one matches an allow.translationErrors entry.
+    """
+    rules = [(re.compile(r['match']), r) for r in allow.get('diagnostics', [])]
+    translation_rules = [(re.compile(r['match']), r) for r in allow.get('translationErrors', [])]
+    for event in fresh:
+        line = _first_line(event)
+        rule = next((r for pattern, r in rules if r['level'] == event.get('level') and pattern.search(line)), None)
+        if rule:
+            event['allowedBy'] = {'match': rule['match'], 'reason': rule['reason']}
+        elif (translation_rules and translation and translation['complete'] and event.get('level') == 'warning'
+              and TRANSLATION_SUMMARY.match(line)):
+            matched = [next((r for pattern, r in translation_rules if pattern.search(item)), None)
+                       for item in translation['newInTarget']]
+            if all(matched):
+                event['allowedBy'] = {'translationErrors': [{'error': item, 'match': r['match'], 'reason': r['reason']}
+                                                            for item, r in zip(translation['newInTarget'], matched)]}
+
+
 def _mentions(event, mods):
     text = (event.get('message') or '').lower()
     return sorted({m['packageId'] for m in mods if m['target'] and (m['packageId'] in text or m['folderName'].lower() in text)})
@@ -788,9 +904,10 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
 
     fresh = []
     if completed and baseline is not None:
-        fresh = new_diagnostics(events, baseline_events)
-        errors = [e for e in fresh if e.get('level') == 'error']
-        warnings = [e for e in fresh if e.get('level') == 'warning']
+        fresh = [dict(e) for e in new_diagnostics(events, baseline_events)]  # annotated below; inputs stay as read
+        mark_allowed(fresh, request.get('allow') or {}, new_translation_errors(worker, baseline))
+        errors = [e for e in fresh if e.get('level') == 'error' and 'allowedBy' not in e]
+        warnings = [e for e in fresh if e.get('level') == 'warning' and 'allowedBy' not in e]
         if errors:
             failed.append({'code': 'newErrors', 'detail': f'{len(errors)} errors appear only when the target mods are loaded'})
         if warnings:
@@ -873,7 +990,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         result['qualificationEvidence'] = qualification['evidence'] if qualification and fidelity == 'qualified' else None
 
         mark = time.monotonic()
-        mods = inspect_mods(request)
+        mods = inspect_mods(request, out_dir / 'inputs')
         timings['inspectModsSeconds'] = round(time.monotonic() - mark, 3)
         result['mods'] = [{k: v for k, v in m.items() if k != 'fileHashes'} for m in mods]
         if 'B' in request['levels'] and request['expectations']['harmonyPatches'] and not any(m['harmonyAssemblies'] for m in mods):
@@ -882,7 +999,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
     except Blocked as blocked:
         result.update({'status': 'blocked', 'executionStatus': 'notStarted',
                        'reasons': [{'code': blocked.code, 'detail': blocked.detail}]})
-        return _finish(result, out_dir, started, timings)
+        return _finish(result, out_dir, started, timings, keep_run_dirs)
 
     limits = request['limits']
     timeout = limits['timeoutSeconds']
@@ -957,6 +1074,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'checks': worker.get('checks'),
         'diagnostics': {
             'newInTarget': fresh,
+            'allowedInTarget': sum(1 for e in fresh if 'allowedBy' in e),
             'translationErrors': new_translation_errors(worker, baseline_worker),
             'target': worker.get('diagnosticsSummary'),
             'baseline': (baseline_worker or {}).get('diagnosticsSummary'),
@@ -970,7 +1088,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
     })
     timings['baselinePrepareSeconds'] = baseline_run['prepareSeconds']
     timings['targetPrepareSeconds'] = target_run['prepareSeconds']
-    return _finish(result, out_dir, started, timings)
+    return _finish(result, out_dir, started, timings, keep_run_dirs)
 
 
 def _scope(request, stages):
@@ -988,7 +1106,9 @@ def _scope(request, stages):
     return {'checked': checked, 'notChecked': not_checked}
 
 
-def _finish(result, out_dir, started, timings):
+def _finish(result, out_dir, started, timings, keep_inputs=False):
+    if not keep_inputs:
+        shutil.rmtree(out_dir / 'inputs', ignore_errors=True)
     timings['totalSeconds'] = round(time.monotonic() - started, 3)
     result['timings'] = timings
     result['finishedAt'] = _now()
@@ -1014,6 +1134,9 @@ def _summary(result):
     for level, stage in (result.get('stages') or {}).items():
         if stage['status'] != 'notRequested':
             lines.append(f'  stage {level}: {stage["status"]}')
+    allowed = (result.get('diagnostics') or {}).get('allowedInTarget')
+    if allowed:
+        lines.append(f'  allowed by the request: {allowed} new diagnostics (see diagnostics.newInTarget[].allowedBy)')
     lines.append(f'  total {result["timings"]["totalSeconds"]} s')
     return '\n'.join(lines)
 

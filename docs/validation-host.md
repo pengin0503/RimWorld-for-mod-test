@@ -39,9 +39,17 @@ python3 tools/validation_host.py prepare-game --source /private/rimworld-linux -
 }
 ```
 
-- `mods` は読み込み順。対象 MOD には `"target": true`。依存 MOD（Harmony など）も同じ一覧に入れます。
+- `mods` は読み込み順。対象 MOD には `"target": true`。依存 MOD（Harmony など）も同じ一覧に入れます。`path` には MOD のフォルダか、配布された ZIP をそのまま指定できます。
 - B を要求するときは期待する Harmony パッチを完全に指定します（上の対象メソッドは書式の例です。実際の MOD のパッチに合わせて書きます）。指定しないと `incomplete` です。
 - 期待値を何も書かなくても、対象 MOD を入れたことで新しく出たエラー・警告は検出されます。
+- 原因を確かめたうえで無害と判断した警告は、`allow` に正規表現と理由を書くと判定から外せます。外した警告も結果に理由付きで残ります。例（VEF の日本語）：
+
+```json
+"allow": {"translationErrors": [{
+  "match": "^Couldn't inject (SchoolDesk\\.comps\\.CompStatEntrySchoolDesk\\.(reportText|statLabel)|Blackboard\\.comps\\.CompInspectStringBlackboard\\.inspectString) into Verse\\.ThingDef ",
+  "reason": "VEF removes these comps on purpose (1.7/Patches/Biotech/LearningBonusPatches.xml)"
+}]}
+```
 
 ## 3. 実行
 

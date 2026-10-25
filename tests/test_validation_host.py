@@ -15,6 +15,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+import zipfile
 
 from tools import validation_host as vh
 
@@ -205,6 +206,11 @@ class RequestTests(TempCase):
             'language path': {'language': '../English'},
             'tests without C': {'tests': ['x']},
             'schema': {'schemaVersion': 2},
+            'unknown allow kind': {'allow': {'everything': []}},
+            'allow without reason': {'allow': {'diagnostics': [{'level': 'warning', 'match': 'x'}]}},
+            'allow empty reason': {'allow': {'diagnostics': [{'level': 'warning', 'match': 'x', 'reason': ' '}]}},
+            'allow bad level': {'allow': {'diagnostics': [{'level': 'info', 'match': 'x', 'reason': 'r'}]}},
+            'allow bad regex': {'allow': {'translationErrors': [{'match': '(', 'reason': 'r'}]}},
         }
         for name, fields in cases.items():
             with self.subTest(name):
@@ -358,6 +364,36 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(outcome[4][0]['mentionsTargets'], ['test.target'])
         self.assertEqual(vh.new_diagnostics([self.warning, self.warning], [self.warning]), [self.warning])
 
+    def test_allowed_diagnostics_are_kept_but_do_not_fail(self):
+        warning = {'level': 'warning', 'category': 'Verse', 'message': 'Known harmless thing\nstack'}
+        request = dict(self.request, allow={'diagnostics': [{'level': 'warning', 'match': '^Known harmless', 'reason': 'by design'}],
+                                            'translationErrors': []})
+        status, _, reasons, _, fresh = self.evaluate(events=[self.warning, warning, self.error], request=request)
+        self.assertEqual((status, self.codes((status, None, reasons))), ('failed', ['newErrors']))
+        self.assertEqual(fresh[0]['allowedBy'], {'match': '^Known harmless', 'reason': 'by design'})
+        self.assertNotIn('allowedBy', fresh[1])
+        status, _, reasons, _, _ = self.evaluate(events=[warning], request=request)
+        self.assertEqual((status, reasons), ('passed', []))
+        wrong_level = dict(request, allow={'diagnostics': [{'level': 'error', 'match': '^Known', 'reason': 'r'}]})
+        self.assertEqual(self.evaluate(events=[warning], request=wrong_level)[0], 'failed')
+
+    def test_translation_summary_is_allowed_only_when_every_new_error_is(self):
+        summary = {'level': 'warning', 'category': 'Verse',
+                   'message': 'Translation data for language Japanese has 3 errors. Generate translation report for more info.'}
+
+        def outcome(items, rules, dropped=0):
+            worker = worker_result(translationErrors={'count': len(items) + dropped, 'dropped': dropped, 'items': items})
+            request = dict(self.request, allow={'diagnostics': [], 'translationErrors': rules})
+            return vh.evaluate(request, self.mods, worker, None, [summary], worker_result(), None, [], {}, 'qualified')
+
+        rule = [{'match': 'CompStatEntrySchoolDesk', 'reason': 'the mod removes this comp on purpose'}]
+        status, _, _, _, fresh = outcome(['Couldn\'t inject SchoolDesk.comps.CompStatEntrySchoolDesk.statLabel'], rule)
+        self.assertEqual(status, 'passed')
+        self.assertEqual(fresh[0]['allowedBy']['translationErrors'][0]['reason'], 'the mod removes this comp on purpose')
+        self.assertEqual(outcome(['CompStatEntrySchoolDesk', 'Found no ThingDef named X'], rule)[0], 'failed')
+        self.assertEqual(outcome(['CompStatEntrySchoolDesk'], rule, dropped=1)[0], 'failed')
+        self.assertEqual(outcome(['CompStatEntrySchoolDesk'], [])[0], 'failed')
+
     def test_new_translation_errors_is_a_multiset_difference(self):
         def worker(items, dropped=0):
             return {'translationErrors': {'count': len(items) + dropped, 'dropped': dropped, 'items': items}}
@@ -405,6 +441,47 @@ class RunTests(TempCase):
         self.assertEqual(result['status'], 'failed')
         self.assertEqual([r['code'] for r in result['reasons']], ['newErrors'])
         self.assertIn('RWMT_Missing', result['diagnostics']['newInTarget'][0]['message'])
+
+    def zip_mod(self, name, entries, *, link=None):
+        path = self.fx.mods / f'{name}.zip'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, 'w') as bundle:
+            for entry, text in entries.items():
+                bundle.writestr(entry, text)
+            if link:
+                info = zipfile.ZipInfo(link)
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                bundle.writestr(info, '/etc/passwd')
+        return path
+
+    def test_zipped_mods_are_extracted_safely(self):
+        about = '<ModMetaData><packageId>test.zipped</packageId></ModMetaData>'
+        self.zip_mod('nested', {'__MACOSX/._x': 'meta', 'Zipped/About/About.xml': about, 'Zipped/Defs/a.xml': '<Defs/>'})
+        result, out = self.fx.run(['*nested.zip'])
+        self.assertEqual(result['status'], 'passed', result.get('reasons'))
+        self.assertEqual((result['mods'][0]['packageId'], result['mods'][0]['folderName']), ('test.zipped', 'Zipped'))
+        self.assertEqual(result['mods'][0]['archive']['sha256'], vh.sha256_file(self.fx.mods / 'nested.zip'))
+        self.assertFalse((out / 'inputs').exists())
+        self.zip_mod('flat', {'About/About.xml': about.replace('zipped', 'flat')})
+        result, _ = self.fx.run(['*flat.zip'])
+        self.assertEqual((result['status'], result['mods'][0]['folderName']), ('passed', 'flat'))
+        bad = {
+            'parent': {'../evil/About/About.xml': about},
+            'absolute': {'/abs/About/About.xml': about},
+            'drive': {'C:/x/About/About.xml': about},
+            'two mods': {'A/About/About.xml': about, 'B/About/About.xml': about},
+            'no mod': {'readme.txt': 'x'},
+        }
+        for name, entries in bad.items():
+            with self.subTest(name):
+                result, _ = self.fx.run([f'*{self.zip_mod(name.replace(" ", "-"), entries).name}'])
+                self.assertEqual((result['status'], result['reasons'][0]['code']), ('blocked', 'modInvalid'))
+        self.assertFalse((self.root / 'evil').exists())
+        result, _ = self.fx.run([f'*{self.zip_mod("link", {"M/About/About.xml": about}, link="M/Defs/x.xml").name}'])
+        self.assertEqual((result['status'], result['reasons'][0]['code']), ('blocked', 'modInvalid'))
+        (self.fx.mods / 'broken.zip').write_bytes(b'not a zip')
+        result, _ = self.fx.run(['*broken.zip'])
+        self.assertEqual((result['status'], result['reasons'][0]['code']), ('blocked', 'modInvalid'))
 
     def test_translation_errors_brought_by_the_target_are_listed(self):
         self.fx.mod('badlang')

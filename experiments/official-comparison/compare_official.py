@@ -42,6 +42,7 @@ EXPECTED_OFFICIAL_ONLY = (
 OFFICIAL_FRAME_LOOP = (
     re.compile(r'Root level exception in Update\(\)'),
 )
+CASE_NAME = re.compile(r'[A-Za-z0-9._-]+')
 DLC = ('Core', 'Royalty', 'Ideology', 'Biotech', 'Odyssey')
 COMPARISON_CASES = {
     'core-only': (['comparisonprobe'], ('Core',), 'English', 'A'),
@@ -165,6 +166,11 @@ def main(argv=None):
     parser.add_argument('--request', action='append', metavar='NAME=PATH',
                         help='compare a private request file (e.g. real mods) instead of the fixture cases')
     args = parser.parse_args(argv)
+    for item in args.request or []:
+        # The name becomes a directory under out/cases that is deleted and recreated.
+        name, _, path = item.partition('=')
+        if not CASE_NAME.fullmatch(name) or name in ('.', '..') or not path:
+            parser.error(f'--request needs NAME=PATH with NAME made of letters, digits, ".", "_" or "-": {item!r}')
     out = Path(args.out).resolve()
     if REPO in out.parents:
         parser.error('--out must be outside the repository')

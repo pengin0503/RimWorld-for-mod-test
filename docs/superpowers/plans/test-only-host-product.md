@@ -21,8 +21,8 @@
 1. 要求を厳格に検証（未知フィールド拒否、A 必須、B の期待パッチ形式、上限範囲）。
 2. blocked 判定：出力先、プラットフォーム（linux-x64 のみ）、C、Worker の有無、スナップショット照合（全ファイルのサイズ、識別ファイルの SHA-256、選択した公式フォルダの余分なファイル。`--verify-full` で全再ハッシュ）、公式コンテンツ・言語、Adapter、MOD（About、packageId、重複、シンボリックリンク、合計 4 GiB）、B の Harmony 同梱。
 3. fidelity：Adapter の `qualified` 表に platform×runtime と要求レベルが含まれ、ランタイムのハッシュも一致する場合だけ `qualified`。
-4. ベースライン（対象 MOD を外した同じ構成）と対象を、それぞれ新しい run ディレクトリと新しい Worker で実行。ベースラインは同一入力ならキャッシュ可（キーはゲーム fingerprint、Worker、ランタイム、公式、言語、上限、各 MOD の内容ハッシュ）。
-5. run ディレクトリ：`host/`（スナップショットへのシンボリックリンク。公式実行ファイル・deps・runtimeconfig は除外、`Data/` は要求したフォルダだけ、`Mods/` はコピー後にハッシュ照合）、`userdata/`（`ModsConfig.xml`、`Prefs.xml`、ログ、キャッシュ）、専用の HOME/XDG/TMPDIR。
+4. ベースライン（対象 MOD を外した同じ構成）と対象を、それぞれ新しい run ディレクトリと新しい Worker で実行。ベースラインは同一入力ならキャッシュ可（キーはゲーム fingerprint、選択した公式フォルダの内容ハッシュ、Worker、ランタイム、公式、言語、上限、各 MOD の内容ハッシュ）。診断の取りこぼしなどで信頼できないベースラインは使わず、キャッシュもしない。
+5. run ディレクトリ：`host/`（スナップショットへのシンボリックリンク。公式実行ファイル・deps・runtimeconfig と、ゲームフォルダ自身の `Mods/` は除外、`Data/` は要求したフォルダだけ、`Mods/` はコピー後にハッシュ照合）、`userdata/`（`ModsConfig.xml`、`Prefs.xml`、ログ、キャッシュ）、専用の HOME/XDG/TMPDIR。
 6. 監視：新しいプロセスグループ、stdin なし。時間・グループ RSS・ログ量をポーリングし、超過で SIGKILL。終了後に残った子孫も停止。`DOTNET_GCHeapHardLimit` も設定。
 7. 判定は [契約](../../contracts/mod-validation-v1.md) の順序。
 

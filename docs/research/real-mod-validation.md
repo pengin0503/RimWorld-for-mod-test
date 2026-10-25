@@ -16,7 +16,7 @@
 | harmony-core | Core＋Harmony（対象） | passed | 新しい診断なし。期待パッチ 2 件が登録済み。登録は全部で 3 件 |
 | vef-core | Core＋Harmony＋VEF（対象） | passed | 新しい診断なし。Def 4 件が期待どおり。MayRequire 付きの 2 件は DLC がないため存在しない。期待パッチ 3 件が登録済み。登録は全部で 410 件（prefix 111、postfix 225、transpiler 65、finalizer 9） |
 | vef-alldlc-en | Core＋4 DLC＋Harmony＋VEF、英語 | passed | MayRequire の Def も存在 |
-| vef-alldlc-ja | 同上、日本語 | **failed**（newWarnings） | 警告「Translation data for language Japanese has 31 errors」が出る。ベースラインでは 28 件で、VEF により 3 件増えた（下記） |
+| vef-alldlc-ja | 同上、日本語 | **failed**（当初は newWarnings、翻訳エラーを 1 件ずつ判定するようにした後は newTranslationErrors） | 警告「Translation data for language Japanese has 31 errors」が出る。ベースラインでは 28 件で、VEF により 3 件増えた（下記） |
 | vef-no-harmony-A | Core＋VEF だけ（A） | failed | loadException（`HarmonyLib.HarmonyPatch` を読み込めない）、playDataNotLoaded、新しいエラー 787 件 |
 | vef-before-harmony | VEF を Harmony より前に置く（A） | failed | 上と同じ種類の失敗 |
 | vef-badref | VEF のコピーで StatDef の category を存在しない名前に変更 | failed（newErrors） | `Could not resolve cross-reference: No RimWorld.StatCategoryDef named RWMT_NoSuchStatCategory ...` |
@@ -30,7 +30,7 @@ Worker は今回から、ゲームが件数しか出さない翻訳エラーの�
 - `Couldn't inject SchoolDesk.comps.CompStatEntrySchoolDesk.reportText ...`
 - `Couldn't inject SchoolDesk.comps.CompStatEntrySchoolDesk.statLabel ...`
 
-原因は VEF の `1.7/Patches/Biotech/LearningBonusPatches.xml` です。黒板と学校机から統計表示の comp を意図的に削除し、独自の StatDef に置き換えています。そのため、公式の日本語翻訳がその comp に書く文字列は、注入先がなくなります。ゲームの動作を壊すものではなく、VEF の設計による結果です。ただしログには警告が出るので、現在の判定規則（新しい警告は failed）では failed になります。要求の `allow.translationErrors` に、この 3 件に一致する正規表現と理由を書くと、件数の警告は判定から外れます。配布された ZIP 2 個を `mods[].path` に直接指定した構成で、passed（`allowedInTarget: 1`）になることを確認しました。展開後の内容 sha256 は、手作業で展開したフォルダと一致しています。ほかの翻訳エラーが 1 件でも増えれば、警告は外れず failed のままです。
+原因は VEF の `1.7/Patches/Biotech/LearningBonusPatches.xml` です。黒板と学校机から統計表示の comp を意図的に削除し、独自の StatDef に置き換えています。そのため、公式の日本語翻訳がその comp に書く文字列は、注入先がなくなります。ゲームの動作を壊すものではなく、VEF の設計による結果です。ただし新しい翻訳エラーなので、既定では failed（`newTranslationErrors`）です。要求の `allow.translationErrors` に、この 3 件に一致する正規表現と理由を書くと、判定から外れます。配布された ZIP 2 個を `mods[].path` に直接指定した構成で、許可規則なしは failed、ありは passed になることを確認しました。展開後の内容 sha256 は、手作業で展開したフォルダと一致しています。ほかの翻訳エラーが 1 件でも増えれば failed のままです。
 
 ## 公式 headless との突き合わせ（開発用）
 

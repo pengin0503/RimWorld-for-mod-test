@@ -33,7 +33,8 @@ EXIT_CODES = {'passed': 0, 'failed': 1, 'blocked': 2, 'incomplete': 3}
 LEVELS = ('A', 'B', 'C')
 OFFICIAL_ORDER = ('Core', 'Royalty', 'Ideology', 'Biotech', 'Anomaly', 'Odyssey')
 EXPANSION_IDS = tuple(f'ludeon.rimworld.{name.lower()}' for name in OFFICIAL_ORDER[1:])
-GAME_EXCLUDED = {'RimWorld', 'RimWorld.exe', 'RimWorld.deps.json', 'RimWorld.runtimeconfig.json', 'Data'}
+# Mods: the install's own local mods never join a run; only the requested ones are copied into host/Mods.
+GAME_EXCLUDED = {'RimWorld', 'RimWorld.exe', 'RimWorld.deps.json', 'RimWorld.runtimeconfig.json', 'Data', 'Mods'}
 REQUIRED_GAME_FILES = (
     'Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
     'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', 'Assets.zip',
@@ -442,15 +443,18 @@ def extract_mod_archive(archive, dest, max_bytes):
             if stat.S_ISLNK(info.external_attr >> 16):
                 raise Blocked('modInvalid', f'{archive} contains a symbolic link: {info.filename!r}')
             target = top.joinpath(*parts)
-            if info.is_dir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+            except OSError:  # a file and a directory with the same path
+                raise Blocked('modInvalid', f'{archive} has conflicting entries at {info.filename!r}') from None
             try:
                 with bundle.open(info) as source, open(target, 'xb') as sink:
                     shutil.copyfileobj(source, sink)
-            except FileExistsError:
-                raise Blocked('modInvalid', f'{archive} has a duplicate entry: {info.filename!r}') from None
+            except (FileExistsError, IsADirectoryError):
+                raise Blocked('modInvalid', f'{archive} has a duplicate or conflicting entry: {info.filename!r}') from None
             except (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError) as error:
                 raise Blocked('modInvalid', f'{archive}: cannot extract {info.filename!r}: {error}') from None
     if (top / 'About' / 'About.xml').is_file():
@@ -663,29 +667,36 @@ def supervise(run_dir, limits, environment, *, poll=0.2):
         process = subprocess.Popen(command, cwd=host, env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
                                    start_new_session=True)
     pgid = process.pid
-    peak, killed, return_code = 0, None, None
-    while True:
-        return_code = process.poll()
-        if return_code is not None:
-            break
-        elapsed = time.monotonic() - started
-        rss = _process_group_rss(pgid)
-        peak = max(peak, rss)
-        if elapsed > limits['timeoutSeconds']:
-            killed = 'timeout'
-        elif rss > memory_limit:
-            killed = 'memoryLimit'
-        elif _dir_bytes(log_paths) > log_limit:
-            killed = 'logLimit'
-        if killed:
+    peak, killed, return_code, stray = 0, None, None, False
+    try:
+        while True:
+            return_code = process.poll()
+            if return_code is not None:
+                break
+            elapsed = time.monotonic() - started
+            rss = _process_group_rss(pgid)
+            peak = max(peak, rss)
+            if elapsed > limits['timeoutSeconds']:
+                killed = 'timeout'
+            elif rss > memory_limit:
+                killed = 'memoryLimit'
+            elif _dir_bytes(log_paths) > log_limit:
+                killed = 'logLimit'
+            if killed:
+                os.killpg(pgid, signal.SIGKILL)
+                return_code = process.wait()
+                break
+            time.sleep(poll)
+    finally:
+        # Also on Ctrl+C or any error: the Worker runs in its own session and would not see
+        # the terminal's interrupt, so it must never outlive the Controller's supervision.
+        if process.poll() is None:
             os.killpg(pgid, signal.SIGKILL)
-            return_code = process.wait()
-            break
-        time.sleep(poll)
-    # The Worker exits with Environment.Exit; anything left in its group is a stray descendant.
-    stray = _group_alive(pgid)
-    if stray:
-        os.killpg(pgid, signal.SIGKILL)
+            process.wait()
+        # The Worker exits with Environment.Exit; anything left in its group is a stray descendant.
+        stray = _group_alive(pgid)
+        if stray:
+            os.killpg(pgid, signal.SIGKILL)
     return {
         'command': [Path(command[0]).name, *command[1:2]], 'exitCode': return_code, 'killedFor': killed,
         'strayProcessesKilled': stray, 'seconds': round(time.monotonic() - started, 3), 'peakRssBytes': peak,
@@ -761,6 +772,24 @@ def new_diagnostics(target_events, baseline_events):
     return fresh
 
 
+def baseline_issues(worker):
+    """Reasons a completed baseline cannot serve as the reference the target is compared with."""
+    issues = []
+    if (worker.get('diagnosticsSummary') or {}).get('dropped'):
+        issues.append(f'{worker["diagnosticsSummary"]["dropped"]} diagnostics were dropped at the limit')
+    if worker.get('verseLogLimitReached'):
+        issues.append('the game stopped logging after its message limit')
+    if not (worker.get('modOrder') or {}).get('matches'):
+        issues.append('the mods that actually loaded differ from the request')
+    translation = worker.get('translationErrors')
+    if translation and translation.get('dropped'):
+        issues.append('translation errors were cut at the limit')
+    for key in ('runningModsError', 'modOrderError', 'translationErrorsError'):
+        if worker.get(key):
+            issues.append(f'{key}: {worker[key].splitlines()[0]}')
+    return issues
+
+
 def new_translation_errors(target_worker, baseline_worker):
     """Individual translation load errors present in the target run but not in the baseline.
 
@@ -789,27 +818,41 @@ def _first_line(event):
 
 
 def mark_allowed(fresh, allow, translation):
-    """Set "allowedBy" on new diagnostics the request explicitly allows; they stay in the result.
+    """Annotate new diagnostics; annotated ones stay in the result but do not fail the run.
 
-    A diagnostic is allowed when its level matches and its first line matches the
-    regular expression of an allow.diagnostics entry. The game's count-only
-    translation warning is allowed only when the individual errors behind it are
-    fully known and every new one matches an allow.translationErrors entry.
+    "allowedBy": the level matches and the first line matches the regular expression
+    of an allow.diagnostics entry. "supersededBy": the game's count-only translation
+    warning, when the individual errors behind it are fully known; those errors are
+    judged one by one instead (judge_translation_errors), so a target that fixes one
+    error and adds another cannot hide behind an unchanged count.
     """
     rules = [(re.compile(r['match']), r) for r in allow.get('diagnostics', [])]
-    translation_rules = [(re.compile(r['match']), r) for r in allow.get('translationErrors', [])]
     for event in fresh:
         line = _first_line(event)
         rule = next((r for pattern, r in rules if r['level'] == event.get('level') and pattern.search(line)), None)
         if rule:
             event['allowedBy'] = {'match': rule['match'], 'reason': rule['reason']}
-        elif (translation_rules and translation and translation['complete'] and event.get('level') == 'warning'
-              and TRANSLATION_SUMMARY.match(line)):
-            matched = [next((r for pattern, r in translation_rules if pattern.search(item)), None)
-                       for item in translation['newInTarget']]
-            if all(matched):
-                event['allowedBy'] = {'translationErrors': [{'error': item, 'match': r['match'], 'reason': r['reason']}
-                                                            for item, r in zip(translation['newInTarget'], matched)]}
+        elif translation and translation['complete'] and event.get('level') == 'warning' and TRANSLATION_SUMMARY.match(line):
+            event['supersededBy'] = 'diagnostics.translationErrors'
+
+
+def judge_translation_errors(translation, allow):
+    """Split the target's new translation errors into allowed (with rule) and not allowed."""
+    if not translation:
+        return translation
+    rules = [(re.compile(r['match']), r) for r in allow.get('translationErrors', [])]
+    allowed, unallowed = [], []
+    for item in translation['newInTarget']:
+        rule = next((r for pattern, r in rules if pattern.search(item)), None)
+        if rule:
+            allowed.append({'error': item, 'match': rule['match'], 'reason': rule['reason']})
+        else:
+            unallowed.append(item)
+    return {**translation, 'allowed': allowed, 'notAllowed': unallowed}
+
+
+def _excused(event):
+    return 'allowedBy' in event or 'supersededBy' in event
 
 
 def _mentions(event, mods):
@@ -905,9 +948,14 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
     fresh = []
     if completed and baseline is not None:
         fresh = [dict(e) for e in new_diagnostics(events, baseline_events)]  # annotated below; inputs stay as read
-        mark_allowed(fresh, request.get('allow') or {}, new_translation_errors(worker, baseline))
-        errors = [e for e in fresh if e.get('level') == 'error' and 'allowedBy' not in e]
-        warnings = [e for e in fresh if e.get('level') == 'warning' and 'allowedBy' not in e]
+        allow = request.get('allow') or {}
+        translation = judge_translation_errors(new_translation_errors(worker, baseline), allow)
+        mark_allowed(fresh, allow, translation)
+        errors = [e for e in fresh if e.get('level') == 'error' and not _excused(e)]
+        warnings = [e for e in fresh if e.get('level') == 'warning' and not _excused(e)]
+        if translation and translation['notAllowed']:
+            failed.append({'code': 'newTranslationErrors',
+                           'detail': f'{len(translation["notAllowed"])} translation errors appear only when the target mods are loaded'})
         if errors:
             failed.append({'code': 'newErrors', 'detail': f'{len(errors)} errors appear only when the target mods are loaded'})
         if warnings:
@@ -942,9 +990,12 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'runId': secrets.token_hex(8), 'startedAt': _now(), 'platform': platform or current_platform(),
         'runtime': {'requested': runtime}, 'request': {'path': str(Path(request_path).resolve())},
     }
+    if out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir())):
+        # Never clean or write into a directory this invocation did not create.
+        result.update({'status': 'blocked', 'executionStatus': 'notStarted',
+                       'reasons': [{'code': 'outputNotEmpty', 'detail': f'{out_dir} is not an empty directory'}]})
+        return _finish(result, None, started, timings)
     try:
-        if out_dir.exists() and any(out_dir.iterdir()):
-            raise Blocked('outputNotEmpty', f'{out_dir} is not empty')
         out_dir.mkdir(parents=True, exist_ok=True)
         try:
             request = load_request(request_path)
@@ -1035,8 +1086,13 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
                 'worker': worker, 'problem': problem, 'events': events}
 
     baseline_mods = [m for m in mods if not m['target']]
+    selected = tuple(f'Data/{folder}/' for folder in request['official'])
+    official_digest = hashlib.sha256(''.join(
+        f'{rel}\0{entry["sha256"]}\n' for rel, entry in sorted(snapshot['files'].items()) if rel.startswith(selected)
+    ).encode()).hexdigest()
     baseline_key = hashlib.sha256(json.dumps({
-        'fingerprint': snapshot['fingerprint'], 'worker': result['tool']['workerSha256'], 'runtime': runtime,
+        'fingerprint': snapshot['fingerprint'], 'officialContent': official_digest,
+        'worker': result['tool']['workerSha256'], 'runtime': runtime,
         'official': request['official'], 'language': request['language'], 'limits': limits,
         'mods': [(m['packageId'], m['sha256']) for m in baseline_mods],
     }, sort_keys=True).encode()).hexdigest()
@@ -1050,7 +1106,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         baseline_run = one_run('baseline', baseline_mods, {k: [] for k in expectations})
         baseline_run['cached'] = False
         if cache_file and baseline_run['worker'] and baseline_run['worker'].get('executionStatus') == 'completed' \
-                and not baseline_run['process'].get('killedFor'):
+                and not baseline_run['process'].get('killedFor') and not baseline_issues(baseline_run['worker']):
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             _write_json(cache_file, baseline_run)
     timings['baselineSeconds'] = round(time.monotonic() - mark, 3)
@@ -1062,6 +1118,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
     baseline_problem = baseline_run['problem'] or (
         None if baseline_worker and baseline_worker.get('executionStatus') == 'completed'
         else f'baseline run did not complete: {(baseline_worker or {}).get("failure") or baseline_run["process"].get("killedFor")}')
+    if not baseline_problem and baseline_issues(baseline_worker):
+        baseline_problem = 'baseline observations are not reliable: ' + '; '.join(baseline_issues(baseline_worker))
     status, execution, reasons, stages, fresh = evaluate(
         request, mods, target_run['worker'], target_run['problem'], target_run['events'],
         baseline_worker, baseline_problem, baseline_run['events'], target_run['process'], fidelity)
@@ -1075,7 +1133,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'diagnostics': {
             'newInTarget': fresh,
             'allowedInTarget': sum(1 for e in fresh if 'allowedBy' in e),
-            'translationErrors': new_translation_errors(worker, baseline_worker),
+            'translationErrors': judge_translation_errors(new_translation_errors(worker, baseline_worker), request['allow']),
             'target': worker.get('diagnosticsSummary'),
             'baseline': (baseline_worker or {}).get('diagnosticsSummary'),
             'baselineCached': baseline_run.get('cached', False),
@@ -1107,13 +1165,15 @@ def _scope(request, stages):
 
 
 def _finish(result, out_dir, started, timings, keep_inputs=False):
-    if not keep_inputs:
-        shutil.rmtree(out_dir / 'inputs', ignore_errors=True)
+    """Record timings and write result.json; out_dir None means the result is only returned."""
     timings['totalSeconds'] = round(time.monotonic() - started, 3)
     result['timings'] = timings
     result['finishedAt'] = _now()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(out_dir / 'result.json', result)
+    if out_dir is not None:
+        if not keep_inputs:
+            shutil.rmtree(out_dir / 'inputs', ignore_errors=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(out_dir / 'result.json', result)
     return result
 
 
@@ -1171,7 +1231,10 @@ def main(argv=None):
                             baseline_cache=args.baseline_cache, allow_unknown_build=args.allow_unknown_build,
                             verify_full=args.verify_full, keep_run_dirs=args.keep_run_dirs)
     print(_summary(result))
-    print(f'result: {Path(args.out).resolve() / "result.json"}')
+    if any(r['code'] == 'outputNotEmpty' for r in result.get('reasons', [])):
+        print('result: not written (the output directory was not empty)')
+    else:
+        print(f'result: {Path(args.out).resolve() / "result.json"}')
     return EXIT_CODES[result['status']]
 
 

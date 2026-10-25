@@ -15,6 +15,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from unittest import mock
 import zipfile
 
 from tools import validation_host as vh
@@ -61,12 +62,13 @@ FAKE_WORKER = textwrap.dedent('''\
         'playDataLoaded': True, 'verseLogLimitReached': False,
         'activeLanguage': request['language'],
         'translationErrors': {'count': 2 if 'badlang' in mods else 1, 'dropped': 0,
-                              'items': ['shared error'] + (['Found no ThingDef named RWMT_Gone'] if 'badlang' in mods else [])},
+                              'items': (['other error'] if 'swaplang' in mods else ['shared error'])
+                                       + (['Found no ThingDef named RWMT_Gone'] if 'badlang' in mods else [])},
         'runningMods': [], 'modClasses': [],
         'modOrder': {'matches': actual == order, 'expected': order, 'actual': actual},
         'checks': {'defs': defs, 'defValues': [], 'keyed': [],
                    'harmony': {'assemblies': [], 'available': True, 'expected': patches, 'unexpected': []}},
-        'diagnosticsSummary': {'written': 2, 'dropped': 0, 'truncated': 0, 'byLevel': {}},
+        'diagnosticsSummary': {'written': 2, 'dropped': 1 if mods == ['droppy'] else 0, 'truncated': 0, 'byLevel': {}},
     }
     with open(request['resultPath'], 'w', encoding='utf-8') as stream:
         json.dump(result, stream)
@@ -377,22 +379,35 @@ class EvaluationTests(unittest.TestCase):
         wrong_level = dict(request, allow={'diagnostics': [{'level': 'error', 'match': '^Known', 'reason': 'r'}]})
         self.assertEqual(self.evaluate(events=[warning], request=wrong_level)[0], 'failed')
 
-    def test_translation_summary_is_allowed_only_when_every_new_error_is(self):
+    def test_translation_errors_are_judged_one_by_one(self):
         summary = {'level': 'warning', 'category': 'Verse',
                    'message': 'Translation data for language Japanese has 3 errors. Generate translation report for more info.'}
 
-        def outcome(items, rules, dropped=0):
+        def outcome(items, rules, *, dropped=0, events=(summary,), baseline_items=()):
             worker = worker_result(translationErrors={'count': len(items) + dropped, 'dropped': dropped, 'items': items})
+            baseline = worker_result(translationErrors={'count': len(baseline_items), 'dropped': 0, 'items': list(baseline_items)})
             request = dict(self.request, allow={'diagnostics': [], 'translationErrors': rules})
-            return vh.evaluate(request, self.mods, worker, None, [summary], worker_result(), None, [], {}, 'qualified')
+            return vh.evaluate(request, self.mods, worker, None, list(events), baseline, None, [], {}, 'qualified')
 
         rule = [{'match': 'CompStatEntrySchoolDesk', 'reason': 'the mod removes this comp on purpose'}]
-        status, _, _, _, fresh = outcome(['Couldn\'t inject SchoolDesk.comps.CompStatEntrySchoolDesk.statLabel'], rule)
-        self.assertEqual(status, 'passed')
-        self.assertEqual(fresh[0]['allowedBy']['translationErrors'][0]['reason'], 'the mod removes this comp on purpose')
-        self.assertEqual(outcome(['CompStatEntrySchoolDesk', 'Found no ThingDef named X'], rule)[0], 'failed')
-        self.assertEqual(outcome(['CompStatEntrySchoolDesk'], rule, dropped=1)[0], 'failed')
+        status, _, reasons, _, fresh = outcome(['Couldn\'t inject SchoolDesk.comps.CompStatEntrySchoolDesk.statLabel'], rule)
+        self.assertEqual((status, reasons), ('passed', []))
+        self.assertEqual(fresh[0]['supersededBy'], 'diagnostics.translationErrors')
+        status, _, reasons, _, _ = outcome(['CompStatEntrySchoolDesk', 'Found no ThingDef named X'], rule)
+        self.assertEqual((status, [r['code'] for r in reasons]), ('failed', ['newTranslationErrors']))
         self.assertEqual(outcome(['CompStatEntrySchoolDesk'], [])[0], 'failed')
+        # A cut list cannot explain the count warning, so the warning itself fails the run.
+        status, _, reasons, _, _ = outcome(['CompStatEntrySchoolDesk'], rule, dropped=1)
+        self.assertEqual((status, [r['code'] for r in reasons]), ('failed', ['newWarnings']))
+        # Same count as the baseline (no summary in the new diagnostics), but one error swapped for another.
+        status, _, reasons, _, _ = outcome(['new error'], [], events=(), baseline_items=['fixed error'])
+        self.assertEqual((status, [r['code'] for r in reasons]), ('failed', ['newTranslationErrors']))
+
+    def test_baseline_issues(self):
+        self.assertEqual(vh.baseline_issues(worker_result()), [])
+        issues = vh.baseline_issues(worker_result(diagnosticsSummary={'dropped': 3}, verseLogLimitReached=True,
+                                                  modOrder={'matches': False}, translationErrors={'dropped': 1}))
+        self.assertEqual(len(issues), 4)
 
     def test_new_translation_errors_is_a_multiset_difference(self):
         def worker(items, dropped=0):
@@ -471,6 +486,8 @@ class RunTests(TempCase):
             'drive': {'C:/x/About/About.xml': about},
             'two mods': {'A/About/About.xml': about, 'B/About/About.xml': about},
             'no mod': {'readme.txt': 'x'},
+            'file then folder': {'M/About/About.xml': about, 'M/Defs': 'file', 'M/Defs/a.xml': '<Defs/>'},
+            'folder then file': {'M/About/About.xml': about, 'M/Defs/a.xml': '<Defs/>', 'M/Defs': 'file'},
         }
         for name, entries in bad.items():
             with self.subTest(name):
@@ -487,7 +504,32 @@ class RunTests(TempCase):
         self.fx.mod('badlang')
         result, _ = self.fx.run(['*badlang'])
         self.assertEqual(result['diagnostics']['translationErrors'],
-                         {'targetCount': 2, 'baselineCount': 1, 'newInTarget': ['Found no ThingDef named RWMT_Gone'], 'complete': True})
+                         {'targetCount': 2, 'baselineCount': 1, 'newInTarget': ['Found no ThingDef named RWMT_Gone'], 'complete': True,
+                          'allowed': [], 'notAllowed': ['Found no ThingDef named RWMT_Gone']})
+        self.assertEqual([r['code'] for r in result['reasons']], ['newTranslationErrors'])
+        self.fx.mod('swaplang')
+        result, _ = self.fx.run(['*swaplang'])
+        self.assertEqual((result['status'], [r['code'] for r in result['reasons']]), ('failed', ['newTranslationErrors']))
+
+    def test_unreliable_baseline_makes_the_run_incomplete_and_is_not_cached(self):
+        self.fx.mod('droppy')
+        self.fx.mod('target')
+        cache = self.root / 'cache'
+        result, _ = self.fx.run(['droppy', '*target'], baseline_cache=cache)
+        self.assertEqual((result['status'], [r['code'] for r in result['reasons']]), ('incomplete', ['baselineIncomplete']))
+        self.assertIn('dropped', result['reasons'][0]['detail'])
+        self.assertFalse(cache.exists() and any(cache.iterdir()))
+
+    def test_local_mods_of_the_install_never_join_a_run(self):
+        self.fx.about(self.fx.game / 'Mods' / 'Local', 'someone.local')
+        snapshot = self.root / 'snapshot-with-mods'
+        vh.prepare_game(self.fx.game, snapshot, log=lambda *_: None)
+        self.fx.mod('target')
+        out = self.root / 'out-local'
+        result = vh.run_validation(snapshot, self.fx.request(['*target']), out, self.fx.worker, adapters=self.fx.adapters,
+                                   platform='linux-x64', keep_run_dirs=True)
+        self.assertEqual(result['status'], 'passed', result.get('reasons'))
+        self.assertEqual(sorted(os.listdir(out / 'target' / 'host' / 'Mods')), ['target'])
 
     def test_run_dirs_are_removed_unless_kept(self):
         self.fx.mod('target')
@@ -540,6 +582,25 @@ class RunTests(TempCase):
         else:
             self.fail('a descendant of the Worker survived the timeout kill')
 
+    def test_interrupted_supervision_kills_the_worker(self):
+        run_dir = self.root / 'interrupted'
+        (run_dir / 'host').mkdir(parents=True)
+        script = run_dir / 'host' / vh.WORKER_NAME
+        script.write_text(f'#!{sys.executable}\nimport os, time\nopen({str(run_dir / "pid")!r}, "w").write(str(os.getpid()))\n'
+                          'time.sleep(600)\n', encoding='utf-8')
+        script.chmod(0o755)
+        real_sleep = time.sleep
+
+        def interrupt(seconds):
+            if (run_dir / 'pid').exists():
+                raise KeyboardInterrupt
+            real_sleep(seconds)
+
+        with mock.patch.object(vh.time, 'sleep', interrupt), self.assertRaises(KeyboardInterrupt):
+            vh.supervise(run_dir, dict(vh.DEFAULT_LIMITS), dict(os.environ), poll=0.05)
+        pid = int((run_dir / 'pid').read_text(encoding='utf-8'))
+        self.assertFalse(Path(f'/proc/{pid}').exists() and 'Z' not in Path(f'/proc/{pid}/stat').read_text().split(')')[1][:3])
+
     def test_log_limit_stops_the_worker(self):
         self.fx.mod('noisy')
         result, _ = self.fx.run(['*noisy'], limits={'logMiB': 1})
@@ -563,6 +624,14 @@ class RunTests(TempCase):
         (self.fx.mods / 'dep' / 'Defs' / 'a.xml').write_text('<Defs><!-- changed --></Defs>', encoding='utf-8')
         third, _ = self.fx.run(['dep', '*target'], baseline_cache=cache)
         self.assertFalse(third['diagnostics']['baselineCached'])
+        # Another snapshot with the same engine files but different official content.
+        (self.fx.game / 'Data' / 'Core' / 'Defs').mkdir()
+        (self.fx.game / 'Data' / 'Core' / 'Defs' / 'extra.xml').write_text('<Defs/>', encoding='utf-8')
+        other = self.root / 'snapshot-other'
+        vh.prepare_game(self.fx.game, other, log=lambda *_: None)
+        fourth = vh.run_validation(other, self.fx.request(['dep', '*target']), self.root / 'out-other', self.fx.worker,
+                                   adapters=self.fx.adapters, platform='linux-x64', baseline_cache=cache)
+        self.assertFalse(fourth['diagnostics']['baselineCached'])
 
     def test_blocked_before_start(self):
         self.fx.mod('target')
@@ -614,6 +683,14 @@ class RunTests(TempCase):
                                    adapters=self.fx.adapters, platform='linux-x64')
         self.assertEqual(result['reasons'][0]['code'], 'outputNotEmpty')
         self.assertEqual((out / 'keep.txt').read_text(encoding='utf-8'), 'x')
+        (out / 'inputs').mkdir()
+        (out / 'inputs' / 'evidence.txt').write_text('y', encoding='utf-8')
+        (out / 'result.json').write_text('{"old": true}', encoding='utf-8')
+        result = vh.run_validation(self.fx.snapshot, self.fx.request(['*target']), out, self.fx.worker,
+                                   adapters=self.fx.adapters, platform='linux-x64')
+        self.assertEqual(result['reasons'][0]['code'], 'outputNotEmpty')
+        self.assertEqual((out / 'inputs' / 'evidence.txt').read_text(encoding='utf-8'), 'y')
+        self.assertEqual((out / 'result.json').read_text(encoding='utf-8'), '{"old": true}')
 
 
 class ProductBoundaryTests(unittest.TestCase):

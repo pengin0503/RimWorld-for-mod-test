@@ -124,7 +124,10 @@ def compare_case(name, request, official, case_dir, args):
         shutil.rmtree(case_dir)
     case_dir.mkdir(parents=True)
     (case_dir / 'request.json').write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding='utf-8')
-    result = validation_host.run_validation(args.snapshot, case_dir / 'request.json', case_dir / 'product', args.worker)
+    # keep_run_dirs: the official run below copies the mods from the Controller's sourcePath,
+    # which for ZIP inputs is the extraction under product/inputs.
+    result = validation_host.run_validation(args.snapshot, case_dir / 'request.json', case_dir / 'product', args.worker,
+                                            keep_run_dirs=True)
     if result['status'] == 'blocked':
         print(f'{name:24} product blocked: {result["reasons"]}', flush=True)
         return {'case': name, 'productStatus': 'blocked', 'errorsMatch': False, 'probesMatch': False}

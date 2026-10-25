@@ -149,7 +149,7 @@ public sealed class HarmonyInspector
             ?? throw new InvalidOperationException($"target type {typeName} not found in {assemblyName}");
         const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
         IEnumerable<MethodBase> candidates = methodName == ".ctor"
-            ? type.GetConstructors(all)
+            ? type.GetConstructors(all).Where(c => !c.IsStatic)
             : methodName == ".cctor" ? type.GetConstructors(all).Where(c => c.IsStatic) : type.GetMethods(all).Where(m => m.Name == methodName);
         MethodBase[] found = candidates.Where(m =>
             (m.IsGenericMethodDefinition ? m.GetGenericArguments().Length : 0) == arity &&

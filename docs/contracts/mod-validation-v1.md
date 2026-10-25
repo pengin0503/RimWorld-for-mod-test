@@ -48,7 +48,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 | `expectations.keyed` | 選択言語での Keyed 翻訳。`equals` を省くと存在だけを見る |
 | `expectations.harmonyPatches` | `B` 必須。対象メソッドは assembly・型・名前・引数型（`Type.ToString()` 形式）・任意の generic arity で一意に指定。`kind` は prefix/postfix/transpiler/finalizer |
 | `allow.diagnostics` | 対象で新たに出た error/warning のうち、`level` が一致し、本文 1 行目に正規表現 `match`（Python の `re.search`）が一致するものを判定から外す。`reason` 必須。最大 200 件、`match` は 500 文字まで |
-| `allow.translationErrors` | 件数だけの翻訳警告（`Translation data for language X has N errors`）を判定から外す条件。内訳が上限で切り詰められておらず、対象で増えた個々の翻訳エラーが全ていずれかの `match` に一致する場合だけ外す。1 件でも一致しなければ外さない |
+| `allow.translationErrors` | 対象で増えた個々の翻訳エラー（`diagnostics.translationErrors.newInTarget`）のうち、正規表現 `match` が一致するものを判定から外す。一致しないものが 1 件でもあれば `newTranslationErrors` で failed |
 | `limits` | 既定値は上記。範囲外は拒否。`timeoutSeconds` は Worker 1 回あたり（ベースラインと対象で別々に適用） |
 
 ## 結果 `modValidationResult`
@@ -61,15 +61,15 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 - `mods[]`（packageId、元パス、ZIP 入力なら `archive` の元パスと sha256、ファイル数、内容 sha256、同梱 0Harmony.dll）、`modOrder`（要求と実際）、`runningMods`、`modClasses`、`activeLanguage`、`loadedAssemblies`（mvid）。
 - `checks`：期待値ごとの実値と `match` / `mismatch` / `missing` / `error`。Harmony は登録一覧、期待外の登録、読み込まれた Harmony の版も含む。
 - `diagnostics.newInTarget`：ベースラインにない error/warning（多重集合の差）。`mentionsTargets` は本文に対象の packageId/フォルダ名が出るものの目安で、責任の確定ではない。
-- `diagnostics.translationErrors`：ゲームが「Translation data for language X has N errors」と件数だけ出す翻訳エラーの中身。`targetCount`・`baselineCount`・`newInTarget`（ベースラインにない個々のエラー、多重集合の差）・`complete`（上限 `limits.diagnostics` で切り詰めていなければ true）。判定は件数の警告そのもの（`newWarnings`）で行い、この項目は原因の説明に使う。読めなかった場合は `translationErrorsError` で incomplete。
+- `diagnostics.translationErrors`：ゲームが「Translation data for language X has N errors」と件数だけ出す翻訳エラーの中身。`targetCount`・`baselineCount`・`newInTarget`（ベースラインにない個々のエラー、多重集合の差）・`complete`（上限 `limits.diagnostics` で切り詰めていなければ true）。`allowed`（許可規則に一致したエラーと規則）・`notAllowed`。翻訳エラーは 1 件ずつ判定します。対象がエラーを 1 件直して別の 1 件を増やし、件数が変わらない場合も検出するためです。内訳が切り詰められていなければ、件数だけの警告は `supersededBy` を付けて判定から外します。切り詰められていれば、件数の警告も `newWarnings` として残します。読めなかった場合は `translationErrorsError` で incomplete。
 - `workerStages`（engineInit → globalInit → staticConstructorsEarly → loadPlayData → lateLoadActions、各秒数と証拠）、`skippedOfficialSteps`、`deviations`、`scope`（確認した範囲と確認していない範囲）。
 - `process`（終了コード、停止理由、最大 RSS、ログ量、上限の実施方式。メモリは監視ポーリングで `memoryHard=false`）、`timings`。
 
 ## 判定順序
 
-1. **blocked**（`executionStatus=notStarted`）：要求不正、出力先が空でない、Linux x64 以外、未実装の C、Worker なし、スナップショット改変、公式コンテンツ・言語・MOD の不足、対応 Adapter のないビルド（`--allow-unknown-build` なし）、B で Harmony を同梱した MOD がない。
-2. **incomplete**：Controller による停止（timeout/memoryLimit/logLimit）、Worker 結果の欠落・不正・古い nonce、Worker の未完了、ベースラインの未完了、`experimental`、診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、言語が適用されない、期待値を評価できない、B で期待パッチ未指定。
-3. **failed**：上記がなく、qualified な範囲で期待値の不一致、期待パッチの未登録、ロード例外、対象で新たに出た error/warning のいずれかを確認。
+1. **blocked**（`executionStatus=notStarted`）：要求不正、出力先が空でない（このときは出力先に何も書かず、何も消さない）、Linux x64 以外、未実装の C、Worker なし、スナップショット改変、公式コンテンツ・言語・MOD の不足、対応 Adapter のないビルド（`--allow-unknown-build` なし）、B で Harmony を同梱した MOD がない。
+2. **incomplete**：Controller による停止（timeout/memoryLimit/logLimit）、Worker 結果の欠落・不正・古い nonce、Worker の未完了、ベースラインの未完了または信頼できないベースライン（診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、翻訳エラーの切り詰め。キャッシュもしない）、`experimental`、診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、言語が適用されない、期待値を評価できない、B で期待パッチ未指定。
+3. **failed**：上記がなく、qualified な範囲で期待値の不一致、期待パッチの未登録、ロード例外、対象で新たに出た error/warning（`allow` で外したものを除く）、対象で増えた翻訳エラー（同）のいずれかを確認。
 4. **passed**：上記のいずれもない。限定範囲の合格で、`scope.notChecked` は未検証。
 
 incomplete でも、確認できた不一致や新しい診断は `reasons` と `diagnostics` に残します（例：`experimental` と `newErrors` の併記）。警告も合格の障害です。要求の `allow` で明示した場合だけ、個々の診断を判定から外します。外した診断も `diagnostics.newInTarget` に `allowedBy`（一致した規則と理由）付きで残り、件数は `diagnostics.allowedInTarget` に出ます。ツール側に組み込みの許可リストはありません。

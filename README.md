@@ -20,6 +20,13 @@ RimWorld 1.7 ベータの MOD を、Linux x86_64 上で公式のヘッドレス�
 - [追加で必要なファイル](docs/linux-files-needed.md)：ゲーム本体のフォルダとユーザーデータのフォルダの違いも説明しています。
 - [設計案](docs/superpowers/specs/2026-10-25-headless-validation-design.md)：ランチャー、検証用 MOD、判定・レポート、実行手順。
 
+
+追加の IL 調査では、MOD 失敗時の自動回復、`-mod=` による公式 DLC の追加・自動ソート、翻訳と static constructor の遅延処理、DevMode による検査範囲の違いを確認しました。
+
+- [起動・読み込み処理の追加調査](notes/2026-10-25-source-audit.md)と[機械可読の結果](notes/2026-10-25-source-audit.json)。
+- [詳細な受け入れ・基準試験の手順](notes/linux-files-needed.md)。
+- [以前の引き継ぎ資料](notes/handoff-2026-10-25.md)と[以前の試運転報告](notes/headless-spike-report.md)。今回の実行結果とは区別しています。
+
 ## 実起動をまだ検証できない理由
 
 受領済みの DLL 一式は `win-x64` 向けです。Linux 用の実行ファイル・同梱ランタイム・ネイティブライブラリ、`Rendering/Shaders/`、公式 `Data/`、アセットパックは今回確認できていません。`Rim_Data.zip` はこの作業環境へ転送されず、中身は未確認です。

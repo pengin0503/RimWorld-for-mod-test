@@ -1,0 +1,140 @@
+{
+  "recordType": "sourceAudit",
+  "schemaVersion": 1,
+  "observedOn": "2026-10-25",
+  "timezone": "Asia/Tokyo",
+  "repository": "pengin0503/RimWorld-for-mod-test",
+  "baseCommit": "8dd9703255182f73654f10fd1157ef21eb5ecdf2",
+  "method": "ZIP entry CRC check and local PE/CLI metadata/CIL inspection; no game launch",
+  "analysisTools": {
+    "dnfile": "0.18.0",
+    "dncil": "1.0.2",
+    "pefile": "2024.8.26"
+  },
+  "archives": [
+    {
+      "bytes": 66283954,
+      "sha256": "77cff83207ccf7eb92321bdadb8e175995f0f0133448392edf54d76b829ac492",
+      "zipIntegrity": "passed",
+      "filesExcludingMacMetadata": 284,
+      "uncompressedBytesExcludingMacMetadata": 162954027,
+      "classification": "windows-install-root",
+      "dllCount": 269,
+      "linuxSharedObjectCount": 0,
+      "uploadedName": "Rim_Dll_All.zip"
+    },
+    {
+      "bytes": 32709185,
+      "sha256": "b258e01304a256db7344f217e8807a974e8a056a57a68208c464051247938cce",
+      "zipIntegrity": "passed",
+      "filesExcludingMacMetadata": 1370,
+      "uncompressedBytesExcludingMacMetadata": 154220584,
+      "classification": "player-profile",
+      "shaderCacheFiles": 1144,
+      "shaderSourceFiles": 0,
+      "saveDataPresent": true,
+      "runtimeConfigPresent": false,
+      "uploadedName": "RimWorld by Ludeon Studios.zip"
+    }
+  ],
+  "unavailableInputs": [
+    {
+      "uploadedName": "Rim_Data.zip",
+      "state": "notMadeAvailable",
+      "contentsInspected": false
+    }
+  ],
+  "assemblies": [
+    {
+      "file": "RimWorld.dll",
+      "assemblyVersion": "1.7.4985.1269",
+      "moduleVersionId": "72ca4f53-dab2-4f6a-aaf3-ed704a839d73",
+      "sha256": "39bd67253a7fa5503ff7f2b51bc3ab5983fb1430acf57d7e8bb322d20e380555",
+      "unityReferences": [
+        "UnityStubs",
+        "Waylith.UnityCompat"
+      ],
+      "targetFramework": ".NETCoreApp,Version=v10.0",
+      "fileVersion": "1.7.4985.1269",
+      "informationalVersion": "1.7.4985.1269+535691cc7c6279fe45ab70da06a06f89e46297f6"
+    },
+    {
+      "file": "Assembly-CSharp.dll",
+      "assemblyVersion": "1.7.9790.38077",
+      "moduleVersionId": "d368493b-52bd-4740-bc75-07c1b0386895",
+      "sha256": "0be7a7ea4b3111d4430f45b36c234a5e43287880b0514b23915f2ef9a0629e16",
+      "unityReferences": [
+        "UnityStubs"
+      ],
+      "targetFramework": ".NETCoreApp,Version=v10.0",
+      "fileVersion": "1.7.9790.38077",
+      "informationalVersion": "1.7.9790.38077+535691cc7c6279fe45ab70da06a06f89e46297f6"
+    },
+    {
+      "file": "Waylith.dll",
+      "assemblyVersion": "1.0.0.0",
+      "moduleVersionId": "41227a46-cd70-4945-9c26-ef442458581e",
+      "sha256": "c69c2a2828c5594b58c9b28f0d19d5b25ff5cb16ceb46dc64f34dd59b7affc26",
+      "unityReferences": [],
+      "targetFramework": ".NETCoreApp,Version=v10.0",
+      "fileVersion": "1.0.0.0",
+      "informationalVersion": "1.0.0+03494be0f2ad22fac64915fa1bfda7a954985807"
+    },
+    {
+      "file": "UnityStubs.dll",
+      "assemblyVersion": "1.0.0.0",
+      "moduleVersionId": "5746cabd-a3a7-46aa-94be-0ca139054940",
+      "sha256": "ea962c9274514e0633d4e4c5471a1a98aff5fc52af20ca2e506c16dcd8be6f81",
+      "unityReferences": [
+        "Waylith.UnityCompat"
+      ],
+      "targetFramework": ".NETCoreApp,Version=v10.0",
+      "fileVersion": "1.0.0.0",
+      "informationalVersion": "1.0.0+535691cc7c6279fe45ab70da06a06f89e46297f6"
+    }
+  ],
+  "declaredRuntime": {
+    "source": "RimWorld.runtimeconfig.json and RimWorld.deps.json",
+    "tfm": "net10.0",
+    "runtimeTarget": ".NETCoreApp,Version=v10.0/win-x64",
+    "frameworkVersion": "10.0.13-waylithclr.dev",
+    "nativeLinuxRuntimeVerified": false
+  },
+  "readiness": {
+    "status": "blocked",
+    "gameLaunchAttempted": false,
+    "linuxExecutableAvailable": false,
+    "linuxRuntimeAvailable": false,
+    "shaderSourcesAvailable": false,
+    "officialDataAvailable": false,
+    "assetPackAvailable": false,
+    "harmonyPresentInDllArchive": false,
+    "standardDotnetAvailable": false,
+    "probeSourceAvailable": false,
+    "previousSpikeSourceAvailable": false
+  },
+  "validationResults": {
+    "coreBoot": {
+      "status": "notRun",
+      "defCount": null
+    },
+    "dlcBoot": {
+      "status": "notRun",
+      "defCount": null
+    },
+    "xmlAndTranslations": {
+      "status": "notRun",
+      "errorCount": null
+    },
+    "harmony": {
+      "status": "notRun",
+      "patchCount": null
+    }
+  },
+  "limitations": [
+    "No contents from the unavailable Rim_Data.zip were inspected.",
+    "Prior handoff spike results are historical reports, not reproduced results.",
+    "Identities and CRCs do not prove install compatibility; Linux baseline execution is required.",
+    "No proprietary binaries, decompiled bodies, player settings, saves, or raw logs are included."
+  ]
+}

@@ -19,6 +19,7 @@ RimWorld 1.7 ベータの MOD を、Linux x86_64 上で公式のヘッドレス�
 - [ファイル識別用のメタデータ](docs/research/input-inventory.json)：ZIP の整合性、SHA-256、主要 DLL の識別情報。
 - [分割 Data の追加調査](docs/research/2026-10-25-split-data-audit.md)：追加受領した ZIP 3 個、DLC アセット、XML 構文、残る不足。
 - [Core アセット管理情報の調査](docs/research/2026-10-25-core-asset-metadata-audit.md)：収録表とテクスチャ管理表の照合、フォントの別名、次の小容量の受領範囲。
+- [Core の小容量リソースの受領結果](docs/research/2026-10-25-core-small-resources-audit.md)：Backstories・Text・Fonts を受領し、13 実ファイルのハッシュを照合。
 - [追加で必要なファイル](docs/linux-files-needed.md)：ゲーム本体のフォルダとユーザーデータのフォルダの違いも説明しています。
 - [設計案](docs/superpowers/specs/2026-10-25-headless-validation-design.md)：ランチャー、検証用 MOD、判定・レポート、実行手順。
 

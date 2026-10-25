@@ -14,7 +14,9 @@
 
 ### 次の小容量の調査用データ
 
-Core の `bake.manifest` と `textures.info` は受領・静的検査済み。次は展開済み Core アセット内の `Resources/Backstories/`、`Resources/Text/`、`Resources/Fonts/` の 3 フォルダを、相対パスを保って受領する。これは追加調査を進めるための範囲で、完全な起動用最小構成ではない。元のメタデータ 2 個は再送不要。画像と音声は保管し、後段で受け入れる。収録表の件数、フォント別名と制約は [Core 管理情報の調査](research/2026-10-25-core-asset-metadata-audit.md) を参照。
+Core の `bake.manifest`、`textures.info` に加え、`Resources/Backstories/`、`Resources/Text/`、`Resources/Fonts/` を含む `Resources.zip` も受領・静的検査済み。13 実ファイルは全件で manifest のハッシュと一致し、Arial の別名を含む 15 論理パス分の内容を確認した。この範囲の再送は不要。詳しい検査と限界は [受領結果](research/2026-10-25-core-small-resources-audit.md) にある。
+
+画像と音声は手元で保管する。Linux の実行ファイル・ランタイムがない段階で、起動用の最小画像・音声集合は確定できないため、今回新たな個別ファイルの追加送付は求めない。完全な Core アセットを受領したことや、起動成功を意味するものではない。
 
 ### 基準起動に必要な一式
 

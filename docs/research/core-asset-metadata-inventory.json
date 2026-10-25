@@ -57,15 +57,9 @@
     "dllAliasMethod": "Waylith.Assets.AssetPack.AliasDeduplicatedEntries",
     "runtimeAliasResolutionTested": false
   },
-  "nextRequestedDirectories": [
-    "Resources/Backstories/",
-    "Resources/Text/",
-    "Resources/Fonts/"
-  ],
-  "nextRequestedLogicalPathCount": 15,
   "readiness": {
     "status": "blocked",
-    "coreResourcePayloadReceived": false,
+    "coreResourcePayloadReceived": true,
     "completeCoreAssetPackReceived": false,
     "linuxRuntimeReceived": false
   },
@@ -76,5 +70,13 @@
     "The manifest has no per-file byte sizes, so upload-size partitions cannot be calculated from it.",
     "No game loading, translation injection, asset decoding, or same-build compatibility test was run.",
     "Only counts, input hashes, and selected diagnostic paths are published, not full received metadata or game content."
-  ]
+  ],
+  "requestedDirectories": [
+    "Resources/Backstories/",
+    "Resources/Text/",
+    "Resources/Fonts/"
+  ],
+  "requestedLogicalPathCount": 15,
+  "requestedDirectoriesStatus": "receivedAndStaticallyInspected",
+  "resourcePayloadAudit": "core-small-resources-inventory.json"
 }

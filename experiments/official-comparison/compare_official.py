@@ -55,6 +55,14 @@ COMPARISON_CASES = {
     'harmony-ok': (['harmonylib', '*harmonyok', 'comparisonprobe'], ('Core',), 'English', 'AB'),
     'harmony-missing': (['harmonylib', '*harmonymissing', 'comparisonprobe'], ('Core',), 'English', 'AB'),
 }
+# Map stage vs the official developer quick test (-quicktest). The mapprobe fixture makes the
+# official quick test use the product's default seed and logs a map fingerprint in both runs.
+MAP_COMPARISON_CASES = {
+    'map-core': (['harmonylib', 'mapprobe', '*okxml', 'comparisonprobe'], ('Core',), 'English'),
+    'map-structure': (['harmonylib', 'mapprobe', '*mapstructure', 'comparisonprobe'], ('Core',), 'English'),
+    'map-genstep-throws': (['harmonylib', 'mapprobe', '*mapgenthrow', 'comparisonprobe'], ('Core',), 'English'),
+    'map-all-dlc': (['harmonylib', 'mapprobe', '*mapstructure', 'comparisonprobe'], DLC, 'English'),
+}
 
 
 def worker_lines(events):
@@ -83,7 +91,7 @@ def official_lines(player_log):
     return errors, probes
 
 
-def run_official(snapshot, target_run, mods, official, out, timeout=180):
+def run_official(snapshot, target_run, mods, official, out, timeout=180, extra_args=()):
     game = Path(snapshot) / 'game'
     root = out / 'official'
     root.mkdir(parents=True)
@@ -108,7 +116,7 @@ def run_official(snapshot, target_run, mods, official, out, timeout=180):
     started = time.monotonic()
     with open(root / 'stdout.log', 'wb') as stdout:
         try:
-            code = subprocess.run(['./RimWorld', '-headless', '-QuitAfterBoot', '-NoCrashDialog'], cwd=root, env=env,
+            code = subprocess.run(['./RimWorld', '-headless', '-QuitAfterBoot', '-NoCrashDialog', *extra_args], cwd=root, env=env,
                                   stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.STDOUT, timeout=timeout).returncode
         except subprocess.TimeoutExpired:
             # When loading fails, the official boot never reaches QuitAfterBoot and keeps
@@ -119,7 +127,21 @@ def run_official(snapshot, target_run, mods, official, out, timeout=180):
     return code, round(seconds, 3), player_log
 
 
-def compare_case(name, request, official, case_dir, args):
+def official_errors_until_map(player_log):
+    errors = []
+    for line in player_log.read_text(encoding='utf-8', errors='replace').splitlines():
+        match = LOG_LINE.match(line)
+        if not match:
+            continue
+        level, category, message = match.groups()
+        if message.startswith('[RWMT-PROBE] map pawns'):
+            break
+        if level in ('ERROR', 'WARN') and not any(p.search(message) for p in EXPECTED_OFFICIAL_ONLY):
+            errors.append(f'{"error" if level == "ERROR" else "warning"} [{category}] {message}')
+    return errors
+
+
+def compare_case(name, request, official, case_dir, args, *, quicktest=False):
     if case_dir.exists():
         shutil.rmtree(case_dir)
     case_dir.mkdir(parents=True)
@@ -134,8 +156,14 @@ def compare_case(name, request, official, case_dir, args):
     target_run = case_dir / 'product' / 'target'
     events = [json.loads(line) for line in (target_run / 'events.jsonl').read_text(encoding='utf-8').splitlines()]
     w_errors, w_probes = worker_lines(events)
-    code, seconds, player_log = run_official(args.snapshot, target_run, result['mods'], official, case_dir, args.official_timeout)
+    code, seconds, player_log = run_official(args.snapshot, target_run, result['mods'], official, case_dir, args.official_timeout,
+                                             ('-quicktest',) if quicktest else ())
     o_errors, o_probes = official_lines(player_log) if player_log.is_file() else ([], [])
+    if quicktest:
+        # The official quick test goes on after the map: game start and 180 played frames before
+        # QuitAfterBoot. Only what both runs can see is compared: the map fingerprint and the
+        # errors up to the end of map generation (the probe's last map line in the official log).
+        o_errors = official_errors_until_map(player_log) if player_log.is_file() else []
     if code == 'timeout':
         # The frame loop repeats its errors every frame until the kill, so only the
         # distinct lines are comparable, and the loop's own errors are left out.
@@ -165,6 +193,8 @@ def main(argv=None):
     parser.add_argument('--out', required=True)
     parser.add_argument('--worker', default=str(REPO / 'worker' / 'bin'))
     parser.add_argument('--cases')
+    parser.add_argument('--map', action='store_true',
+                        help='compare the map stage with the official -quicktest map (MAP_COMPARISON_CASES)')
     parser.add_argument('--official-timeout', type=int, default=180)
     parser.add_argument('--request', action='append', metavar='NAME=PATH',
                         help='compare a private request file (e.g. real mods) instead of the fixture cases')
@@ -192,6 +222,14 @@ def main(argv=None):
                 mod['path'] = str((base / mod['path']).resolve())
             request['mods'].append({'path': str(staged / 'comparisonprobe')})
             jobs.append((name, request, tuple(request.get('official', ['Core']))))
+    elif args.map:
+        for name in (args.cases.split(',') if args.cases else MAP_COMPARISON_CASES):
+            mod_names, official, language = MAP_COMPARISON_CASES[name]
+            request = matrix.case('A', mod_names, official=official, language=language, map={},
+                                  limits={'timeoutSeconds': 600})
+            for mod in request['mods']:
+                mod['path'] = str(staged / mod['path'])
+            jobs.append((name, request, official))
     else:
         for name in (args.cases.split(',') if args.cases else COMPARISON_CASES):
             mod_names, official, language, levels = COMPARISON_CASES[name]
@@ -204,7 +242,7 @@ def main(argv=None):
                 request['expectations'] = {'harmonyPatches': [matrix.HARMONY_OK]}
             jobs.append((name, request, official))
     for name, request, official in jobs:
-        rows.append(compare_case(name, request, official, out / 'cases' / name, args))
+        rows.append(compare_case(name, request, official, out / 'cases' / name, args, quicktest=args.map))
     (out / 'comparison.json').write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding='utf-8')
     print(f'comparison: {out / "comparison.json"}')
     return 0 if all(r['errorsMatch'] and r['probesMatch'] for r in rows) else 1

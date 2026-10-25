@@ -13,7 +13,7 @@ namespace RimWorldValidation.Worker;
 /// autostart save, UI/sound roots) with a fixed sequence that ends the process.
 /// The order and every skipped step are listed in docs/research/test-host-entrypoints.md.
 /// </summary>
-public sealed class Host(WorkerRequest request, GameApi api, Diagnostics diagnostics, Stopwatch clock)
+public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Diagnostics diagnostics, Stopwatch clock)
 {
     public static readonly string[] SkippedOfficialSteps =
     [
@@ -44,6 +44,10 @@ public sealed class Host(WorkerRequest request, GameApi api, Diagnostics diagnos
     private int _finished;
     private Stage? _loadStage;
     private Stage? _lateStage;
+    private Stage? _mapStage;
+    private MapStage? _map;
+    private volatile Exception? _mapException;
+    private Dictionary<string, object?>? _mapSummary;
 
     public int ExitCode { get; private set; } = 3;
 
@@ -222,7 +226,8 @@ public sealed class Host(WorkerRequest request, GameApi api, Diagnostics diagnos
                 Finish("failed", "a scene change was requested; the worker never loads a playable scene");
                 return;
             }
-            if (api.CurrentGame.GetValue(null) != null)
+            // Only the map stage may create a Game, and it never starts play.
+            if (_mapStage == null && api.CurrentGame.GetValue(null) != null)
             {
                 Finish("failed", "game code created a Game instance; the worker never enters play");
                 return;
@@ -309,6 +314,47 @@ public sealed class Host(WorkerRequest request, GameApi api, Diagnostics diagnos
                 _lateStage.Evidence["coreStaticAssetsLoaded"] = api.CoreStaticAssetsLoaded.GetValue(null);
                 Complete(_lateStage, _loadStage?.Status == "completed" ? "completed" : "failed");
             }
+            if (request.Map != null && mapApi != null && _lateStage?.Status == "completed")
+            {
+                QueueMap(request.Map, mapApi);
+            }
+            else
+            {
+                _markerRan = true;
+            }
+        }, async: false, handler: null);
+    }
+
+    // Like the official "GeneratingMap" long event, generation runs asynchronously;
+    // the observation runs on the main thread after the game's when-finished actions.
+    private void QueueMap(MapRequest mapRequest, MapApi bound)
+    {
+        _mapStage = Begin("mapGeneration");
+        _map = new MapStage(mapRequest, bound);
+        Queue(() =>
+        {
+            _map.Generate();
+            Diagnostics.Stage = "map.whenFinished";
+        }, async: true, handler: e => _mapException = e);
+        Queue(() =>
+        {
+            Diagnostics.Stage = "map.observe";
+            foreach ((string key, object? value) in _map.Evidence)
+            {
+                _mapStage.Evidence[key] = value;
+            }
+            if (_mapException == null && _map.Map != null)
+            {
+                try
+                {
+                    _mapSummary = new MapObservation(bound, _map, mapRequest.MaxListedThings).Write(mapRequest.ObservationPath);
+                }
+                catch (Exception e) when (e is not OutOfMemoryException)
+                {
+                    _mapException = e;
+                }
+            }
+            Complete(_mapStage, _mapException == null && _mapSummary != null ? "completed" : "failed");
             _markerRan = true;
         }, async: false, handler: null);
     }
@@ -451,6 +497,34 @@ public sealed class Host(WorkerRequest request, GameApi api, Diagnostics diagnos
                 Guard(json, "checksError", () => checks.WriteExpectations(json, request.Expectations));
             }
         }
+        if (request.Map != null)
+        {
+            WriteMap(json);
+        }
+    }
+
+    private void WriteMap(Utf8JsonWriter json)
+    {
+        json.WriteStartObject("map");
+        json.WriteString("status", _mapStage?.Status ?? "notStarted");
+        Exception? error = _mapException is TargetInvocationException { InnerException: { } inner } ? inner : _mapException;
+        if (error != null)
+        {
+            json.WriteString("setupError", error is MapSetupException ? error.Message : null);
+            json.WriteString("exception", error is MapSetupException ? null : error.ToString());
+        }
+        if (_mapSummary != null)
+        {
+            json.WritePropertyName("summary");
+            JsonSerializer.Serialize(json, _mapSummary);
+        }
+        json.WriteStartArray("skippedOfficialSteps");
+        foreach (string step in MapStage.SkippedOfficialSteps)
+        {
+            json.WriteStringValue(step);
+        }
+        json.WriteEndArray();
+        json.WriteEndObject();
     }
 
     // A failing observation must not lose the rest of the result.
@@ -501,7 +575,7 @@ public sealed class Host(WorkerRequest request, GameApi api, Diagnostics diagnos
             foreach ((string key, object? value) in stage.Evidence)
             {
                 json.WritePropertyName(key);
-                JsonSerializer.Serialize(json, value?.ToString() is string s && value is not bool && value is not int ? s : value);
+                JsonSerializer.Serialize(json, value is bool or int or float or double or System.Collections.IEnumerable and not string ? value : value?.ToString());
             }
             json.WriteEndObject();
             json.WriteEndObject();

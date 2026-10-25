@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "audit_date": "2026-10-25",
+  "inspection": "static_only",
+  "game_executed": false,
+  "inputs": [
+    {
+      "archive": "01-Rim_Dll_All.zip",
+      "sha256": "77cff83207ccf7eb92321bdadb8e175995f0f0133448392edf54d76b829ac492",
+      "total_entries": 569,
+      "payload_files": 284,
+      "payload_bytes": 162954027,
+      "role": "windows_install_root_files",
+      "crc_ok": true,
+      "runtime_target": ".NETCoreApp,Version=v10.0/win-x64",
+      "tfm": "net10.0",
+      "frameworks": [
+        {
+          "name": "Microsoft.NETCore.App",
+          "version": "10.0.13-waylithclr.dev"
+        }
+      ],
+      "waylithclr_property_names": [
+        "WaylithClr.AllowInitOnlyStaticWrites",
+        "WaylithClr.AssemblyNameRedirects",
+        "WaylithClr.CatchableAccessViolations",
+        "WaylithClr.DynamicMethodOwnerIsDeclaringType",
+        "WaylithClr.IsolatedLoadsResolveByName",
+        "WaylithClr.JitNoInlinePatchableIntoDynamicMethods",
+        "WaylithClr.JitPatchableAssemblies",
+        "WaylithClr.LaxAssemblyArchitecture",
+        "WaylithClr.LaxAssemblyBinding",
+        "WaylithClr.LaxCallvirt",
+        "WaylithClr.LaxDynamicMethodAttributes",
+        "WaylithClr.LaxInheritedFieldRefs",
+        "WaylithClr.LaxInterfaceDispatch",
+        "WaylithClr.LaxMemberSignatures",
+        "WaylithClr.LaxPrivateFieldNames",
+        "WaylithClr.LaxTypeRefResolution",
+        "WaylithClr.MissingAssemblyTypeLoadException",
+        "WaylithClr.MonoFloatFormatPrecision",
+        "WaylithClr.MonoStringHashCode",
+        "WaylithClr.SkipAccessChecks"
+      ],
+      "selected_files": [
+        {
+          "name": "RimWorld.exe",
+          "bytes": 198656,
+          "sha256": "4c59c2aa41e39180ef3322e9f9130608362c6b5baba5b19d0f17f8ca96b6b215",
+          "pe_machine": "0x8664"
+        },
+        {
+          "name": "Assembly-CSharp.dll",
+          "bytes": 15632896,
+          "sha256": "0be7a7ea4b3111d4430f45b36c234a5e43287880b0514b23915f2ef9a0629e16",
+          "pe_machine": "0x14c",
+          "module_mvid": "d368493b-52bd-4740-bc75-07c1b0386895"
+        },
+        {
+          "name": "RimWorld.dll",
+          "bytes": 285696,
+          "sha256": "39bd67253a7fa5503ff7f2b51bc3ab5983fb1430acf57d7e8bb322d20e380555",
+          "pe_machine": "0x8664",
+          "module_mvid": "72ca4f53-dab2-4f6a-aaf3-ed704a839d73"
+        },
+        {
+          "name": "Waylith.dll",
+          "bytes": 1562624,
+          "sha256": "c69c2a2828c5594b58c9b28f0d19d5b25ff5cb16ceb46dc64f34dd59b7affc26",
+          "pe_machine": "0x14c",
+          "module_mvid": "41227a46-cd70-4945-9c26-ef442458581e"
+        },
+        {
+          "name": "UnityStubs.dll",
+          "bytes": 963072,
+          "sha256": "ea962c9274514e0633d4e4c5471a1a98aff5fc52af20ca2e506c16dcd8be6f81",
+          "pe_machine": "0x14c",
+          "module_mvid": "5746cabd-a3a7-46aa-94be-0ca139054940"
+        },
+        {
+          "name": "coreclr.dll",
+          "bytes": 9719808,
+          "sha256": "9986655ee9485eb8668fb27224a31797ce90e7cc201dc863c91d8f6d70488a74",
+          "pe_machine": "0x8664"
+        }
+      ],
+      "linux_so_files": 0,
+      "has_rendering_shaders": false,
+      "has_official_data": false,
+      "has_assets_zip": false
+    },
+    {
+      "archive": "03-RimWorld-by-Ludeon-Studios.zip",
+      "sha256": "b258e01304a256db7344f217e8807a974e8a056a57a68208c464051247938cce",
+      "total_entries": 2782,
+      "payload_files": 1370,
+      "payload_bytes": 154220584,
+      "role": "user_data_not_game_install",
+      "crc_ok": true,
+      "privacy_note": "Only aggregate folder categories recorded; no save contents, user settings, account identifiers or log contents copied.",
+      "folder_category_counts": {
+        "Saves": 6,
+        "Config": 106,
+        "ShaderCache": 1144,
+        "BundleCache": 5
+      },
+      "has_rendering_shaders": false,
+      "has_official_data": false,
+      "has_assets_zip": false
+    }
+  ],
+  "unavailable_inputs": [
+    "Rim_Data.zip"
+  ]
+}

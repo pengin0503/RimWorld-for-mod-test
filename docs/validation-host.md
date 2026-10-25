@@ -51,6 +51,17 @@ python3 tools/validation_host.py prepare-game --source /private/rimworld-linux -
 }]}
 ```
 
+### マップを生成して確認する
+
+建造物などをマップに置く MOD は、要求に `map` を足すとロード後に一時的なマップを 1 枚生成し、画像と内容の一覧を出します（遊べる状態にはしません）。
+
+```json
+"map": {"seed": "rwmt", "biome": "TemperateForest"},
+"expectations": {"mapThings": [{"type": "ThingDef", "defName": "MyMod_Ruin", "minCount": 1}]}
+```
+
+`--out/map.png` が対象込みのマップ、`--out/map-baseline.png` が対象を外したマップです。対象 MOD の物はマゼンタで描かれます。ゲームの見た目ではなく、地形・岩・建物・植物・物・ポーン・屋根を色分けした模式図です。詳しい項目と判定は [契約のマップ生成](contracts/mod-validation-v1.md#マップ生成) を参照してください。マップ生成はまだ公式の quick test との比較で確かめていないため、`map` を付けた実行は問題がなくても `incomplete`（`mapNotQualified`）になります。
+
 ## 3. 実行
 
 ```bash
@@ -74,7 +85,8 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 - `diagnostics.newInTarget`：対象 MOD を入れたときだけ出たエラー・警告（本文の先頭と全文）。
 - `diagnostics.translationErrors.newInTarget`：対象で増えた個々の翻訳エラー（例：MOD が公式 Def の comp を消したため、公式翻訳の注入先がなくなった）。ゲームのログは「翻訳データに N 件のエラー」と件数しか出しませんが、判定はこの 1 件ずつの差で行います。
 - `checks`：期待値ごとの実値と一致結果。Harmony は実際に登録されたパッチの一覧も含みます。
-- `scope.notChecked`：確認していない範囲（ほかの言語、マップ・tick・UI・描画・音声出力・Steam が必要な処理、パッチの実行時の効果、ほかの OS）。
+- `scope.notChecked`：確認していない範囲（ほかの言語、マップ・tick・UI・描画・音声出力・Steam が必要な処理、パッチの実行時の効果、ほかの OS）。`map` を付けた場合は、生成したマップ以外（ほかの種・バイオーム、ゲーム開始後、tick）。
+- `map`：マップ生成の結果（画像のパス、凡例、対象 MOD が置いた物と位置、`mapThings` の結果）。
 
 `passed` は「要求した範囲で、対応環境の実物の処理で問題が見つからなかった」という意味です。プレイ中の挙動や Windows 固有の動作は保証しません。
 
@@ -91,4 +103,12 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 python3 tests/integration/run_fixture_matrix.py --snapshot /private/rw-snapshot --harmony-dll /private/0Harmony.dll --out /private/matrix
 ```
 
-自作 fixture の DLL をその場でビルドし、正常・故障の 16 ケースを実行します。公開 CI では実行しません。
+自作 fixture の DLL をその場でビルドし、正常・故障のケース（マップ生成の 6 ケースを含む）を実行します。公開 CI では実行しません。
+
+マップ生成を公式の開発者 quick test と比べる（開発専用。公式実行ファイルを `-headless -quicktest` で起動します）：
+
+```bash
+python3 experiments/official-comparison/compare_official.py --map --snapshot /private/rw-snapshot --harmony-dll /private/0Harmony.dll --out /private/compare-map
+```
+
+`mapprobe` fixture が公式側の種を製品の既定値に揃え、両方で生成直後のマップの指紋（地形・屋根・物の一覧のハッシュ、ポーンの位置）を記録します。指紋とマップ生成終了までのエラーが一致すれば、そのビルドの `qualified.features` に `map` を加えられます。

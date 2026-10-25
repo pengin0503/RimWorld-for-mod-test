@@ -50,6 +50,8 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 | `allow.diagnostics` | 対象で新たに出た error/warning のうち、`level` が一致し、本文 1 行目に正規表現 `match`（Python の `re.search`）が一致するものを判定から外す。`reason` 必須。最大 200 件、`match` は 500 文字まで |
 | `allow.translationErrors` | 対象で増えた個々の翻訳エラー（`diagnostics.translationErrors.newInTarget`）のうち、正規表現 `match` が一致するものを判定から外す。一致しないものが 1 件でもあれば `newTranslationErrors` で failed |
 | `limits` | 既定値は上記。範囲外は拒否。`timeoutSeconds` は Worker 1 回あたり（ベースラインと対象で別々に適用） |
+| `map` | 任意。指定するとロード完了後に一時的なワールドとマップを 1 枚生成する（下記「マップ生成」）。`A` が前提 |
+| `expectations.mapThings` | `map` 必須。`type` は `ThingDef`（マップ上の個数）か `TerrainDef`（セル数）。`minCount`（既定 1）・`maxCount`（任意）の範囲に入れば一致。Controller がマップの観測結果から判定する |
 
 ## 結果 `modValidationResult`
 
@@ -73,6 +75,42 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 4. **passed**：上記のいずれもない。限定範囲の合格で、`scope.notChecked` は未検証。
 
 incomplete でも、確認できた不一致や新しい診断は `reasons` と `diagnostics` に残します（例：`experimental` と `newErrors` の併記）。警告も合格の障害です。要求の `allow` で明示した場合だけ、個々の診断を判定から外します。外した診断も `diagnostics.newInTarget` に `allowedBy`（一致した規則と理由）付きで残り、件数は `diagnostics.allowedInTarget` に出ます。ツール側に組み込みの許可リストはありません。
+
+## マップ生成
+
+`map` を指定すると、Worker は A のロード完了後、ゲーム本体のコードで一時的なワールドとプレイヤー開始マップを 1 枚生成し、生成直後の状態を読み取って終了します。手順は公式の開発者向け quick test（`Root_Play.SetupForQuickTestPlay` → `GameInitData.PrepForMapGen` → `Scenario.PreMapGenerate` → `Game.InitNewGame` のうち `MapGenerator.GenerateMap` まで）と同じ順序で、値だけを要求から取ります。
+
+```json
+"map": {"seed": "rwmt", "size": 250, "planetCoverage": 0.3, "biome": "TemperateForest",
+        "scenario": "Crashlanded", "storyteller": "Cassandra", "difficulty": "Rough",
+        "mapGenerator": "Base_Player", "extraGenSteps": ["MyMod_RuinsStep"], "imageScale": 2}
+```
+
+| 項目 | 規則 |
+|---|---|
+| `seed` | ワールドの種文字列。既定 `rwmt`。ベースラインと対象は同じ種で生成する。ゲームの乱数状態もこの種から固定する（FNV-1a） |
+| `size` | 50〜400。既定 250（quick test と同じ） |
+| `planetCoverage` | 0.05〜1。既定 0.3（quick test と同じ）。小さいほどワールド生成が速い |
+| `biome` / `tile` | どちらか一方。`biome` はそのバイオームの入植可能なタイルをゲームの関数で選ぶ。`tile` は地表レイヤーのタイル番号。どちらもなければゲームが開始タイルを選ぶ |
+| `scenario`・`storyteller`・`difficulty` | defName。既定は quick test と同じ Crashlanded・Cassandra・Rough |
+| `mapGenerator` | 任意。MapGeneratorDef を差し替える（既定は開始拠点のもの） |
+| `extraGenSteps` | 任意。追加で実行する GenStepDef（最大 50） |
+| `imageScale` | 画像の 1 セルあたりの画素数 1〜8（判定には影響しない） |
+| `maxListedThings` | `map-observation.json` に位置付きで列挙する物の上限（既定 20000。植物・汚れ・自然の岩は数のみ） |
+
+実行しない公式の手順（結果の `map.skippedOfficialSteps`）：Play シーン・カメラ・音楽・UI、`MapGenerator.GenerateMap` 後の `Game.InitNewGame` の残り（`Game.FinalizeInit`、`Scenario.PostGameStart`、`GameComponent.StartedNewGame` など）、tick。したがってゲーム開始時や時間経過で MOD が置く物は写りません。
+
+結果：
+
+- `stages.map`：`completed` / `failed` / `incomplete` / `notStarted` と `fidelity`。
+- `map.image`（`--out/map.png`）と `map.baselineImage`（対象を外したベースラインのマップ）。1 セル 1 色の模式図で、ゲームの描画ではありません。対象 MOD の物はマゼンタ、対象 MOD の地形は薄いマゼンタ。凡例とセル数は `map.legend`。
+- `map.summary`（タイル、バイオーム、地形の特徴、MapGeneratorDef、実行した GenStep 数、物の数）、`map.targetContent`（MOD 別の数、対象 MOD の物・地形と位置、対象 MOD の GenStep）、`map.checks`（`mapThings` の結果）、`map.observationFile`（全セルの層とパレット）。
+- マップ生成中に出た error/warning は通常の診断として扱い、同じ種で生成したベースラインとの差分で判定します（例：対象 MOD の GenStep が例外を出すと `newErrors`）。
+
+判定への追加：
+
+- incomplete：`mapNotQualified`（このビルドでマップ生成を公式の quick test と比較して一致を確かめていない。現在はすべての環境がこれ）、`mapNotGenerated`（設定の誤りなどで生成できなかった。例：存在しないバイオーム）、`baselineMapIncomplete`（ベースラインのマップが生成できず、生成中の診断を比べられない）。
+- failed：`mapGenerationFailed`（ベースラインは生成できたのに、対象では例外で生成が止まった）、`mapExpectationMismatch`。
 
 ## ZIP 入力
 

@@ -6,8 +6,8 @@
 
 ## 現在の不足
 
-- `Rim_Data.zip` は今回の作業環境へ転送されなかった。まず再添付してほしい。内容は未確認なので、名前だけから必要な Data が揃っているとは判断していない。
-- 現在利用できる二つの ZIP に、Linux 起動用の一式、公式 `Data/`、`Rendering/Shaders/`、`Assets.zip` は確認できていない。
+- 分割 Data の ZIP 3 個は受領・検査済み。Core、Royalty、Ideology、Biotech、Odyssey のデータと DLC アセット 4 個がある。元の `Rim_Data.zip` や確認済み部分の再送は不要。詳細は [追加調査](research/2026-10-25-split-data-audit.md)。
+- Linux 起動用の一式と Core 用アセットパックは未受領。分割 Data の GLSL 225 個は `Core/Shaders/` にあり、受領 DLL の起動時参照先 `Rendering/Shaders/` は満たしていない。内容の同等性を確かめずに移動しない。
 - `RimWorld by Ludeon Studios.zip` は設定・セーブのフォルダだった。これは再送不要。
 
 ## 送ってほしいもの
@@ -20,8 +20,8 @@
 | ランタイム・ネイティブ用サブフォルダ | 存在すればフォルダ構造を保って同梱 | ルートの `.so` だけを抜き出すと依存先を失う可能性があるため |
 | `Rendering/` | `Shaders/` を含む全体 | キャッシュではなく元のシェーダーが必要 |
 | `RimWorld_Data/` | 存在する場合は全体 | インストール構造を保つため |
-| `Data/` | Core と所有する Royalty・Ideology・Biotech・Odyssey。Defs・Patches・Languages・About 以外も含む全体 | 本物の XML、言語、アセット読み込みのため |
-| アセットパック | インストール直下の `Assets.zip` と、所有 DLC 側に存在するアセットパック | 欠損を MOD エラーと誤判定しないため |
+| `Data/` | Core と所有する Royalty・Ideology・Biotech・Odyssey は受領済み。Linux 一式と同じ更新時点か照合し、不足や不一致がある場合のみ差し替える | 本物の XML、言語、アセット読み込みのため。完全性は未確定 |
+| アセットパック | 未受領の Core 用パック。ルートの `Assets.zip` またはそのビルドでの同等リソースを構造ごと保持する。DLC 側の 4 個は検査済み | Core の欠損を MOD エラーと誤判定しないため |
 | 付属ファイル | `steam_appid.txt`、存在すればバージョン情報・マニフェスト | 起動条件とビルドの識別のため |
 
 `libcoreclr.so`、`libclrjit.so`、`libhostfxr.so`、`libhostpolicy.so`、`libsteam_api.so`、音声用ライブラリなどは確認対象の例。Linux 版の実際の配置はまだ未確認なので、例に載っていないファイルも削らず、直下と関連サブフォルダを保持してほしい。

@@ -107,9 +107,63 @@
       "has_rendering_shaders": false,
       "has_official_data": false,
       "has_assets_zip": false
+    },
+    {
+      "archive": "Rim_data_1.zip",
+      "archive_bytes": 105654881,
+      "sha256": "676fb9641804a3e525f893c235875ad0cf5ced3475556592d9a9a7fbc8ed9d03",
+      "total_entries": 4084,
+      "payload_files": 1878,
+      "payload_bytes": 162735239,
+      "role": "official_data_subset",
+      "crc_ok": true,
+      "groups": [
+        "Biotech",
+        "Core",
+        "Ideology"
+      ],
+      "details": "split-data-inventory.json"
+    },
+    {
+      "archive": "Rim_data_2.zip",
+      "archive_bytes": 140248276,
+      "sha256": "2fb7345bd1bb299268d2b03afd465f1448c54378d5aef4ede79aca47df2cfa54",
+      "total_entries": 435,
+      "payload_files": 185,
+      "payload_bytes": 170901373,
+      "role": "official_data_subset",
+      "crc_ok": true,
+      "groups": [
+        "Royalty"
+      ],
+      "details": "split-data-inventory.json"
+    },
+    {
+      "archive": "Rim_data_3.zip",
+      "archive_bytes": 109059938,
+      "sha256": "e406c1867a2e3d8072fa6288cd191e454ab4686c2fc1727ec877965faf124de2",
+      "total_entries": 623,
+      "payload_files": 270,
+      "payload_bytes": 127108862,
+      "role": "official_data_subset",
+      "crc_ok": true,
+      "groups": [
+        "Odyssey"
+      ],
+      "details": "split-data-inventory.json"
     }
   ],
-  "unavailable_inputs": [
-    "Rim_Data.zip"
+  "unavailable_inputs": [],
+  "superseded_inputs": [
+    {
+      "archive": "Rim_Data.zip",
+      "original_inspected": false,
+      "replacement_archives": [
+        "Rim_data_1.zip",
+        "Rim_data_2.zip",
+        "Rim_data_3.zip"
+      ],
+      "equivalence_to_original_verified": false
+    }
   ]
 }

@@ -35,15 +35,50 @@
       "saveDataPresent": true,
       "runtimeConfigPresent": false,
       "uploadedName": "RimWorld by Ludeon Studios.zip"
-    }
-  ],
-  "unavailableInputs": [
+    },
     {
-      "uploadedName": "Rim_Data.zip",
-      "state": "notMadeAvailable",
-      "contentsInspected": false
+      "uploadedName": "Rim_data_1.zip",
+      "bytes": 105654881,
+      "sha256": "676fb9641804a3e525f893c235875ad0cf5ced3475556592d9a9a7fbc8ed9d03",
+      "zipIntegrity": "passed",
+      "filesExcludingMacMetadata": 1878,
+      "uncompressedBytesExcludingMacMetadata": 162735239,
+      "classification": "official-data-subset",
+      "topLevelGroups": [
+        "Biotech",
+        "Core",
+        "Ideology"
+      ],
+      "details": "../docs/research/split-data-inventory.json"
+    },
+    {
+      "uploadedName": "Rim_data_2.zip",
+      "bytes": 140248276,
+      "sha256": "2fb7345bd1bb299268d2b03afd465f1448c54378d5aef4ede79aca47df2cfa54",
+      "zipIntegrity": "passed",
+      "filesExcludingMacMetadata": 185,
+      "uncompressedBytesExcludingMacMetadata": 170901373,
+      "classification": "official-data-subset",
+      "topLevelGroups": [
+        "Royalty"
+      ],
+      "details": "../docs/research/split-data-inventory.json"
+    },
+    {
+      "uploadedName": "Rim_data_3.zip",
+      "bytes": 109059938,
+      "sha256": "e406c1867a2e3d8072fa6288cd191e454ab4686c2fc1727ec877965faf124de2",
+      "zipIntegrity": "passed",
+      "filesExcludingMacMetadata": 270,
+      "uncompressedBytesExcludingMacMetadata": 127108862,
+      "classification": "official-data-subset",
+      "topLevelGroups": [
+        "Odyssey"
+      ],
+      "details": "../docs/research/split-data-inventory.json"
     }
   ],
+  "unavailableInputs": [],
   "assemblies": [
     {
       "file": "RimWorld.dll",
@@ -105,13 +140,16 @@
     "gameLaunchAttempted": false,
     "linuxExecutableAvailable": false,
     "linuxRuntimeAvailable": false,
-    "shaderSourcesAvailable": false,
-    "officialDataAvailable": false,
-    "assetPackAvailable": false,
+    "shaderSourcesAvailable": true,
+    "officialDataAvailable": true,
+    "assetPackAvailable": true,
     "harmonyPresentInDllArchive": false,
     "standardDotnetAvailable": false,
     "probeSourceAvailable": false,
-    "previousSpikeSourceAvailable": false
+    "previousSpikeSourceAvailable": false,
+    "shaderSourcesAtBootstrapPathAvailable": false,
+    "coreAssetPackAvailable": false,
+    "completeOfficialContentVerified": false
   },
   "validationResults": {
     "coreBoot": {
@@ -132,9 +170,32 @@
     }
   },
   "limitations": [
-    "No contents from the unavailable Rim_Data.zip were inspected.",
+    "The unavailable original Rim_Data.zip was replaced by three independently inspected ZIPs; exact equivalence to the original is unverified.",
     "Prior handoff spike results are historical reports, not reproduced results.",
     "Identities and CRCs do not prove install compatibility; Linux baseline execution is required.",
-    "No proprietary binaries, decompiled bodies, player settings, saves, or raw logs are included."
-  ]
+    "No proprietary binaries, decompiled bodies, player settings, saves, or raw logs are included.",
+    "Data and four DLC asset packs are present, but Core assets, expected bootstrap shader placement, precise build compatibility and Linux baseline execution remain unverified or missing."
+  ],
+  "supersededInputs": [
+    {
+      "uploadedName": "Rim_Data.zip",
+      "state": "replacedByIndependentArchives",
+      "originalContentsInspected": false,
+      "replacementArchives": [
+        "Rim_data_1.zip",
+        "Rim_data_2.zip",
+        "Rim_data_3.zip"
+      ],
+      "equivalenceToOriginalVerified": false
+    }
+  ],
+  "staticDataInspection": {
+    "details": "../docs/research/split-data-inventory.json",
+    "outerXmlFilesParsed": 1463,
+    "languageTarXmlFilesParsed": 16343,
+    "xmlSyntaxErrorCount": 1,
+    "englishXmlSyntax": "passed",
+    "japaneseXmlSyntax": "passed",
+    "gameLoaderExecuted": false
+  }
 }

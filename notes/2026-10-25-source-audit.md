@@ -2,7 +2,7 @@
 
 ## 今回できたことと、できなかったこと
 
-ZIP 2 個を全エントリ読み出しで検査し、中央ディレクトリに記載された CRC との一致を確認しました。ゲーム DLL の PE/CLI メタデータと、起動・読み込みに関係するメソッドの IL をローカルで調べました。ゲームのコードやユーザープロファイルは公開していません。
+当初の ZIP 2 個に加え、追加の分割 Data ZIP 3 個も全エントリ読み出しで検査し、中央ディレクトリに記載された CRC との一致を確認しました。DLC アセット ZIP 4 個の CRC と、翻訳 TAR 77 個の読み出しも確認しました。詳しい Data の結果は [追加調査](../docs/research/2026-10-25-split-data-audit.md) にあります。ゲーム DLL の PE/CLI メタデータと、起動・読み込みに関係するメソッドの IL もローカルで調べました。ゲームのコードやユーザープロファイルは公開していません。
 
 **ゲームは起動していません。Core/DLC の読み込み成功、MOD の動作、Harmony の適用成功を証明する結果はありません。** 前の試運転は [以前の報告](headless-spike-report.md) として保持し、今回の実測には含めません。
 
@@ -17,7 +17,10 @@ ZIP 2 個を全エントリ読み出しで検査し、中央ディレクトリ�
 | `Rim_Dll_All.zip` | Windows 版のインストール直下相当、284 ファイル。DLL 269 個、`.so` 0 個 | ZIP 整合性 OK。Linux の実行環境にはならない |
 | `RimWorld by Ludeon Studios.zip` | ユーザープロファイル、1,370 ファイル。設定、セーブ、ログ、キャッシュなど | ZIP 整合性 OK。インストールフォルダではない |
 | 同 ZIP 内の `ShaderCache/` | 1,144 ファイル。`.spv-cache` と `.layout-cache` | `Rendering/Shaders/*.glsl` の代用にはならない |
-| `Rim_Data.zip` | ワークスペースへの取り込み失敗 | 未読。含まれる Data、アセット、バージョンを推定しない |
+| `Rim_Data.zip` | 元の単一 ZIP は未受領。分割版で受け直した | 元との完全一致は未確認だが、元の再送は不要 |
+| `Rim_data_1.zip` | Core、Ideology、Biotech、1,878 ファイル | CRC OK。Core アセットはない。`Core/Shaders/` に GLSL 225 個あり |
+| `Rim_data_2.zip` | Royalty、185 ファイル | CRC OK。アセット ZIP あり |
+| `Rim_data_3.zip` | Odyssey、270 ファイル | CRC OK。アセット ZIP あり |
 | 引き継ぎ Markdown 3 個 | 方針、以前の試運転、Linux ファイル一覧 | 読み込み済み |
 
 今回の環境には `dotnet`、ILSpy、Mono はありませんでした。静的調査には Python と `dnfile 0.18.0` / `dncil 1.0.2` / `pefile 2024.8.26` を一時領域で使用しました。これらは製品の依存関係ではありません。
@@ -94,7 +97,7 @@ ZIP 自体の SHA-256、展開後ファイルの識別情報は [JSON の調査�
 
 1. Linux 版の公式実行ファイル、WaylithClr、依存する `.so`、対応する managed DLL 一式。
 2. 同じビルドの `Rendering/Shaders` と、存在する場合の `RimWorld_Data`。
-3. Core と所有する対象 DLC の完全な Data およびアセット。今回失敗した `Rim_Data.zip` は再添付が必要。
+3. 未受領の Core 用アセットパック。Core と対象 DLC の Data、DLC アセット 4 個は受領・静的検査済み。ただしインストール全体の完全性と Linux 一式とのビルド互換性は未確認。
 4. B を実行する際の、1.7 に対応した Harmony MOD。今回の DLL ZIP に `0Harmony.dll` はない。
 
 現在の実行準備は **blocked** です。これは MOD の失敗判定ではなく、検証前提が不足しているという結果です。

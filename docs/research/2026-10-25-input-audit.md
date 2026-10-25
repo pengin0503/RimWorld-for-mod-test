@@ -2,6 +2,8 @@
 
 この文書は主にメタデータ調査の記録です。その後に起動・読み込み処理の IL も確認しました。追加で確認した実行パスと判定への影響は [追加の調査記録](../../notes/2026-10-25-source-audit.md) にまとめています。以下の「引き継ぎ資料からの情報」の一部は、追加調査で静的に照合できましたが、Linux での実起動は引き続き未確認です。
 
+同日追加：分割 Data の ZIP 3 個も受領・検査しました。詳しい結果は [分割 Data の調査](2026-10-25-split-data-audit.md)、集計値と hash は [追加の JSON](split-data-inventory.json) を参照してください。以下の入力表も現状に更新しています。
+
 ## 結論
 
 公式ヘッドレス起動＋検証用 MOD という合意済みの方向を変更する材料は見つからなかった。ただし、**この環境でゲームを起動できる Linux 一式は受領できていない**。今回の成果は静的調査と設計案であり、ゲームのビルド成功・起動成功・MOD 検証成功を意味しない。
@@ -9,7 +11,7 @@
 ## 調査対象と方法
 
 - 引き継ぎ資料 `handoff-for-other-ai_md.md`、`linux-files-needed_md.md`、`headless-spike-report_md.md` を読んだ。
-- 受領できた二つの ZIP のエントリー一覧、サイズ、CRC、SHA-256 を調べた。
+- 当初の ZIP 2 個と追加 Data の ZIP 3 個のエントリー一覧、サイズ、CRC、SHA-256 を調べた。Data 内の DLC アセット ZIP 4 個と翻訳 TAR 77 個も読み出した。
 - Windows 版 ZIP 内の runtimeconfig/deps、PE ヘッダー、CLI メタデータを静的に調べた。ゲームのメソッドは実行していない。
 - 公開リポジトリの `main`（開始時点 `8dd9703255182f73654f10fd1157ef21eb5ecdf2`）、ブランチ一覧、PR 一覧を確認した。README のみで、`notes/spike-launcher/` などの既存実装はなかった。
 - ZIP 本体、ゲームソース、ユーザー設定・セーブ・ログの内容はこのリポジトリに取り込んでいない。
@@ -25,8 +27,9 @@
 | 同 ZIP の runtimeconfig | TFM は `net10.0`、included framework は `10.0.13-waylithclr.dev`。`WaylithClr.*` 設定がある | 通常の .NET に置換した検証を正式判定に使わない |
 | 同 ZIP のネイティブ部分 | `RimWorld.exe`、`coreclr.dll` は PE/AMD64。`.so` は 0 件 | Linux 実行ファイル・Linux ランタイムの追加が必要 |
 | `RimWorld by Ludeon Studios.zip` | 同条件で 1,370 ファイル、154,220,584 bytes。ZIP 全体の CRC 検査で不一致なし。`Config/`、`Saves/`、`ShaderCache/`、`BundleCache/` を含む | ゲーム本体ではなくユーザーデータとして扱う。設定を検証環境へ流用しない |
-| 利用可能な二つの ZIP | 公式 `Data/Core/`、`Rendering/Shaders/`、`Assets.zip` を確認できなかった | XML・アセットを使う起動検証は未実施 |
-| `Rim_Data.zip` | 作業環境への転送失敗により未確認 | 含有ファイルも完全性も推測しない。再添付が必要 |
+| 当初の二つの ZIP | 公式 `Data/Core/`、`Rendering/Shaders/`、`Assets.zip` は含まれなかった | 当初の受領時点では Data が不足していた |
+| `Rim_Data.zip` | 元の単一 ZIP は未受領。追加の独立 ZIP 3 個で受け直した | 元の ZIP の再送は不要。元との完全一致は未確認 |
+| `Rim_data_1.zip`〜`Rim_data_3.zip` | Core と対象 DLC 4 個のデータ、合計 2,333 ファイル。外側 ZIP 3 個と DLC 内側 ZIP 4 個の CRC 検査に通過 | 静的 Data 調査が可能になった。Core アセットと Linux 一式は引き続き不足 |
 | この作業環境 | `dotnet`、`ilspycmd`、`mono` 系の実行・逆コンパイル用コマンドは利用できなかった | .NET ビルド、以前の試運転の再現は未実施 |
 
 `ShaderCache/` のキャッシュが存在することは、インストール先の `Rendering/Shaders/` が揃っていることを意味しない。

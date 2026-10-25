@@ -1,0 +1,241 @@
+{
+  "recordType": "splitDataSourceAudit",
+  "schemaVersion": 1,
+  "observedOn": "2026-10-25",
+  "timezone": "Asia/Tokyo",
+  "gameLaunchAttempted": false,
+  "inspection": "static_only",
+  "archiveLayout": "independent ZIPs; strip each Rim_data_N/ wrapper and map groups below Data/; no concatenation or deployment performed",
+  "analysisTools": {
+    "python": "3.12",
+    "zstandard": "0.25.0"
+  },
+  "archives": [
+    {
+      "uploadedName": "Rim_data_1.zip",
+      "bytes": 105654881,
+      "sha256": "676fb9641804a3e525f893c235875ad0cf5ced3475556592d9a9a7fbc8ed9d03",
+      "classification": "official-data-subset",
+      "zipIntegrity": "passed",
+      "xmlFilesParsed": 1050,
+      "nestedAssetPacks": [
+        {
+          "path": "Data/Ideology/Assets.zip",
+          "bytes": 32393013,
+          "sha256": "5227e6f819bf0e52df974842c3e1d03d022f7b693d7c782f2f94987109e39a80",
+          "files": 1488,
+          "uncompressedBytes": 61847820,
+          "zipIntegrity": "passed",
+          "duplicateEntries": [],
+          "compressionMethodCounts": {
+            "0": 477,
+            "93": 1011
+          }
+        },
+        {
+          "path": "Data/Biotech/Assets.zip",
+          "bytes": 56108649,
+          "sha256": "5694f4ffb2c7f854081128a6c735e9143c1094591739b4819f3bf8e42f294f56",
+          "files": 2131,
+          "uncompressedBytes": 123852653,
+          "zipIntegrity": "passed",
+          "duplicateEntries": [],
+          "compressionMethodCounts": {
+            "0": 1014,
+            "93": 1117
+          }
+        }
+      ],
+      "nonAsciiNamesWithoutUtf8Flag": 30,
+      "totalEntries": 4084,
+      "filesExcludingMacMetadata": 1878,
+      "uncompressedBytesExcludingMacMetadata": 162735239,
+      "topLevelGroups": [
+        "Biotech",
+        "Core",
+        "Ideology"
+      ],
+      "languageTarCount": 39,
+      "languageTarXmlFilesParsed": 9965
+    },
+    {
+      "uploadedName": "Rim_data_2.zip",
+      "bytes": 140248276,
+      "sha256": "2fb7345bd1bb299268d2b03afd465f1448c54378d5aef4ede79aca47df2cfa54",
+      "classification": "official-data-subset",
+      "zipIntegrity": "passed",
+      "xmlFilesParsed": 163,
+      "nestedAssetPacks": [
+        {
+          "path": "Data/Royalty/Assets.zip",
+          "bytes": 150010687,
+          "sha256": "bfbf8d9475d0873c309fe31008791cdc8af3063b919a51436c97e34e6a627ee6",
+          "files": 671,
+          "uncompressedBytes": 172959859,
+          "zipIntegrity": "passed",
+          "duplicateEntries": [],
+          "compressionMethodCounts": {
+            "0": 148,
+            "93": 523
+          }
+        }
+      ],
+      "nonAsciiNamesWithoutUtf8Flag": 15,
+      "totalEntries": 435,
+      "filesExcludingMacMetadata": 185,
+      "uncompressedBytesExcludingMacMetadata": 170901373,
+      "topLevelGroups": [
+        "Royalty"
+      ],
+      "languageTarCount": 20,
+      "languageTarXmlFilesParsed": 2925
+    },
+    {
+      "uploadedName": "Rim_data_3.zip",
+      "bytes": 109059938,
+      "sha256": "e406c1867a2e3d8072fa6288cd191e454ab4686c2fc1727ec877965faf124de2",
+      "classification": "official-data-subset",
+      "zipIntegrity": "passed",
+      "xmlFilesParsed": 250,
+      "nestedAssetPacks": [
+        {
+          "path": "Data/Odyssey/Assets.zip",
+          "bytes": 106059387,
+          "sha256": "a481df4716425b0f165591c21cfe24051797b5e5d0e43e1557cccf9a26b29fb0",
+          "files": 2561,
+          "uncompressedBytes": 240501572,
+          "zipIntegrity": "passed",
+          "duplicateEntries": [],
+          "compressionMethodCounts": {
+            "0": 885,
+            "93": 1676
+          }
+        }
+      ],
+      "nonAsciiNamesWithoutUtf8Flag": 14,
+      "totalEntries": 623,
+      "filesExcludingMacMetadata": 270,
+      "uncompressedBytesExcludingMacMetadata": 127108862,
+      "topLevelGroups": [
+        "Odyssey"
+      ],
+      "languageTarCount": 18,
+      "languageTarXmlFilesParsed": 3453
+    }
+  ],
+  "content": {
+    "Ideology": {
+      "files": 247,
+      "bytes": 67631263,
+      "defsXmlFiles": 212,
+      "patchXmlFiles": 1,
+      "languageXmlFiles": 11,
+      "languageTars": 20,
+      "shaderSources": 0,
+      "shaderCaches": 0,
+      "assetPackPresent": true,
+      "packageId": "Ludeon.RimWorld.Ideology",
+      "supportedVersions": [
+        "1.7"
+      ]
+    },
+    "Biotech": {
+      "files": 260,
+      "bytes": 80600337,
+      "defsXmlFiles": 219,
+      "patchXmlFiles": 5,
+      "languageXmlFiles": 14,
+      "languageTars": 18,
+      "shaderSources": 0,
+      "shaderCaches": 0,
+      "assetPackPresent": true,
+      "packageId": "Ludeon.RimWorld.Biotech",
+      "supportedVersions": [
+        "1.7"
+      ]
+    },
+    "Core": {
+      "files": 1371,
+      "bytes": 14503639,
+      "defsXmlFiles": 554,
+      "patchXmlFiles": 0,
+      "languageXmlFiles": 31,
+      "languageTars": 1,
+      "shaderSources": 225,
+      "shaderCaches": 486,
+      "assetPackPresent": false,
+      "packageId": "Ludeon.RimWorld",
+      "supportedVersions": []
+    },
+    "Royalty": {
+      "files": 185,
+      "bytes": 170901373,
+      "defsXmlFiles": 148,
+      "patchXmlFiles": 2,
+      "languageXmlFiles": 12,
+      "languageTars": 20,
+      "shaderSources": 0,
+      "shaderCaches": 0,
+      "assetPackPresent": true,
+      "packageId": "Ludeon.RimWorld.Royalty",
+      "supportedVersions": [
+        "1.7"
+      ]
+    },
+    "Odyssey": {
+      "files": 270,
+      "bytes": 127108862,
+      "defsXmlFiles": 231,
+      "patchXmlFiles": 6,
+      "languageXmlFiles": 12,
+      "languageTars": 18,
+      "shaderSources": 0,
+      "shaderCaches": 0,
+      "assetPackPresent": true,
+      "packageId": "Ludeon.RimWorld.Odyssey",
+      "supportedVersions": [
+        "1.7"
+      ]
+    }
+  },
+  "checks": {
+    "unsafePaths": [],
+    "links": [],
+    "duplicateDataPaths": [],
+    "caseOrUnicodeCollisions": [],
+    "xmlSyntaxErrors": [
+      {
+        "path": "Data/Biotech/Languages/Polish (Polski).tar::DefInjected/HediffDef/Hediffs_Various.xml",
+        "error": "not well-formed (invalid token): line 53, column 84"
+      }
+    ],
+    "outerXmlFilesParsed": 1463,
+    "languageTarFiles": 77,
+    "languageTarXmlFilesParsed": 16343
+  },
+  "selectedLanguageSyntaxChecks": {
+    "English": {
+      "outerXmlFiles": 80,
+      "tarXmlFiles": 0,
+      "syntaxErrors": []
+    },
+    "Japanese": {
+      "outerXmlFiles": 0,
+      "tarXmlFiles": 1360,
+      "syntaxErrors": []
+    }
+  },
+  "missingInputs": [
+    "Linux x86_64 official executable, WaylithClr and matching managed/native dependencies",
+    "Core asset pack or complete equivalent official resources",
+    "Rendering/Shaders/ at the bootstrap path required by the received Windows DLL; Core/Shaders/ is present but equivalence is unverified"
+  ],
+  "limitations": [
+    "The original unsplit Rim_Data.zip is unavailable; equivalence to it or a full official installation is unverified.",
+    "DLC About.xml lists version 1.7; no precise build identity was found, and compatibility with the received DLLs or a future Linux install is unverified.",
+    "XML syntax inspection does not perform game Def deserialization, patches, references, translation injection, asset decoding or Harmony execution.",
+    "One Polish translation XML syntax error exists in the supplied Biotech language TAR. Input content was not modified.",
+    "Non-ASCII archive names lacking the UTF-8 flag require filename verification before deployment.",
+    "Only aggregate counts, hashes and diagnostic paths are published; no game content, archive payloads or player data."
+  ]
+}

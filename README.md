@@ -7,17 +7,19 @@ RimWorld を通常起動できない環境でも、作成した MOD を実物の
 
 ## 最新の仕様と現在の状態
 
-**最新の方針は [検証専用ホストの仕様・設計案](docs/superpowers/specs/2026-10-25-test-only-host-design.md) です。** 独立したホストからゲーム DLL の必要な処理を呼ぶ方式を主案にしています。公式ゲーム実行ファイルを起動するラッパーを製品方式にはしません。成立性・ランタイムの同等性・速度はまだ未検証です。
-
-2026-10-25 の今回の更新は**仕様・設計・未実行の計画だけ**です。製品コード変更、試作、ゲーム実行は行っていません。主案と未確認事項は設計提案であり、実装済み・成立確認済みとは扱いません。
+**最新の方針は [検証専用ホストの仕様・設計案](docs/superpowers/specs/2026-10-25-test-only-host-design.md) です。** 独立したホストからゲーム DLL の必要な処理を呼ぶ方式で、公式ゲーム実行ファイルは起動しません。2026-10-25 に Linux で成立を確認し、A（実ローダー）と B（DLL・Harmony）を実装しました。**使い方は [実ゲーム処理による MOD 検証](docs/validation-host.md)** です。
 
 | 項目 | 現状 |
 |---|---|
+| 実ゲーム処理による検証（`tools/validation_host.py` と C# Worker） | **Linux x86_64 で実装済み**。RimWorld 1.7.4985 rev1269＋同梱 WaylithClr で `qualified`。XML パッチ失敗、未解決参照、Mod 初期化例外、期待した Harmony パッチの欠落、パッチの副作用（公式の Def 検査エラー）を実物の処理で検出 |
+| 公式 headless との比較（開発用） | 自作 fixture 9 ケースで、エラー・警告と読込結果（Def 値、翻訳、MOD 順序、Harmony 登録）が一致。[適格化の記録](docs/research/test-host-qualification.md) |
+| Windows での実ゲーム検証 | 未対応（`run` は `blocked`）。Linux の結果を Windows の保証にしない |
+| 標準 .NET での実行 | 実験扱い（常に `incomplete`）。WaylithClr との実害のある差を確認済み |
+| C：指定動作テスト／D：一時マップ・tick | 未実装（`blocked`） |
 | 入力監査 CLI | 実装済み。ZIP・XML 構文・manifest を検査 |
-| MOD 事前検査 CLI / Windows 画面 | 実装済み。依存・順序・XML 構文等の静的検査のみ。DLL はハッシュするだけ |
-| 独立ホストによる実処理の検証 | 未実装。ロード、参照解決、MOD 初期化、Harmony と指定動作を段階的に扱う設計 |
-| 既存の通常起動機能 | 旧実装の CLI `play` と画面ボタンが残っている。**新仕様には不適合で、将来の削除対象**。今回はコードを変更していない |
-| 通常起動より速いこと | 目標。実測による比較はまだない |
+| MOD 事前検査 CLI / Windows 画面 | 実装済み。静的検査のみ（`gameVerification=notRun`） |
+| 既存の通常起動機能 | **削除済み**。CLI `play` は移行エラーを返すだけ。画面の起動ボタンも削除 |
+| 速度 | 準備込みの実測あり（[性能](docs/research/test-host-performance.md)）。公式の通常（GUI）起動との比較は未計測 |
 
 AI の通常の検証先は Linux、Windows は利用者自身の検証先として維持します。Windows 向け開発や自作テストの CI は別途行いますが、ユーザーの Windows PC への遠隔接続を製品方式には採用しません。成果物は修正した MOD と検証結果です。「遊べる状態」は MOD 側の目標であり、ツール自体を遊べる形にすることではありません。
 
@@ -26,12 +28,14 @@ AI の通常の検証先は Linux、Windows は利用者自身の検証先とし
 ## 仕様・使い方・次の計画
 
 - [検証専用ホストの仕様・設計案](docs/superpowers/specs/2026-10-25-test-only-host-design.md)：原意、方式比較、プレイ不可、検証範囲、OS/CLR の同等性、判定、速度測定。
-- [成立性調査と設計確定の計画](docs/superpowers/plans/2026-10-25-test-only-host.md)：今後の未実行タスクと停止条件。今回の依頼では実行しない。
+- [実ゲーム処理による MOD 検証の使い方](docs/validation-host.md) と [要求・結果契約](docs/contracts/mod-validation-v1.md)。
+- [製品実装計画と実施状況](docs/superpowers/plans/test-only-host-product.md)、[成立性調査の計画](docs/superpowers/plans/2026-10-25-test-only-host.md)。
+- 調査：[依存と必要資材](docs/research/test-host-dependencies.md)、[呼出し経路と終了点](docs/research/test-host-entrypoints.md)、[適格化](docs/research/test-host-qualification.md)、[性能](docs/research/test-host-performance.md)。
 - [二つの用途と現在使える静的検査](docs/dual-use.md)：現在の実装と将来の仕様を区別。
 - [入力監査 CLI](docs/offline-input-audit.md)：Python 3.12+、外部パッケージ不要。
 - [資材の現状と必要性の確認方針](docs/linux-files-needed.md)：Linux 一式を待つことと、工程別の不足を調べることを区別。
 
-最初の実処理の目標は A：Defs・XML パッチ・選択言語・参照解決、B：DLL 初期化と期待した Harmony 登録の検証です。C：指定動作テストは後段、D：一時世界・限定 tick は別の将来設計です。ロード成功や Harmony 登録だけで、MOD の全機能が正しいとは判定しません。
+実装済みの範囲は A：Defs・XML パッチ・選択言語・参照解決・公式の Def 検査、B：DLL 初期化と期待した Harmony 登録です。C：指定動作テストは後段、D：一時世界・限定 tick は別の将来設計です。ロード成功や Harmony 登録だけで、MOD の全機能が正しいとは判定しません。
 
 ## 受領資料と調査記録
 
@@ -41,7 +45,7 @@ AI の通常の検証先は Linux、Windows は利用者自身の検証先とし
 - [起動・読み込みの静的調査](notes/2026-10-25-source-audit.md)と[調査 JSON](notes/2026-10-25-source-audit.json)。MOD 自動回復、DLC の追加・ソート、遅延初期化、言語、ログ上限等。
 - [以前の引き継ぎ](notes/handoff-2026-10-25.md)と[以前の試運転報告](notes/headless-spike-report.md)。今回の成功実績として扱わない。
 
-受領 DLL は win-x64 向け。Linux の CLR/native 依存は未受領・未確認です。Core アセットや GLSL の配置、Data の完全性・ビルド互換性も未確認の範囲が残ります。新設計では工程ごとに必要性を調べ、資材不足を MOD の失敗や検証成功に変換しません。
+2026-10-25 に Linux 版一式（WaylithClr、native 依存、Data、Assets.zip、GLSL を含む）を受領し、依存を確認しました（[依存と必要資材](docs/research/test-host-dependencies.md)）。以前の Windows 版とはゲーム DLL がバイト単位で同一です。資材不足を MOD の失敗や検証成功に変換しません。
 
 `RimWorld by Ludeon Studios.zip` は設定・セーブ・キャッシュなどのユーザーデータで、インストール一式の代わりにはなりません。
 

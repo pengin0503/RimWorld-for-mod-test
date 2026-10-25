@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+  <!-- Harmless on purpose: no official def check depends on this value. -->
+  <Operation Class="PatchOperationReplace">
+    <xpath>Defs/ThingDef[defName="Steel"]/deepCountPerPortion</xpath>
+    <value>
+      <deepCountPerPortion>60</deepCountPerPortion>
+    </value>
+  </Operation>
+</Patch>

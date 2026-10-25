@@ -6,7 +6,7 @@ import sys
 from unittest.mock import patch
 import unittest
 
-from tools.mod_preflight import check_profile, load_profile, launch_command
+from tools.mod_preflight import check_profile, load_profile, main
 
 
 class PreflightTests(unittest.TestCase):
@@ -133,13 +133,12 @@ class PreflightTests(unittest.TestCase):
         r = check_profile(load_profile(path))
         self.assertEqual(r['auditStatus'], 'passed')
 
-    def test_launch_command_uses_official_executable_and_same_save_folder(self):
-        report = check_profile(self.profile)
-        for platform, exe in [('windows', 'RimWorld.exe'), ('linux', 'RimWorld')]:
-            command = launch_command(self.profile, report, platform)
-            self.assertEqual(command, [str(self.game / exe), '-savedatafolder=' + str(self.save)])
+    def test_check_does_not_require_the_official_executable(self):
+        (self.game / 'RimWorld.exe').unlink()
+        (self.game / 'RimWorld').unlink()
+        self.assertEqual(check_profile(self.profile)['auditStatus'], 'passed')
 
-    def test_old_result_is_rejected_after_config_xml_dll_or_profile_change(self):
+    def test_fingerprint_changes_after_config_xml_dll_profile_or_exe_change(self):
         for kind in ['config', 'xml', 'dll', 'profile', 'exe']:
             with self.subTest(kind=kind):
                 self.setUp()
@@ -150,12 +149,7 @@ class PreflightTests(unittest.TestCase):
                     folder = self.game / 'Mods/Example/Assemblies';folder.mkdir();(folder/'x.dll').write_bytes(b'not loaded')
                 elif kind == 'profile':self.profile['modRoots'] = [str(self.root)]
                 else:(self.game / 'RimWorld.exe').write_bytes(b'changed')
-                with self.assertRaises(ValueError):launch_command(self.profile, report, 'windows')
-
-    def test_nonpassed_report_does_not_authorize_launch(self):
-        report = check_profile(self.profile)
-        report['auditStatus'] = 'incomplete'
-        with self.assertRaises(ValueError):launch_command(self.profile, report, 'windows')
+                self.assertNotEqual(check_profile(self.profile)['fingerprint'], report['fingerprint'])
 
     def test_unknown_version_fallback_does_not_report_success(self):
         path = self.game / 'Mods/Example/LoadFolders.xml'
@@ -171,24 +165,30 @@ class PreflightTests(unittest.TestCase):
         path.write_text(json.dumps(self.profile), encoding='utf-8')
         return path
 
-    def test_cli_check_and_dry_run_share_the_same_report(self):
+    def test_cli_check_writes_a_static_only_report(self):
         profile = self.save_profile();report = self.root / 'result.json'
         out = self.cli('check', '--profile', profile, '--output', report)
         self.assertEqual(out.returncode, 0, out.stderr)
         result = json.loads(report.read_text())
         self.assertEqual(result['recordType'], 'modPreflight')
         self.assertEqual(result['gameVerification'], 'notRun')
-        out = self.cli('play', '--profile', profile, '--report', report, '--dry-run')
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertFalse(json.loads(out.stdout)['launchRequested'])
-        self.assertEqual(json.loads(out.stdout)['launchCommand'][1], '-savedatafolder=' + str(self.save))
 
-    def test_cli_requires_explicit_acknowledgement_before_normal_launch(self):
+    def test_removed_play_command_reports_migration_error(self):
         profile = self.save_profile();report = self.root / 'result.json'
         self.cli('check', '--profile', profile, '--output', report)
-        out = self.cli('play', '--profile', profile, '--report', report)
-        self.assertEqual(out.returncode, 1)
-        self.assertIn('acknowledge', json.loads(out.stdout)['error'])
+        for extra in ([], ['--dry-run'], ['--acknowledge-static-only']):
+            with self.subTest(extra=extra):
+                out = self.cli('play', '--profile', profile, '--report', report, *extra)
+                self.assertEqual(out.returncode, 1)
+                self.assertIn('never starts the game', json.loads(out.stdout)['error'])
+
+    def test_no_entry_point_spawns_a_process(self):
+        profile = self.save_profile();report = self.root / 'result.json'
+        spawn = AssertionError('a process was spawned')
+        with patch('subprocess.Popen', side_effect=spawn), patch('os.system', side_effect=spawn), \
+                patch('os.execv', side_effect=spawn), patch('builtins.print'):
+            self.assertEqual(main(['check', '--profile', str(profile), '--output', str(report)]), 0)
+            self.assertEqual(main(['play', '--profile', str(profile), '--report', str(report)]), 1)
 
     def test_reports_cannot_overwrite_game_data_or_profile(self):
         profile = self.save_profile()
@@ -246,13 +246,6 @@ class PreflightTests(unittest.TestCase):
             write_json(link/'input.xml', {'x':1}, self.profile)
         self.assertEqual(data.read_text(), '<original/>')
 
-    def test_save_path_equal_sign_is_rejected_before_game_ignores_override(self):
-        other = self.root/'Saves=Other';(other/'Config').mkdir(parents=True)
-        (other/'Config/ModsConfig.xml').write_bytes(self.config.read_bytes())
-        self.profile['saveDataDir'] = str(other)
-        report = check_profile(self.profile)
-        with self.assertRaises(ValueError):launch_command(self.profile, report, 'windows')
-
     def test_desktop_result_distinguishes_preflight_from_game_verification(self):
         from tools.preflight_gui import format_result
         text = format_result(check_profile(self.profile))
@@ -268,6 +261,11 @@ class PreflightTests(unittest.TestCase):
             self.assertTrue(window.winfo_children())
         finally:
             window.destroy()
+
+    def test_desktop_has_no_game_launch_path(self):
+        source = Path('tools/preflight_gui.py').read_text(encoding='utf-8')
+        for forbidden in ('subprocess', 'launch', 'Popen', 'startfile', 'ゲームを起動する'):
+            self.assertNotIn(forbidden, source)
 
 
 if __name__ == '__main__':

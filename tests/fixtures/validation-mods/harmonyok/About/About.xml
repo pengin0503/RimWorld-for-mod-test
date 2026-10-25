@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <packageId>rwmodtest.harmonyok</packageId>
+  <name>RWMT fixture: harmonyok</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <description>Self-made validation fixture. Applies one Harmony postfix to Verse.GenText.ToSpaceList from its Mod constructor.</description>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+  <modDependencies>
+    <li>
+      <packageId>rwmodtest.harmonylib</packageId>
+      <displayName>RWMT fixture: harmonylib</displayName>
+      <downloadUrl>https://github.com/pengin0503/RimWorld-for-mod-test</downloadUrl>
+    </li>
+  </modDependencies>
+  <loadAfter>
+    <li>rwmodtest.harmonylib</li>
+  </loadAfter>
+</ModMetaData>

@@ -1,0 +1,171 @@
+"""DEVELOPMENT-ONLY qualification experiment. Not part of the product.
+
+Runs each fixture case twice on the same private snapshot:
+  1. through the product Controller/Worker (tools/validation_host.py), and
+  2. through the official executable in headless mode with -QuitAfterBoot,
+and compares the error/warning lines and the [RWMT-PROBE] facts both boots log.
+The product never imports or calls this file (tests/test_validation_host.py
+checks that). It exists so the qualification evidence in
+docs/research/test-host-qualification.md can be reproduced.
+
+The official executable here runs in a throwaway copy layout with its own HOME
+and XDG directories; it never touches a normal game profile.
+
+Usage:
+  python3 experiments/official-comparison/compare_official.py --snapshot S --harmony-dll H --out O [--cases ...]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / 'tools'))
+sys.path.insert(0, str(REPO / 'tests' / 'integration'))
+import validation_host  # noqa: E402
+import run_fixture_matrix as matrix  # noqa: E402
+
+LOG_LINE = re.compile(r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+(ERROR|WARN|INFO)\s+\[([^\]]+)\] (.*)$')
+# Differences that follow from documented design choices, not from the load itself.
+EXPECTED_OFFICIAL_ONLY = (
+    re.compile(r'^\[Steamworks\.NET\] SteamAPI\.Init\(\) failed'),  # the Worker skips Steam on purpose
+)
+DLC = ('Core', 'Royalty', 'Ideology', 'Biotech', 'Odyssey')
+COMPARISON_CASES = {
+    'core-only': (['comparisonprobe'], ('Core',), 'English', 'A'),
+    'ok': (['*okxml', 'comparisonprobe'], ('Core',), 'English', 'A'),
+    'ok-all-dlc-japanese': (['*okxml', 'comparisonprobe'], DLC, 'Japanese', 'A'),
+    'side-effect': (['*sideeffect', 'comparisonprobe'], ('Core',), 'English', 'A'),
+    'bad-patch': (['*badpatch', 'comparisonprobe'], ('Core',), 'English', 'A'),
+    'bad-reference': (['*badref', 'comparisonprobe'], ('Core',), 'English', 'A'),
+    'init-exception': (['*initthrow', 'comparisonprobe'], ('Core',), 'English', 'A'),
+    'harmony-ok': (['harmonylib', '*harmonyok', 'comparisonprobe'], ('Core',), 'English', 'AB'),
+    'harmony-missing': (['harmonylib', '*harmonymissing', 'comparisonprobe'], ('Core',), 'English', 'AB'),
+}
+
+
+def worker_lines(events):
+    errors, probes = [], []
+    for event in events:
+        first = (event.get('message') or '').splitlines()[0] if event.get('message') else ''
+        if event.get('level') in ('error', 'warning'):
+            errors.append(f'{event["level"]} [{event["category"]}] {first}')
+        elif first.startswith('[RWMT-PROBE]'):
+            probes.append(first)
+    return errors, probes
+
+
+def official_lines(player_log):
+    errors, probes = [], []
+    for line in player_log.read_text(encoding='utf-8', errors='replace').splitlines():
+        match = LOG_LINE.match(line)
+        if not match:
+            continue
+        level, category, message = match.groups()
+        if message.startswith('[RWMT-PROBE]'):
+            probes.append(message)
+        elif level in ('ERROR', 'WARN'):
+            if not any(p.search(message) for p in EXPECTED_OFFICIAL_ONLY):
+                errors.append(f'{"error" if level == "ERROR" else "warning"} [{category}] {message}')
+    return errors, probes
+
+
+def run_official(snapshot, target_run, mods, official, out, timeout=180):
+    game = Path(snapshot) / 'game'
+    root = out / 'official'
+    root.mkdir(parents=True)
+    for name in os.listdir(game):
+        if name not in ('RimWorld', 'Data'):
+            os.symlink(game / name, root / name)
+    shutil.copyfile(game / 'RimWorld', root / 'RimWorld')
+    (root / 'RimWorld').chmod(0o755)
+    (root / 'Data').mkdir()
+    for folder in official:
+        os.symlink(game / 'Data' / folder, root / 'Data' / folder)
+    (root / 'Mods').mkdir()
+    for mod in mods:
+        shutil.copytree(mod['sourcePath'], root / 'Mods' / mod['folderName'])
+    config = root / 'xdg' / 'unity3d' / 'Ludeon Studios' / 'RimWorld by Ludeon Studios' / 'Config'
+    config.mkdir(parents=True)
+    for name in ('ModsConfig.xml', 'Prefs.xml'):
+        shutil.copyfile(Path(target_run) / 'userdata' / 'Config' / name, config / name)
+    (root / 'home').mkdir()
+    env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(root / 'home'), 'XDG_CONFIG_HOME': str(root / 'xdg'),
+           'LANG': 'C.UTF-8'}
+    started = time.monotonic()
+    with open(root / 'stdout.log', 'wb') as stdout:
+        process = subprocess.run(['./RimWorld', '-headless', '-QuitAfterBoot', '-NoCrashDialog'], cwd=root, env=env,
+                                 stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.STDOUT, timeout=timeout)
+    seconds = time.monotonic() - started
+    player_log = config.parent / 'Logs' / 'Player.log'
+    return process.returncode, round(seconds, 3), player_log
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--snapshot', required=True)
+    parser.add_argument('--harmony-dll', required=True)
+    parser.add_argument('--out', required=True)
+    parser.add_argument('--worker', default=str(REPO / 'worker' / 'bin'))
+    parser.add_argument('--cases')
+    args = parser.parse_args(argv)
+    out = Path(args.out).resolve()
+    if REPO in out.parents:
+        parser.error('--out must be outside the repository')
+    out.mkdir(parents=True, exist_ok=True)
+    matrix.ASSEMBLIES['comparisonprobe'] = 'ComparisonProbe'
+    staged = matrix.build_fixtures(out, args.snapshot, Path(args.harmony_dll).resolve())
+    rows = []
+    for name in (args.cases.split(',') if args.cases else COMPARISON_CASES):
+        mod_names, official, language, levels = COMPARISON_CASES[name]
+        case_dir = out / 'cases' / name
+        if case_dir.exists():
+            shutil.rmtree(case_dir)
+        case_dir.mkdir(parents=True)
+        request = matrix.case(levels, mod_names, official=official, language=language)
+        if not any(m['target'] for m in request['mods']):
+            request['mods'][-1]['target'] = True
+        for mod in request['mods']:
+            mod['path'] = str(staged / mod['path'])
+        if 'B' in levels:
+            request['expectations'] = {'harmonyPatches': [matrix.HARMONY_OK]}
+        (case_dir / 'request.json').write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding='utf-8')
+        result = validation_host.run_validation(args.snapshot, case_dir / 'request.json', case_dir / 'product', args.worker)
+        if result['status'] == 'blocked':
+            print(f'{name:24} product blocked: {result["reasons"]}', flush=True)
+            rows.append({'case': name, 'productStatus': 'blocked', 'errorsMatch': False, 'probesMatch': False})
+            continue
+        target_run = case_dir / 'product' / 'target'
+        events = [json.loads(line) for line in (target_run / 'events.jsonl').read_text(encoding='utf-8').splitlines()]
+        w_errors, w_probes = worker_lines(events)
+        code, seconds, player_log = run_official(args.snapshot, target_run, result['mods'], official, case_dir)
+        o_errors, o_probes = official_lines(player_log) if player_log.is_file() else ([], [])
+        row = {
+            'case': name, 'productStatus': result['status'], 'productReasons': [r['code'] for r in result['reasons']],
+            'officialExitCode': code, 'officialSeconds': seconds, 'productTargetSeconds': result['timings'].get('targetSeconds'),
+            'errorsMatch': sorted(w_errors) == sorted(o_errors), 'probesMatch': sorted(w_probes) == sorted(o_probes),
+            'workerOnlyErrors': sorted(set(w_errors) - set(o_errors)), 'officialOnlyErrors': sorted(set(o_errors) - set(w_errors)),
+            'errorCounts': {'worker': len(w_errors), 'official': len(o_errors)},
+            'workerOnlyProbes': sorted(set(w_probes) - set(o_probes)), 'officialOnlyProbes': sorted(set(o_probes) - set(w_probes)),
+            'probes': sorted(w_probes),
+        }
+        rows.append(row)
+        print(f'{name:24} product={result["status"]:10} errorsMatch={row["errorsMatch"]} probesMatch={row["probesMatch"]} '
+              f'official={seconds:.1f}s product-target={row["productTargetSeconds"]}s', flush=True)
+        for key in ('workerOnlyErrors', 'officialOnlyErrors', 'workerOnlyProbes', 'officialOnlyProbes'):
+            for line in row[key]:
+                print(f'    {key}: {line[:200]}')
+    (out / 'comparison.json').write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding='utf-8')
+    print(f'comparison: {out / "comparison.json"}')
+    return 0 if all(r['errorsMatch'] and r['probesMatch'] for r in rows) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

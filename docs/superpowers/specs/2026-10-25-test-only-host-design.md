@@ -1,6 +1,6 @@
 # RimWorld MOD 検証専用ホスト：仕様・設計案
 
-日付：2026-10-25（日本時間）。状態：**設計提案・実装未着手**。今回の依頼は文書作成のみ。試作・依存導入・製品コード変更・ゲーム実行は行わない。
+日付：2026-10-25（日本時間）。状態：**Linux x86_64 で主案の成立を確認し、A/B を実装済み（2026-10-25 更新）**。実装と結果は [製品計画](../plans/test-only-host-product.md)、[呼出し経路](../../research/test-host-entrypoints.md)、[適格化](../../research/test-host-qualification.md)、[性能](../../research/test-host-performance.md)、[契約](../../contracts/mod-validation-v1.md) を参照。以下の本文は設計時点の記述で、§3 と §11 の「現状」は更新前の状態を指す。Windows 実行、C、D は未実装。
 
 ## 1. 原点と文書の優先順位
 

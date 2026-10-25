@@ -7,8 +7,6 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
-import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
@@ -156,11 +154,10 @@ def check_profile(profile):
         if not game.is_absolute() or not save.is_absolute() or not game.is_dir() or not save.is_dir():
             raise ValueError('gameDir and saveDataDir must be existing absolute directories')
         read_anchors.update({game, game.resolve(), save, save.resolve(), *(Path(p).resolve() for p in roots)})
-        executables = [p for p in (game / 'RimWorld.exe', game / 'RimWorld') if p.is_file()]
-        if not executables:
-            raise ValueError('official executable name not found in gameDir')
-        for path in executables:
-            read(path)
+        # The executable is only fingerprinted when present; nothing here runs it.
+        for path in (game / 'RimWorld.exe', game / 'RimWorld'):
+            if path.is_file():
+                read(path)
         for name in ('RimWorld.dll', 'Assembly-CSharp.dll', 'Waylith.dll', 'UnityStubs.dll',
                      'RimWorld.runtimeconfig.json', 'RimWorld.deps.json'):
             path = game / name
@@ -295,22 +292,8 @@ def check_profile(profile):
     return report
 
 
-def launch_command(profile, report, platform):
-    if report.get('recordType') != 'modPreflight' or report.get('auditStatus') != 'passed':
-        raise ValueError('a passed preflight report is required')
-    fresh = check_profile(profile)
-    if fresh['auditStatus'] != 'passed' or report.get('fingerprint') != fresh['fingerprint']:
-        raise ValueError('configuration changed; run preflight again')
-    names = {'windows': 'RimWorld.exe', 'linux': 'RimWorld'}
-    if platform not in names:
-        raise ValueError('unsupported game platform')
-    executable = Path(profile['gameDir']) / names[platform]
-    if not executable.is_file() or _linked(executable):
-        raise ValueError('official executable is missing or linked')
-    save = str(Path(profile['saveDataDir']))
-    if '=' in save or save.endswith(('"', "'")):
-        raise ValueError('selected save-data path cannot be represented by this game argument parser')
-    return [str(executable), '-savedatafolder=' + save]
+PLAY_REMOVED = ('the play command was removed: this is a test-only tool and never starts the game. '
+                'Start RimWorld yourself; for real game-code validation use tools/validation_host.py run.')
 
 
 def write_json(path, data, profile, profile_path=None):
@@ -344,14 +327,18 @@ def main(argv=None):
     check = commands.add_parser('check', help='read active MOD configuration without starting the game')
     check.add_argument('--profile', type=Path, required=True)
     check.add_argument('--output', type=Path)
-    play = commands.add_parser('play', help='explicitly request normal game launch after rechecking')
-    play.add_argument('--profile', type=Path, required=True)
-    play.add_argument('--report', type=Path, required=True)
-    play.add_argument('--dry-run', action='store_true')
-    play.add_argument('--acknowledge-static-only', action='store_true')
+    # Removed: this tool is test-only and never starts the game. Kept as a command
+    # only so old scripts get an explicit migration error instead of a usage error.
+    commands.add_parser('play', help='removed; this tool never starts the game')
     desktop = commands.add_parser('desktop', help='open local desktop interface')
     desktop.add_argument('--profile', type=Path)
-    args = parser.parse_args(argv)
+    args, unknown = parser.parse_known_args(argv)
+    if unknown and args.command != 'play':
+        parser.error('unrecognized arguments: ' + ' '.join(unknown))
+    if args.command == 'play':
+        print(json.dumps({'recordType': 'modPreflight', 'schemaVersion': 1, 'auditStatus': 'failed',
+                          'gameVerification': 'notRun', 'error': PLAY_REMOVED}, ensure_ascii=True, indent=2))
+        return 1
     try:
         if args.command == 'desktop':
             try:
@@ -368,21 +355,7 @@ def main(argv=None):
             else:
                 print(json.dumps(report, ensure_ascii=True, indent=2))
             return {'passed': 0, 'failed': 1, 'incomplete': 2}[report['auditStatus']]
-        if not args.dry_run and not args.acknowledge_static_only:
-            raise ValueError('use --acknowledge-static-only to request normal game launch')
-        if args.report.stat().st_size > 16 * MIB:
-            raise ValueError('report exceeds size limit')
-        report = json.loads(args.report.read_text(encoding='utf-8-sig'))
-        if not isinstance(report, dict):
-            raise ValueError('invalid preflight report')
-        platform = 'windows' if sys.platform == 'win32' else 'linux' if sys.platform.startswith('linux') else ''
-        command = launch_command(profile, report, platform)
-        result = {'launchRequested': False, 'gameVerification': 'notRun', 'launchCommand': command}
-        if not args.dry_run:
-            child = subprocess.Popen(command, cwd=profile['gameDir'], stdin=subprocess.DEVNULL)
-            result.update(launchRequested=True, pid=child.pid)
-        print(json.dumps(result, ensure_ascii=True, indent=2))
-        return 0
+        raise ValueError(f'unknown command {args.command}')
     except (OSError, ValueError, KeyError, TypeError, ImportError) as error:
         print(json.dumps({'recordType': 'modPreflight', 'schemaVersion': 1, 'auditStatus': 'failed',
                           'gameVerification': 'notRun', 'error': str(error)}, ensure_ascii=True, indent=2))

@@ -1,48 +1,39 @@
-# 追加で必要なファイル
+# 検証用ファイルの現状と必要性の確認方針
 
-必要な範囲の一覧はこのページに、ファイル受け入れ後の順序と同一ビルドの扱いは [詳細な手順](../notes/linux-files-needed.md) に記載しています。
+最新の [検証専用ホスト設計](superpowers/specs/2026-10-25-test-only-host-design.md) は、公式ゲーム実行ファイルを製品から起動せず、独立ホストから必要な DLL 処理を呼ぶ案です。旧方式の「まず Linux の完全な公式起動一式を必須とする」という一律の前提は、今回の製品設計では採用しません。**対応する Linux の CLR/native 依存も不要になった、という意味ではありません。**
 
-対象は **RimWorld 1.7 ベータ（unstable）の Linux x86_64 版**。Windows 版の実行ファイル・ネイティブ DLL では代用しない。
+今回は仕様・設計だけを更新し、追加ファイルの一律再送は依頼しません。実装が許可された後、工程別の依存を調べて、実際に不足するものを指定します。[旧基準起動向け一覧](../notes/linux-files-needed.md) は開発用の比較実験の参考資料として残します。
 
-## 現在の不足
+## 受領済みと未確認
 
-- 分割 Data の ZIP 3 個は受領・検査済み。Core、Royalty、Ideology、Biotech、Odyssey のデータと DLC アセット 4 個がある。元の `Rim_Data.zip` や確認済み部分の再送は不要。詳細は [追加調査](research/2026-10-25-split-data-audit.md)。
-- Linux 起動用の一式と Core 用アセットパックは未受領。分割 Data の GLSL 225 個は `Core/Shaders/` にあり、受領 DLL の起動時参照先 `Rendering/Shaders/` は満たしていない。内容の同等性を確かめずに移動しない。
-- `RimWorld by Ludeon Studios.zip` は設定・セーブのフォルダだった。これは再送不要。
-
-## 送ってほしいもの
-
-### 次の小容量の調査用データ
-
-Core の `bake.manifest`、`textures.info` に加え、`Resources/Backstories/`、`Resources/Text/`、`Resources/Fonts/` を含む `Resources.zip` も受領・静的検査済み。13 実ファイルは全件で manifest のハッシュと一致し、Arial の別名を含む 15 論理パス分の内容を確認した。この範囲の再送は不要。詳しい検査と限界は [受領結果](research/2026-10-25-core-small-resources-audit.md) にある。
-
-画像と音声は手元で保管する。Linux の実行ファイル・ランタイムがない段階で、起動用の最小画像・音声集合は確定できないため、今回新たな個別ファイルの追加送付は求めない。完全な Core アセットを受領したことや、起動成功を意味するものではない。
-
-### 基準起動に必要な一式
-
-ゲームを更新している途中でコピーせず、**同じ時点のインストールフォルダ**からまとめる。
-
-| 場所 | 必要な内容 | 理由 |
+| 分類 | 現状 | 扱い |
 |---|---|---|
-| インストール直下 | `RimWorld` など拡張子なしの Linux 実行ファイル、`RimWorld.dll`、`RimWorld.runtimeconfig.json`、`RimWorld.deps.json`、同じ場所にある DLL・SO・付属ランタイム一式 | 元の apphost と WaylithClr を使うため |
-| ランタイム・ネイティブ用サブフォルダ | 存在すればフォルダ構造を保って同梱 | ルートの `.so` だけを抜き出すと依存先を失う可能性があるため |
-| `Rendering/` | `Shaders/` を含む全体 | キャッシュではなく元のシェーダーが必要 |
-| `RimWorld_Data/` | 存在する場合は全体 | インストール構造を保つため |
-| `Data/` | Core と所有する Royalty・Ideology・Biotech・Odyssey は受領済み。Linux 一式と同じ更新時点か照合し、不足や不一致がある場合のみ差し替える | 本物の XML、言語、アセット読み込みのため。完全性は未確定 |
-| アセットパック | 未受領の Core 用パック。ルートの `Assets.zip` またはそのビルドでの同等リソースを構造ごと保持する。DLC 側の 4 個は検査済み | Core の欠損を MOD エラーと誤判定しないため |
-| 付属ファイル | `steam_appid.txt`、存在すればバージョン情報・マニフェスト | 起動条件とビルドの識別のため |
+| Windows インストール直下相当 | Rim_Dll_All.zip。managed DLL、Windows apphost/native、runtimeconfig/deps 等を静的確認 | 実行 OS/CLR をまたぐ互換性は未確認。Windows の native DLL は Linux 用として使わない |
+| Data 分割 ZIP 3 個 | Core、Royalty、Ideology、Biotech、Odyssey。DLC の Assets.zip 4 個を検査 | 元の大 ZIP や確認済み範囲は再送不要。全インストールとのビルド互換性は未確認 |
+| Core 管理情報 | bake.manifest、textures.info | 受領・照合済み。実画像・音声の内容を持つものではない |
+| Core の小容量資材 | Resources.zip の Backstories/Text/Fonts。13 実ファイル、別名込み 15 論理パス | 再送不要。詳細は [受領結果](research/2026-10-25-core-small-resources-audit.md) |
+| Core アセット全体 | 完全なパックの受領・検査は未完了 | 必要な検査範囲を決めずに「素材なしで全項目合格」としない |
+| GLSL | Core/Shaders に 225 個 | DLL の既知参照先 Rendering/Shaders との同等性・配置は未確認。勝手に移動して満たしたことにしない |
+| Linux の CLR/native | 未受領・実配置未確認 | stage ごとの必要性を調べ、必須なら不足を blocked とする |
+| Harmony | 実行用の対応 MOD は未確認 | B の前提。版/hash/期待 patch を固定する |
+| ユーザーデータ ZIP | RimWorld by Ludeon Studios.zip は Config/Saves/cache 等 | ゲーム資材の代替ではない。通常の個人セーブは検証入力に不要 |
 
-`libcoreclr.so`、`libclrjit.so`、`libhostfxr.so`、`libhostpolicy.so`、`libsteam_api.so`、音声用ライブラリなどは確認対象の例。Linux 版の実際の配置はまだ未確認なので、例に載っていないファイルも削らず、直下と関連サブフォルダを保持してほしい。
+Data の詳細は [分割 Data の調査](research/2026-10-25-split-data-audit.md)、管理情報は [Core 管理情報の調査](research/2026-10-25-core-asset-metadata-audit.md) を参照してください。
 
-Linux 版の実行ファイルは ELF 形式である必要がある。`RimWorld.exe` の拡張子だけを消しても Linux 版にはならない。ZIP 化で実行権限が失われた場合は、展開後に正しい実行ファイルへ実行権限を付け直す。
+## 検証範囲ごとの必要性
 
-Data とアセットは Windows 版と共通の可能性があるが、今回は未検証。同じゲーム更新時点であることを確認し、混在を見つけた場合は正式判定を出さない。
+| 段階 | 必要なもの | 不足時の結果 |
+|---|---|---|
+| S：現在の静的検査 | 対象の XML/About/ロード設定等。現コードは executable 存在確認も残る | 静的検査の failed/incomplete。実処理は notRun |
+| A：実ローダー | 同一対応ビルドの managed DLL、対象 Core/DLC の Data、言語、その呼出しが実際に必要とする資材とランタイム | 実行前は blocked、実行後の欠落は incomplete。素材を fake 成功で代用しない |
+| B：DLL/Harmony | A の必要前提、対象 MOD と依存、対応 Harmony、同等性を確認できる CLR/Adapter | B を合格にしない。列挙だけなら期待値不明とする |
+| C：指定動作 | test ID と fixture が必要とする資材・native 依存。具体的な集合は成立性調査で固定 | 非対応範囲を明記。OS 固有のものを別 OS で保証しない |
+| 開発時の比較実験 | 対応する公式インストールと別環境での比較結果 | 比較できない範囲は未適格のまま。製品が代わりに公式ゲームを起動する方式に変えない |
 
-## 不要なもの
+「headless だから音声ライブラリ不要」「C# DLL だから Windows 版が全て Linux でも動く」は前提にしません。WaylithClr の同等性と独立ホストでの初期化も調査対象です。
 
-- `Saves/`、`Config/`、`ShaderCache/`、`BundleCache/`、クラッシュダンプ、個人ログ。
-- Steam のアカウント情報、ログイン情報、Steam クライアントの個人設定。
-- Anomaly。所有していない DLC は有効化しない。
-- 最初の Core 起動確認には一般の MOD 群は不要。Harmony と検証対象 MOD は後の段階で用意する。
+追加が必要になった場合は同じ更新時点の正規インストールから相対パスを保って用意し、ビルド識別と hash を照合します。別ビルドを混ぜて不足だけ埋めないでください。画像・音声は必要な範囲が確定するまで手元に保持してください。
 
-ファイルを分割する場合は、元の相対パスを保持し、どの ZIP がどの範囲か分かる名前にする。ゲームファイルの置き場所は公開リポジトリの外にする。
+## 検証用に不要な個人情報
+
+通常の Saves、個人ログ、クラッシュダンプ、キャッシュ、Steam のアカウント/ログイン情報を追加で求めません。Anomaly と所有していない DLC は対象外です。ゲーム資材・結果原本は公開リポジトリの外へ置きます。

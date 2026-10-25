@@ -1,0 +1,126 @@
+{
+  "recordType": "coreSmallResourcesAudit",
+  "observedOn": "2026-10-25",
+  "timezone": "Asia/Tokyo",
+  "inspection": "static_only",
+  "gameLaunchAttempted": false,
+  "archive": {
+    "name": "Resources.zip",
+    "bytes": 2145779,
+    "sha256": "19f86bca351a52fbc99248af2101630cdb5d4d3b7efa3d4d8f354745f4244a5b",
+    "totalEntries": 33,
+    "payloadFiles": 13,
+    "payloadBytes": 5841914,
+    "zipIntegrity": "passed"
+  },
+  "manifestComparison": {
+    "physicalFilesMatched": 13,
+    "physicalHashMismatches": 0,
+    "requestedLogicalPaths": 15,
+    "logicalPathsCoveredByContentHash": 15,
+    "logicalPathsAbsentAsPhysicalFiles": [
+      "Resources/Fonts/Arial_small.ttf",
+      "Resources/Fonts/Arial_tiny.ttf"
+    ],
+    "runtimeAliasResolutionTested": false
+  },
+  "checks": {
+    "unsafePaths": [],
+    "links": [],
+    "duplicatePayloadPaths": 0,
+    "xml": [
+      {
+        "path": "Resources/Backstories/Solid/Rare.xml",
+        "root": "PlayerCreatedBios",
+        "elements": 73,
+        "syntax": "passed"
+      },
+      {
+        "path": "Resources/Backstories/Solid/Requested.xml",
+        "root": "Backstories",
+        "elements": 7,
+        "syntax": "passed"
+      },
+      {
+        "path": "Resources/Backstories/Solid/PlayerCreated/names.xml",
+        "root": "PlayerCreatedBios",
+        "elements": 96557,
+        "syntax": "passed"
+      },
+      {
+        "path": "Resources/Backstories/Solid/PlayerCreated/backstories.xml",
+        "root": "PlayerCreatedBios",
+        "elements": 2692,
+        "syntax": "passed"
+      }
+    ],
+    "text": [
+      {
+        "path": "Resources/Text/Names/Nick_Male.txt",
+        "encoding": "utf-8",
+        "nonEmptyLines": 15
+      },
+      {
+        "path": "Resources/Text/Names/Nick_Female.txt",
+        "encoding": "utf-8",
+        "nonEmptyLines": 11
+      },
+      {
+        "path": "Resources/Text/Names/Last.txt",
+        "encoding": "utf-8",
+        "nonEmptyLines": 988
+      },
+      {
+        "path": "Resources/Text/Names/First_Female.txt",
+        "encoding": "utf-8",
+        "nonEmptyLines": 312
+      },
+      {
+        "path": "Resources/Text/Names/Nick_Unisex.txt",
+        "encoding": "utf-8",
+        "nonEmptyLines": 42
+      },
+      {
+        "path": "Resources/Text/Names/First_Male.txt",
+        "encoding": "utf-8",
+        "nonEmptyLines": 356
+      }
+    ],
+    "fonts": [
+      {
+        "path": "Resources/Fonts/Pretendard-Regular.otf",
+        "tables": 12,
+        "glyphs": 14716,
+        "tableChecksums": "passed"
+      },
+      {
+        "path": "Resources/Fonts/Calibri_tiny.TTF",
+        "tables": 21,
+        "glyphs": 3874,
+        "tableChecksums": "passed"
+      },
+      {
+        "path": "Resources/Fonts/Arial_medium.ttf",
+        "tables": 24,
+        "glyphs": 3417,
+        "tableChecksums": "passed"
+      }
+    ]
+  },
+  "readiness": {
+    "status": "blocked",
+    "completeCoreAssetPackReceived": false,
+    "linuxRuntimeReceived": false,
+    "gameBoot": "notRun"
+  },
+  "limitations": [
+    "Content-hash coverage includes Arial aliases; no missing files were synthesized or copied.",
+    "XML syntax, UTF-8 text decoding and font table checks do not prove game deserialization, rendering, actual glyph coverage or runtime alias resolution.",
+    "Core textures and sounds, bootstrap GLSL placement and Linux executable/runtime remain unverified or unavailable.",
+    "No game resource contents or original archives are published."
+  ],
+  "analysisTools": {
+    "fontTools": "4.61.1",
+    "xml": "Python ElementTree"
+  }
+}

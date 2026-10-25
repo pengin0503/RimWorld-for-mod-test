@@ -1,0 +1,56 @@
+name: Offline input audit
+
+on:
+  push:
+    branches: [main, docs/headless-design-review, claude/project-thread-poug58]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.12', '3.13']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Check Python syntax
+        run: python -m compileall -q tools tests experiments
+      - name: Test synthetic inputs only
+        run: python -m unittest discover -s tests -v
+
+  # Builds the validation Worker without any game file: it binds every game
+  # member by reflection at run time. Real-game runs stay private.
+  worker-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build Worker (warnings are errors)
+        run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+      - name: Worker refuses to run without a Controller request
+        shell: bash
+        run: |
+          set +e
+          dotnet worker/bin/RimWorldValidationWorker.dll
+          code=$?
+          test "$code" -eq 2

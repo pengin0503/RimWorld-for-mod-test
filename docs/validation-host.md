@@ -64,6 +64,7 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 
 - `status` と `reasons`：何が理由でその判定になったか。
 - `diagnostics.newInTarget`：対象 MOD を入れたときだけ出たエラー・警告（本文の先頭と全文）。
+- `diagnostics.translationErrors.newInTarget`：日本語などで「翻訳データに N 件のエラー」の警告が増えたとき、増えた個々のエラー（例：MOD が公式 Def の comp を消したため、公式翻訳の注入先がなくなった）。
 - `checks`：期待値ごとの実値と一致結果。Harmony は実際に登録されたパッチの一覧も含みます。
 - `scope.notChecked`：確認していない範囲（ほかの言語、マップ・tick・UI・描画・音声出力・Steam が必要な処理、パッチの実行時の効果、ほかの OS）。
 

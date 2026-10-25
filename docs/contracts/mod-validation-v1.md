@@ -55,6 +55,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 - `mods[]`（packageId、元パス、ファイル数、内容 sha256、同梱 0Harmony.dll）、`modOrder`（要求と実際）、`runningMods`、`modClasses`、`activeLanguage`、`loadedAssemblies`（mvid）。
 - `checks`：期待値ごとの実値と `match` / `mismatch` / `missing` / `error`。Harmony は登録一覧、期待外の登録、読み込まれた Harmony の版も含む。
 - `diagnostics.newInTarget`：ベースラインにない error/warning（多重集合の差）。`mentionsTargets` は本文に対象の packageId/フォルダ名が出るものの目安で、責任の確定ではない。
+- `diagnostics.translationErrors`：ゲームが「Translation data for language X has N errors」と件数だけ出す翻訳エラーの中身。`targetCount`・`baselineCount`・`newInTarget`（ベースラインにない個々のエラー、多重集合の差）・`complete`（上限 `limits.diagnostics` で切り詰めていなければ true）。判定は件数の警告そのもの（`newWarnings`）で行い、この項目は原因の説明に使う。読めなかった場合は `translationErrorsError` で incomplete。
 - `workerStages`（engineInit → globalInit → staticConstructorsEarly → loadPlayData → lateLoadActions、各秒数と証拠）、`skippedOfficialSteps`、`deviations`、`scope`（確認した範囲と確認していない範囲）。
 - `process`（終了コード、停止理由、最大 RSS、ログ量、上限の実施方式。メモリは監視ポーリングで `memoryHard=false`）、`timings`。
 

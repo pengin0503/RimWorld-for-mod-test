@@ -25,6 +25,12 @@ class ZipAuditTests(unittest.TestCase):
         path = self.root / 'input.zip'
         with zipfile.ZipFile(path, 'w') as z:
             for name, data in entries:
+                if isinstance(name, str):
+                    # ZipInfo normalizes backslashes on Windows. Preserve raw
+                    # hostile fixture names so every OS tests the same bytes.
+                    info = zipfile.ZipInfo(name)
+                    info.filename = info.orig_filename = name
+                    name = info
                 z.writestr(name, data)
         return path
 

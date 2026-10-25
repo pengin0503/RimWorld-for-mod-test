@@ -1,6 +1,6 @@
 # 検証専用ホスト：成立性調査と設計確定の計画
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans when separately authorized to execute this plan. Steps use checkbox (`- [ ]`) syntax for tracking. 今回は文書だけ。以下の試作・製品コード変更・実行は未許可かつ未着手。ユーザーの「実装は行わない」を優先し、この文書を実装指示として実行しない。
+> **2026-10-25 実施状況：** ユーザーの実装依頼を受けて Task 1–5 を実施した（Linux x86_64＋WaylithClr の範囲）。成果物は下表のとおり作成済みで、結果は [製品計画と実施状況](test-only-host-product.md) にまとめた。Windows の実物検証（Task 3/4 の Windows 欄）は未実施で、未確認のまま残す。以下の本文は計画時点の記述。
 
 **Goal:** ユーザーが PC を使わず iPad から AI に Linux 上の検証・修正・再検証を任せて MOD を遊べる状態へ整える主用途と、Windows で自分で検証する追加用途について、独立した検証専用ホストの成立範囲を証拠で確定する。
 

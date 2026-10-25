@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <packageId>rwmodtest.harmonylib</packageId>
+  <name>RWMT fixture: harmonylib</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <description>Self-made validation fixture. Private test-only provider of the Harmony library (Lib.Harmony from NuGet, MIT). The 0Harmony.dll is copied in at test time and is not committed.</description>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+</ModMetaData>

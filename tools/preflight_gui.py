@@ -1,14 +1,12 @@
 """Desktop entry point; all validation is shared with the AI CLI."""
 from pathlib import Path
 import queue
-import subprocess
-import sys
 import threading
 
 try:
-    from .mod_preflight import check_profile, launch_command, load_profile, write_json
+    from .mod_preflight import check_profile, load_profile, write_json
 except ImportError:
-    from mod_preflight import check_profile, launch_command, load_profile, write_json
+    from mod_preflight import check_profile, load_profile, write_json
 
 
 def format_result(report):
@@ -43,7 +41,7 @@ def create_window(profile_path=None):
             self.messages = queue.Queue()
             panel = ttk.Frame(window, padding=16)
             panel.pack(fill='both', expand=True)
-            ttk.Label(panel, text='プレイ前のMOD事前検査', font=('', 17, 'bold')).pack(anchor='w')
+            ttk.Label(panel, text='MOD事前検査（静的検査）', font=('', 17, 'bold')).pack(anchor='w')
             ttk.Label(panel, text='同じ検査をLinux上のAIからも実行できます。ゲーム実行時の動作は別の検証です。').pack(anchor='w', pady=(4, 14))
             self.game = tk.StringVar()
             self.save = tk.StringVar()
@@ -72,10 +70,8 @@ def create_window(profile_path=None):
             row.pack(fill='x', pady=(12, 8))
             self.check_button = ttk.Button(row, text='事前検査を実行', command=self.check)
             self.check_button.pack(side='left')
-            self.play_button = ttk.Button(row, text='事前検査済みの構成でゲームを起動', state='disabled', command=self.play)
-            self.play_button.pack(side='left', padx=8)
             ttk.Button(row, text='結果JSONを保存', command=self.save_report).pack(side='right')
-            ttk.Label(panel, text='通常起動ボタンは再検査後に動作します。ゲーム内の動作を保証するものではありません。').pack(anchor='w')
+            ttk.Label(panel, text='このツールは検証専用で、ゲームを起動しません。遊ぶときは通常どおりゲームを起動してください。').pack(anchor='w')
             self.status = tk.StringVar(value='ゲームと保存先を指定してください。設定やセーブは変更しません。')
             ttk.Label(panel, textvariable=self.status).pack(anchor='w', pady=6)
             self.output = ScrolledText(panel, wrap='word', height=16, state='disabled')
@@ -115,7 +111,6 @@ def create_window(profile_path=None):
                 self.roots.insert('end', root)
             self.profile_path = Path(path)
             self.report = None
-            self.play_button.configure(state='disabled')
 
         def open_profile(self):
             path = filedialog.askopenfilename(filetypes=[('JSON', '*.json')])
@@ -147,7 +142,6 @@ def create_window(profile_path=None):
 
         def begin(self, operation):
             self.check_button.configure(state='disabled')
-            self.play_button.configure(state='disabled')
             self.status.set('検査中です。画像・音声のデコードやゲームコードの実行は行いません。')
             def worker():
                 try:
@@ -163,14 +157,6 @@ def create_window(profile_path=None):
             except ValueError as error:
                 messagebox.showerror('入力を確認してください', str(error))
 
-        def play(self):
-            try:
-                profile, report = self.profile(), self.report
-                platform = 'windows' if sys.platform == 'win32' else 'linux' if sys.platform.startswith('linux') else ''
-                self.begin(lambda: ('play', profile, launch_command(profile, report or {}, platform)))
-            except ValueError as error:
-                messagebox.showerror('起動できません', str(error))
-
         def poll(self):
             try:
                 kind, value = self.messages.get_nowait()
@@ -179,22 +165,13 @@ def create_window(profile_path=None):
                     self.status.set('処理できませんでした。入力を確認して再検査してください。')
                     messagebox.showerror('事前検査', value)
                 else:
-                    operation, profile, result = value
-                    if operation == 'check':
-                        self.report = result
-                        self.output.configure(state='normal')
-                        self.output.delete('1.0', 'end')
-                        self.output.insert('end', format_result(result))
-                        self.output.configure(state='disabled')
-                        self.status.set('事前検査が終わりました。ゲーム実行検証は未実施です。')
-                        if result['auditStatus'] == 'passed':
-                            self.play_button.configure(state='normal')
-                    else:
-                        try:
-                            subprocess.Popen(result, cwd=profile['gameDir'], stdin=subprocess.DEVNULL)
-                            self.status.set('ゲームへ起動要求を送信しました。起動完了は未確認です。')
-                        except OSError as error:
-                            messagebox.showerror('ゲームを起動できません', str(error))
+                    _, _, result = value
+                    self.report = result
+                    self.output.configure(state='normal')
+                    self.output.delete('1.0', 'end')
+                    self.output.insert('end', format_result(result))
+                    self.output.configure(state='disabled')
+                    self.status.set('事前検査が終わりました。ゲーム実行検証は未実施です。')
             except queue.Empty:
                 pass
             window.after(100, self.poll)

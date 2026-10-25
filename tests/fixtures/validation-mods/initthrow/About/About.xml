@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <packageId>rwmodtest.initthrow</packageId>
+  <name>RWMT fixture: initthrow</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <description>Self-made validation fixture. Its Mod subclass constructor throws. The real loader must report the initialization exception.</description>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+</ModMetaData>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <packageId>rwmodtest.badref</packageId>
+  <name>RWMT fixture: badref</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <description>Self-made validation fixture. Contains a ThingDef that references a ThingCategoryDef that does not exist. The real loader must report the unresolved reference.</description>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+</ModMetaData>

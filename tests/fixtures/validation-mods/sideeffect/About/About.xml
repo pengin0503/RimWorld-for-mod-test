@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <packageId>rwmodtest.sideeffect</packageId>
+  <name>RWMT fixture: sideeffect</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <description>Self-made validation fixture. Raises the market value of Core Steel to 2.5, which makes the official DevMode def checks report weaponless pawn kinds. The patch itself succeeds; the side effect must be detected.</description>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+</ModMetaData>

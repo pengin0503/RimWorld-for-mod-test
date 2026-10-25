@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <packageId>rwmodtest.okxml</packageId>
+  <name>RWMT fixture: okxml</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <description>Self-made validation fixture. Adds one ThingDef, patches a harmless Core Steel value and adds English and Japanese keyed strings. Must load without new errors.</description>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+</ModMetaData>

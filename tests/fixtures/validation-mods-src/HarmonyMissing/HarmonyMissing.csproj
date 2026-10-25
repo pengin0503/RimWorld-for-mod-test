@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RWMT.HarmonyMissing</AssemblyName>
+    <UsesHarmony>true</UsesHarmony>
+  </PropertyGroup>
+</Project>

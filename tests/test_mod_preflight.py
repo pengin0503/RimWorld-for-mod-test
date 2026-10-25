@@ -13,7 +13,9 @@ class PreflightTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # Windows TEMP can use an 8.3 alias. The CLI resolves profiles, so
+        # fixture paths must identify the same canonical directory too.
+        self.root = Path(self.temp.name).resolve()
         self.game = self.root / 'Game with spaces'
         self.save = self.root / 'Player data'
         self.config = self.save / 'Config/ModsConfig.xml'

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans when separately authorized to execute this plan. Steps use checkbox (`- [ ]`) syntax for tracking. 今回は文書だけ。以下の試作・製品コード変更・実行は未許可かつ未着手。ユーザーの「実装は行わない」を優先し、この文書を実装指示として実行しない。
 
-**Goal:** 遊べない独立した MOD 検証ホストが Linux/Windows で成立する範囲を証拠で確定し、その後の製品実装計画を作れる状態にする。
+**Goal:** ユーザーが PC を使わず iPad から AI に Linux 上の検証・修正・再検証を任せて MOD を遊べる状態へ整える主用途と、Windows で自分で検証する追加用途について、独立した検証専用ホストの成立範囲を証拠で確定する。
 
 **Architecture:** Controller は要求・監視・結果を管理し、別プロセスの検証用 Worker が対応する CLR とビルド別 Adapter を使って実物 DLL の必要な処理だけを実行する。公式ゲーム実行ファイルを起動する製品へフォールバックしない。まず不確かな実行 API/CLR/初期化を調査し、成立前に製品構造を実装しない。
 
@@ -88,7 +88,7 @@
 
 Windows 版は引き続き正式な設計対象。iPad 利用を理由に Linux 版だけへ限定しない。Linux のこのセッションで Windows 用ソースを作成し、GitHub Actions の Windows runner でゲーム不要のビルド・テストを確認する経路を使える。既存の Windows 自作 fixture テストは成功済みだが、将来の C# Worker のビルドや実物 DLL の検証が済んだ意味ではない。
 
-Task 2 の環境表には「Windows のゲーム不要 CI」と「私有資材を使う Windows 実行ホスト」を別行で持つ。Task 3/4 の実物 Windows 検証は、接続した Windows ホスト等を得た場合にだけ実施する。公開 runner へゲーム資材を投入しない。OpenAI の Remote 機能は利用可能なら選択肢だが、未設定のホストやアカウントへの提供を前提にしない。詳細と公式資料は [仕様 §7](../specs/2026-10-25-test-only-host-design.md) を参照。
+Task 2 の環境表には「Windows のゲーム不要 CI」と「私有資材を使う Windows 実行環境」を別行で持つ。Task 3/4 の実物 Windows 検証は私有環境を得た場合に行うが、ユーザーの PC への遠隔接続は本プロジェクトの方式・必須依存に採用しない。公開 runner へゲーム資材を投入しない。AI の検証先は Linux、Windows は利用者が自分で検証する用途として維持する。詳細は [仕様 §7](../specs/2026-10-25-test-only-host-design.md) を参照。
 
 Linux 版受領は依存確認・最小試作の材料が増えることで、製品実装の詳細が全て確定した意味ではない。共通契約・監視と Windows 用の開発準備は Linux 版入手と切り離せる。今回も文書補足のみで、試作・コード変更・CI 設定変更は行わない。
 
@@ -132,6 +132,7 @@ Linux 版受領は依存確認・最小試作の材料が増えることで、�
 - [ ] 既存 `tools/mod_preflight.py` の `play` と `launch_command`、`tools/preflight_gui.py` の起動ボタン/呼出し、起動関連テストを廃止するタスクを入れる。`play` は移行エラーになり、どの入口も公式ゲームを spawn しないことを検査する。
 - [ ] 静的検査の公式 executable 必須条件を外し、ゲーム資材と独立した検証 Worker を別入力にする計画を入れる。既存プロフィールの読み取り移行、通常設定を上書きしないことを検査する。
 - [ ] Windows/Linux の CLI 同一契約、Windows の検証専用画面、JSON 保存、取消、非対応表示、原本保護、子孫回収、結果欠損と古い結果の拒否を受け入れテストへ対応付ける。
+- [ ] 主用途の受け入れケースとして「ユーザーの PC が停止・未接続」のまま、iPad からの依頼→Linux 上の検証→AI による許可範囲の MOD 修正→再検証→導入用 MOD/報告の受け渡しが成立することを計画する。通常のユーザー操作やゲーム手動起動を必須の途中工程にしない。未確認範囲を隠して合格にする設計にもせず、ツール自体のプレイ機能は作らない。
 - [ ] CI は自作 fixture と公開可能なコードのみ、実物検証は私有領域とする。実物がない CI の成功を互換性検証と呼ばないチェックを含める。
 - [ ] 仕様 R1–R7 と S/A/B/C の対応表を更新し、レビュー用として提出する。実装へ自動移行しない。
 

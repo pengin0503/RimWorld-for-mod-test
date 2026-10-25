@@ -69,4 +69,4 @@
 
 - 標準 .NET：`ProfilerBootStart` の静的コンストラクタが `TypeLoadException` で失敗する差がある（[依存](test-host-dependencies.md)）。故障検出は 2 ケースで一致したが、差の影響範囲を証明していない。
 - Windows：比較環境がない。Linux の結果を Windows の欄へ転記しない。
-- 実際の利用者 MOD：まだ実行していない。fixture にない種類の事象、たとえば transpiler、非同期処理、Steam 依存には、別途の比較が必要になりうる。
+- 実際の MOD：Harmony と Vanilla Expanded Framework の 8 構成を公式 headless と突き合わせた（[実 MOD 検証](real-mod-validation.md)）。transpiler の登録は一致したが、実行時の効果は未確認。ほかの MOD、非同期処理や Steam 依存の事象は未比較。

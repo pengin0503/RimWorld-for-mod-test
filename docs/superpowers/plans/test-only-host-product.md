@@ -35,7 +35,7 @@
 
 ## 残りのタスク
 
-- [ ] 実際の利用者 MOD（と Harmony MOD）での検証。入力待ち。
+- [x] 実際の MOD での検証：Harmony 3.0.1 と Vanilla Expanded Framework で実施（[実 MOD 検証](../../research/real-mod-validation.md)）。ほかの MOD は今後。
 - [ ] 既知の無害な警告を除外する規則（ビルド・範囲・根拠付き）。現在は全ての新しい警告で failed。
 - [ ] Windows の Worker 実行（apphost .exe、パス、Job Object によるメモリ上限）と、Windows での公式比較による適格化。現在は `blocked`。
 - [ ] Windows 画面からの `run`。既存の画面は静的検査のみ。

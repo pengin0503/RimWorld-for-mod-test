@@ -424,6 +424,11 @@ public sealed class Host(WorkerRequest request, GameApi api, Diagnostics diagnos
             object? language = api.ActiveLanguage.GetValue(null);
             json.WriteString("activeLanguage", language == null ? null : (string?)Reflect.Member(language, "folderName"));
         });
+        if (loaded)
+        {
+            Guard(json, "translationErrorsError", () =>
+                Checks.WriteTranslationErrors(json, api.ActiveLanguage.GetValue(null), request.MaxDiagnostics, request.MaxMessageBytes));
+        }
         if (executionStatus == "completed")
         {
             var checks = new Checks(api);

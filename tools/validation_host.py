@@ -673,6 +673,29 @@ def new_diagnostics(target_events, baseline_events):
     return fresh
 
 
+def new_translation_errors(target_worker, baseline_worker):
+    """Individual translation load errors present in the target run but not in the baseline.
+
+    The game logs only a count ("Translation data for language X has N errors"); the
+    Worker reports the errors behind it, so a changed count can be explained.
+    """
+    target = (target_worker or {}).get('translationErrors')
+    if not target:
+        return None
+    baseline = (baseline_worker or {}).get('translationErrors') or {'count': 0, 'dropped': 0, 'items': []}
+    remaining = {}
+    for item in baseline['items']:
+        remaining[item] = remaining.get(item, 0) + 1
+    fresh = []
+    for item in target['items']:
+        if remaining.get(item):
+            remaining[item] -= 1
+        else:
+            fresh.append(item)
+    return {'targetCount': target['count'], 'baselineCount': baseline['count'], 'newInTarget': fresh,
+            'complete': not target['dropped'] and not baseline['dropped']}
+
+
 def _mentions(event, mods):
     text = (event.get('message') or '').lower()
     return sorted({m['packageId'] for m in mods if m['target'] and (m['packageId'] in text or m['folderName'].lower() in text)})
@@ -720,7 +743,7 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
             failed.append({'code': 'loadException', 'detail': worker['loadException'].splitlines()[0]})
         if not worker.get('playDataLoaded'):
             failed.append({'code': 'playDataNotLoaded', 'detail': 'PlayDataLoader did not report Loaded'})
-        for key in ('runningModsError', 'modOrderError', 'checksError', 'activeLanguageError'):
+        for key in ('runningModsError', 'modOrderError', 'checksError', 'activeLanguageError', 'translationErrorsError'):
             if worker.get(key):
                 incomplete.append({'code': key, 'detail': worker[key].splitlines()[0]})
 
@@ -934,6 +957,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'checks': worker.get('checks'),
         'diagnostics': {
             'newInTarget': fresh,
+            'translationErrors': new_translation_errors(worker, baseline_worker),
             'target': worker.get('diagnosticsSummary'),
             'baseline': (baseline_worker or {}).get('diagnosticsSummary'),
             'baselineCached': baseline_run.get('cached', False),

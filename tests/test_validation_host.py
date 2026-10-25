@@ -59,6 +59,8 @@ FAKE_WORKER = textwrap.dedent('''\
         'runtime': {'frameworkDescription': 'fake'}, 'stages': [], 'skippedOfficialSteps': [], 'deviations': [],
         'playDataLoaded': True, 'verseLogLimitReached': False,
         'activeLanguage': request['language'],
+        'translationErrors': {'count': 2 if 'badlang' in mods else 1, 'dropped': 0,
+                              'items': ['shared error'] + (['Found no ThingDef named RWMT_Gone'] if 'badlang' in mods else [])},
         'runningMods': [], 'modClasses': [],
         'modOrder': {'matches': actual == order, 'expected': order, 'actual': actual},
         'checks': {'defs': defs, 'defValues': [], 'keyed': [],
@@ -356,6 +358,19 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(outcome[4][0]['mentionsTargets'], ['test.target'])
         self.assertEqual(vh.new_diagnostics([self.warning, self.warning], [self.warning]), [self.warning])
 
+    def test_new_translation_errors_is_a_multiset_difference(self):
+        def worker(items, dropped=0):
+            return {'translationErrors': {'count': len(items) + dropped, 'dropped': dropped, 'items': items}}
+        self.assertEqual(vh.new_translation_errors(worker(['a', 'a', 'b']), worker(['a'])),
+                         {'targetCount': 3, 'baselineCount': 1, 'newInTarget': ['a', 'b'], 'complete': True})
+        self.assertFalse(vh.new_translation_errors(worker(['a'], dropped=5), worker([]))['complete'])
+        self.assertEqual(vh.new_translation_errors(worker(['a']), {})['newInTarget'], ['a'])
+        self.assertIsNone(vh.new_translation_errors({'translationErrors': None}, worker(['a'])))
+
+    def test_unreadable_translation_errors_make_the_run_incomplete(self):
+        status, _, reasons, _, _ = self.evaluate(worker=worker_result(translationErrorsError='MissingMemberException: loadErrors'))
+        self.assertEqual((status, [r['code'] for r in reasons]), ('incomplete', ['translationErrorsError']))
+
 
 @unittest.skipUnless(LINUX, 'running the Worker is implemented for Linux only')
 class RunTests(TempCase):
@@ -390,6 +405,12 @@ class RunTests(TempCase):
         self.assertEqual(result['status'], 'failed')
         self.assertEqual([r['code'] for r in result['reasons']], ['newErrors'])
         self.assertIn('RWMT_Missing', result['diagnostics']['newInTarget'][0]['message'])
+
+    def test_translation_errors_brought_by_the_target_are_listed(self):
+        self.fx.mod('badlang')
+        result, _ = self.fx.run(['*badlang'])
+        self.assertEqual(result['diagnostics']['translationErrors'],
+                         {'targetCount': 2, 'baselineCount': 1, 'newInTarget': ['Found no ThingDef named RWMT_Gone'], 'complete': True})
 
     def test_run_dirs_are_removed_unless_kept(self):
         self.fx.mod('target')

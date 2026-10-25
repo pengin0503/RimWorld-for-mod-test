@@ -33,6 +33,35 @@ public sealed class Checks(GameApi api)
         json.WriteEndArray();
     }
 
+    /// <summary>
+    /// The individual errors behind the game's "Translation data for language X has
+    /// N errors" warning: the same lists LoadedLanguage.InjectIntoData_AfterImpliedDefs
+    /// counts (the language's own load errors plus each def-injection package's).
+    /// </summary>
+    public static void WriteTranslationErrors(Utf8JsonWriter json, object? language, int maxItems, int maxBytes)
+    {
+        if (language == null)
+        {
+            json.WriteNull("translationErrors");
+            return;
+        }
+        var errors = ((IEnumerable)Reflect.Member(language, "loadErrors")!).Cast<string>().ToList();
+        foreach (object package in (IEnumerable)Reflect.Member(language, "defInjections")!)
+        {
+            errors.AddRange(((IEnumerable)Reflect.Member(package, "loadErrors")!).Cast<string>());
+        }
+        json.WriteStartObject("translationErrors");
+        json.WriteNumber("count", errors.Count);
+        json.WriteNumber("dropped", Math.Max(0, errors.Count - maxItems));
+        json.WriteStartArray("items");
+        foreach (string error in errors.Take(maxItems))
+        {
+            json.WriteStringValue(Diagnostics.TruncateUtf8(error, maxBytes));
+        }
+        json.WriteEndArray();
+        json.WriteEndObject();
+    }
+
     public List<string> RunningModIds()
     {
         return ((IEnumerable)api.RunningMods.GetValue(null)!).Cast<object>()

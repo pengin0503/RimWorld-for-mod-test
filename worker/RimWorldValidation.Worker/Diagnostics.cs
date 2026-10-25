@@ -98,7 +98,7 @@ public sealed class Diagnostics : ILoggerProvider
         }
     }
 
-    private static string TruncateUtf8(string text, int maxBytes)
+    internal static string TruncateUtf8(string text, int maxBytes)
     {
         int length = Math.Min(text.Length, maxBytes);
         while (length > 0 && Encoding.UTF8.GetByteCount(text.AsSpan(0, length)) > maxBytes)

@@ -337,7 +337,7 @@ def main(argv=None):
                     raise ValueError('output must not overwrite an input or an alias of it')
     except (OSError, ValueError) as error:
         guard.add('output', error)
-        print(json.dumps(guard.report, ensure_ascii=False, indent=2))
+        print(json.dumps(guard.report, ensure_ascii=True, indent=2))
         return 1
     if args.command == 'metadata':
         report = audit_metadata(args.manifest, args.textures)
@@ -345,7 +345,7 @@ def main(argv=None):
         report = audit_zip(args.archive, manifest=args.manifest, scopes=args.scope,
             max_entry_bytes=args.max_entry_mib * MIB,
             max_total_bytes=args.max_total_mib * MIB, max_entries=args.max_entries)
-    content = json.dumps(report, ensure_ascii=False, indent=2) + '\n'
+    content = json.dumps(report, ensure_ascii=args.output is None, indent=2) + '\n'
     temporary = None
     if args.output is None:
         print(content, end='')
@@ -359,7 +359,7 @@ def main(argv=None):
         except OSError as error:
             guard.report = report
             guard.add('output', error)
-            print(json.dumps(report, ensure_ascii=False, indent=2))
+            print(json.dumps(report, ensure_ascii=True, indent=2))
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)

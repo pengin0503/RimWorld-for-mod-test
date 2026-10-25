@@ -274,6 +274,15 @@ class MetadataAndCliTests(unittest.TestCase):
         self.assertEqual(out.returncode, 1)
         self.assertEqual(m.read_bytes(), before)
 
+    def test_cli_json_survives_non_utf8_stdout_encoding(self):
+        p = self.archive([('a.xml', '<a/>')])
+        japanese = self.root / '日本語.zip'
+        p.rename(japanese)
+        out = subprocess.run([sys.executable, 'tools/audit_inputs.py', 'zip', str(japanese)],
+            env={**os.environ, 'PYTHONIOENCODING': 'ascii'}, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)['input']['name'], '日本語.zip')
+
 
 if __name__ == '__main__':
     unittest.main()

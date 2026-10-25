@@ -64,3 +64,5 @@ Final: minor (deferred): 「正常な別名の実体がある一方、別名先�
 Final: Ruling: Windows と remote CI はローカルレビューでは未実行なので、Actions の実行結果を別に確認する。ゲーム・実素材デコードは初版の検査対象外で `notRun` を維持する。未観測の環境結果を成功と記載しない。
 
 CI: 初回は Ubuntu 3.12/3.13 が成功、Windows 3.12/3.13 が不正パス fixture の 1 ケースで失敗。Windows の ZipInfo がバックスラッシュを自動変換するためで、テストの元の名前を明示的に保持するよう修正した。製品のパス判定は変更していない。全 30 テストを再実行してから CI を再確認する。
+
+Cross-platform follow-up: 非 UTF-8 標準出力で日本語の ZIP 名を JSON に出すと例外になることを再現し、標準出力を ASCII 互換の JSON エスケープへ変更した。テスト RED→GREEN、全 31 件が通過。出力ファイルは UTF-8 のまま。

@@ -1,0 +1,80 @@
+{
+  "recordType": "coreAssetMetadataAudit",
+  "observedOn": "2026-10-25",
+  "timezone": "Asia/Tokyo",
+  "inspection": "static_only",
+  "gameLaunchAttempted": false,
+  "inputs": [
+    {
+      "name": "bake.manifest",
+      "bytes": 789907,
+      "sha256": "0519d33bcc22b2502d43ba27afa104c43a2d91a78050f20bf3d93301d665866d"
+    },
+    {
+      "name": "textures.info",
+      "bytes": 293763,
+      "sha256": "ce49032e2d0c1a0d1f0429fba3f6718c14060978f9d67398c3cabf8092adfa7e"
+    }
+  ],
+  "manifest": {
+    "logicalPaths": 5907,
+    "distinctContentHashValues": 5868,
+    "duplicatePathCount": 0,
+    "malformedLineCount": 0,
+    "categoryCounts": {
+      "Resources/Backstories": 4,
+      "Resources/Fonts": 5,
+      "Resources/Sounds": 2437,
+      "Resources/Text": 6,
+      "Resources/Textures": 3455
+    }
+  },
+  "textureInfo": {
+    "entries": 3455,
+    "fieldsPerEntryAfterPath": 6,
+    "malformedLineCount": 0,
+    "pathsMissingFromManifest": 0,
+    "manifestTexturePathsMissingFromInfo": 0,
+    "categoryCounts": {
+      "Resources/Textures/Damage": 8,
+      "Resources/Textures/Designations": 25,
+      "Resources/Textures/Other": 19,
+      "Resources/Textures/PlaceholderImage.psd.dds": 1,
+      "Resources/Textures/PlaceholderImage_Gear.psd.dds": 1,
+      "Resources/Textures/Terrain": 46,
+      "Resources/Textures/Things": 2721,
+      "Resources/Textures/UI": 544,
+      "Resources/Textures/Weather": 10,
+      "Resources/Textures/World": 80
+    }
+  },
+  "fontAliases": {
+    "identicalHashPaths": [
+      "Resources/Fonts/Arial_medium.ttf",
+      "Resources/Fonts/Arial_small.ttf",
+      "Resources/Fonts/Arial_tiny.ttf"
+    ],
+    "dllAliasMethod": "Waylith.Assets.AssetPack.AliasDeduplicatedEntries",
+    "runtimeAliasResolutionTested": false
+  },
+  "nextRequestedDirectories": [
+    "Resources/Backstories/",
+    "Resources/Text/",
+    "Resources/Fonts/"
+  ],
+  "nextRequestedLogicalPathCount": 15,
+  "readiness": {
+    "status": "blocked",
+    "coreResourcePayloadReceived": false,
+    "completeCoreAssetPackReceived": false,
+    "linuxRuntimeReceived": false
+  },
+  "limitations": [
+    "Metadata lists expected paths and hashes, not payload availability or correctness.",
+    "textures.info has six integer fields after each path; field semantics were not validated here.",
+    "The manifest contains Resources paths only, no shader caches or metadata entries.",
+    "The manifest has no per-file byte sizes, so upload-size partitions cannot be calculated from it.",
+    "No game loading, translation injection, asset decoding, or same-build compatibility test was run.",
+    "Only counts, input hashes, and selected diagnostic paths are published, not full received metadata or game content."
+  ]
+}

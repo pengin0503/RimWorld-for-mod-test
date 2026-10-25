@@ -723,12 +723,7 @@ class RunTests(TempCase):
         self.assertEqual((out / 'result.json').read_text(encoding='utf-8'), '{"old": true}')
 
 
-class MapTests(TempCase):
-    def setUp(self):
-        super().setUp()
-        self.fx.prepare()
-        self.fx.mod('ruins', 'test.ruins')
-
+class MapRequestTests(TempCase):
     def test_map_request_defaults_and_rejections(self):
         base = {'recordType': 'modValidationRequest', 'schemaVersion': 1, 'levels': ['A'],
                 'mods': [{'path': 'm', 'target': True}]}
@@ -749,6 +744,14 @@ class MapTests(TempCase):
         for name, fields in bad.items():
             with self.subTest(name), self.assertRaises(vh.RequestError):
                 vh.validate_request(dict(base, **fields), self.root)
+
+
+@unittest.skipUnless(LINUX, 'running the Worker is implemented for Linux only')
+class MapTests(TempCase):
+    def setUp(self):
+        super().setUp()
+        self.fx.prepare()
+        self.fx.mod('ruins', 'test.ruins')
 
     def test_map_is_generated_rendered_and_marked_experimental(self):
         result, out = self.fx.run(['*ruins'], map={'imageScale': 3},

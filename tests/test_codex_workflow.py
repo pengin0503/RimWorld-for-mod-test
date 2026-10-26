@@ -129,5 +129,45 @@ class CodexWorkflowTests(unittest.TestCase):
             self.assertEqual((private / "request.json").read_text(), "original")
 
 
+    def test_validation_strips_cloud_credentials_from_worker(self):
+        import os
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "private"
+            (root / "game-snapshot").mkdir(parents=True)
+            (root / "request.json").write_text("{}", encoding="utf-8")
+            worker = Path(directory) / "worker"
+            worker.mkdir()
+            args = SimpleNamespace(private_root=root, request=None, worker=str(worker), run_id="case001")
+            captured = {}
+
+            def mock_run(*args, **kwargs):
+                captured["secret"] = os.environ.get("AWS_SECRET_ACCESS_KEY")
+                captured["endpoint"] = os.environ.get("R2_ENDPOINT")
+                return {"status": "passed", "reasons": [], "scope": {"notChecked": []}}
+
+            with patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "test-secret",
+                                         "AWS_ACCESS_KEY_ID": "test-id",
+                                         "R2_ENDPOINT": "https://private.example"}, clear=False), \
+                 patch.object(cw.validation_host, "run_validation", side_effect=mock_run):
+                result = cw.validate(args)
+                self.assertEqual(os.environ["AWS_SECRET_ACCESS_KEY"], "test-secret")
+            self.assertEqual(result["status"], "passed")
+            self.assertIsNone(captured["secret"])
+            self.assertIsNone(captured["endpoint"])
+
+    def test_validation_refuses_escaping_run_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "private"
+            (root / "game-snapshot").mkdir(parents=True)
+            (root / "request.json").write_text("{}", encoding="utf-8")
+            worker = Path(directory) / "worker"
+            worker.mkdir()
+            args = SimpleNamespace(private_root=root, request=None, worker=str(worker), run_id="../other")
+            with patch.object(cw.validation_host, "run_validation") as validate:
+                with self.assertRaises(cw.WorkflowError):
+                    cw.validate(args)
+                validate.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

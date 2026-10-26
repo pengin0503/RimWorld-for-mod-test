@@ -27,7 +27,7 @@
 
 ## R2・索引・秘密情報
 
-- バケット rimworld-17：Game-Linux/ が対応する Linux 版、Workshop/<数字ID>/ が MOD。バケット直下の Windows 版と RimWorld by Ludeon Studios/ の個人データを使用しない。
+- バケット rimworld-17：Game-Linux/ が対応する Linux 版、Workshop/<数字ID>/ が MOD。RimWorld by Ludeon Studios/ の個人データを使用しない。バケット直下の Windows 版は、`Version.txt` が Game-Linux/ と同じビルド（現在 1.7.4985 rev1269）である場合に限り、照合用（設定ファイル・ハッシュ）の個別ファイル取得だけに使ってよい（ユーザー許可 2026-10-26）。一括取得や実行には使わない。Windows の実ゲーム確認はユーザーの PC で行う。
 - R2 API は読み取り専用。環境変数の**値を表示・保存・コミットしない**。Codex の継承 AWS_PROFILE は AWS CLI の子プロセスだけ解除。
 - **ゲーム DLL、実行ファイル、Data、アセット、逆コンパイル本文、第三者 MOD 実体、個人設定、セーブ、生ログ、私有パス、MOD索引（zip、mods.json、MOD_INDEX.md）は GitHub の公開リポジトリへコミットしない。**
 - 索引の既定取得元は R2 直下の `rimworld-mod-index.zip`。取得済み ZIP を再利用し、更新が必要なときだけ明示して再取得する。tools/codex_workflow.py search --index-zip <私有zip> <名前> などで正確な ID を確認する。元の Windows folder_path は使わず Workshop ID を使う。

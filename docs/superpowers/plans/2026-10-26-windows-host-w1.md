@@ -85,5 +85,5 @@
 ### Task 5: ユーザーの PC での実ゲーム確認（Remote Control、ユーザーの承認 1 回）
 
 - [ ] PC の Python・.NET SDK・Windows 版 RimWorld の場所を確認（なければ導入の可否をユーザーに聞く）。
-- [ ] Windows 版の実際のファイル構成（`BUILD_FILES['windows-x64']` の `RimWorld.exe`・`hostfxr.dll`・`coreclr.dll`、deps.json の runtimeTarget、runtimeconfig）を、ユーザーの正規版で確かめる（R2 バケット直下の Windows 版は使わない）。
+- [ ] Windows 版の実際のファイル構成（`BUILD_FILES['windows-x64']` の `RimWorld.exe`・`hostfxr.dll`・`coreclr.dll`、deps.json の runtimeTarget、runtimeconfig）を、ユーザーの正規版で確かめる。
 - [ ] `prepare-game` → Worker を `-r win-x64` でビルド → fixture 行列・C fixture・小麦粉 MOD を実行し、Linux の結果と比べた表を研究記録に残す。公式 `RimWorld.exe` の headless 比較が使えるかを確かめ、適格化の可否を判断する。

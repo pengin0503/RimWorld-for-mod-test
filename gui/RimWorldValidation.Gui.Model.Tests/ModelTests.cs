@@ -58,6 +58,7 @@ public class ResultSummaryTests
         Assert.Equal("experimental", summary.Fidelity);
         Assert.Equal(["experimental", "billIngredientMismatch"], summary.Reasons.Select(r => r.Code));
         Assert.Equal(["example.flour"], summary.TargetPackageIds);
+        Assert.Equal(["example.flour"], summary.TargetLabels);
         var bill = Assert.Single(summary.BillChecks);
         Assert.Equal(("VCE_CookBakeSimple", "VCE_Flour", true, false, "mismatch"),
             (bill.Recipe, bill.Thing, bill.ExpectedVisible, bill.ActualVisible, bill.Outcome));
@@ -66,6 +67,7 @@ public class ResultSummaryTests
         Assert.Equal("Could not resolve cross-reference", summary.NewDiagnostics[0].FirstLine);
         Assert.Null(summary.NewDiagnostics[0].KnownNoise);
         Assert.Equal("engine shutdown", summary.NewDiagnostics[1].KnownNoise);
+        Assert.Equal((true, false), (summary.NewDiagnostics[0].Counted, summary.NewDiagnostics[1].Counted));
         Assert.Equal("/r/map.png", summary.MapImage);
         Assert.Equal("/r/map-baseline.png", summary.MapBaselineImage);
         Assert.Equal(["ticks", "other platforms"], summary.NotChecked);
@@ -86,6 +88,21 @@ public class ResultSummaryTests
         Assert.Empty(summary.NotChecked);
         Assert.Null(summary.MapImage);
         Assert.Null(summary.TotalSeconds);
+    }
+
+    [Fact]
+    public void target_without_package_id_is_named_by_its_folder()
+    {
+        using var temp = new TempDir();
+        var summary = ResultSummary.Load(temp.Write("result.json", """
+            {"recordType": "modValidationResult", "status": "passed",
+             "mods": [{"target": true, "sourcePath": "C:\\Mods\\Flour"}],
+             "diagnostics": {"newInTarget": [{"level": "error", "message": "x", "allowedBy": {"match": "x"}},
+                                              {"level": "warning", "message": "y", "supersededBy": "diagnostics.translationErrors"}]}}
+            """));
+        Assert.Equal(["Flour"], summary.TargetLabels);
+        Assert.False(summary.NewDiagnostics[0].Counted);
+        Assert.Equal((false, "diagnostics.translationErrors"), (summary.NewDiagnostics[1].Counted, summary.NewDiagnostics[1].SupersededBy));
     }
 
     [Fact]
@@ -265,7 +282,7 @@ public class RunHistoryTests
         Assert.Equal(["20261026-120000", "20261026-110000", "20261026-100000"], entries.Select(e => e.Id));
         Assert.Equal((false, (string?)null), (entries[0].HasResult, entries[0].Status));
         Assert.Equal((true, "passed"), (entries[1].HasResult, entries[1].Status));
-        Assert.Equal(["Flour"], entries[1].TargetNames);
+        Assert.Equal(["a.b"], entries[1].TargetLabels);
         Assert.False(entries[2].HasResult);
     }
 
@@ -280,9 +297,9 @@ public class RunHistoryTests
         temp.Write("20261026-140000/request.json", "not json");
         var entries = RunHistory.List(temp.Path);
         Assert.Equal((false, false), (entries[0].HasResult, entries[0].Cancelled));
-        Assert.Empty(entries[0].TargetNames);
+        Assert.Empty(entries[0].TargetLabels);
         Assert.Equal((false, true), (entries[1].HasResult, entries[1].Cancelled));
-        Assert.Equal(["Flour"], entries[1].TargetNames);
+        Assert.Equal(["Flour"], entries[1].TargetLabels);
     }
 
     [Fact]

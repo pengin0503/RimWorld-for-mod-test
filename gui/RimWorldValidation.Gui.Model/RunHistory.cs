@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 namespace RimWorldValidation.Gui.Model;
 
 public sealed record HistoryEntry(string Id, string Dir, bool HasResult, string? Status, string? StartedAt,
-    IReadOnlyList<string> TargetNames, bool Cancelled = false);
+    IReadOnlyList<string> TargetLabels, bool Cancelled = false);
 
 /// <summary>
 /// The results folder holds one folder per GUI run: request.json and, once the
@@ -47,7 +47,7 @@ public static class RunHistory
                 }
             }
             entries.Add(new HistoryEntry(id, dir, summary != null, summary?.Status, summary?.StartedAt,
-                summary?.TargetNames ?? RequestTargetNames(Path.Combine(dir, RequestFile)),
+                summary?.TargetLabels ?? RequestTargetNames(Path.Combine(dir, RequestFile)),
                 File.Exists(Path.Combine(dir, CancelledFile))));
         }
         return entries.OrderByDescending(e => e.Id, StringComparer.Ordinal).ToList();

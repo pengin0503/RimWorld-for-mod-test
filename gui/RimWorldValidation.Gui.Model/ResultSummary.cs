@@ -5,8 +5,12 @@ namespace RimWorldValidation.Gui.Model;
 
 public sealed record Reason(string Code, string Detail);
 
+/// <summary>A diagnostic new in the target run. The Controller leaves the annotated ones out of the verdict.</summary>
 public sealed record Diagnostic(string Level, string Category, string Stage, string FirstLine, string Text,
-    string? KnownNoise, string? AllowedBy);
+    string? KnownNoise, string? AllowedBy, string? SupersededBy = null)
+{
+    public bool Counted => KnownNoise == null && AllowedBy == null && SupersededBy == null;
+}
 
 public sealed record BillCheck(string Recipe, string Thing, bool? ExpectedVisible, bool? ActualVisible,
     bool? ExpectedAllowed, bool? ActualAllowed, string Outcome, IReadOnlyList<string> Reasons);
@@ -26,6 +30,10 @@ public sealed class ResultSummary
     public required IReadOnlyList<Reason> Reasons { get; init; }
     public required IReadOnlyList<string> TargetPackageIds { get; init; }
     public required IReadOnlyList<string> TargetNames { get; init; }
+
+    /// <summary>Each target by its packageId, or by its folder when the result has none.</summary>
+    public IReadOnlyList<string> TargetLabels =>
+        TargetPackageIds.Zip(TargetNames, (id, name) => string.IsNullOrEmpty(id) ? name : id).ToList();
     public required IReadOnlyList<Diagnostic> NewDiagnostics { get; init; }
     public required IReadOnlyList<BillCheck> BillChecks { get; init; }
     public string? MapImage { get; init; }
@@ -87,7 +95,8 @@ public sealed class ResultSummary
         string firstLine = text.Split('\n', 2)[0].TrimEnd('\r');
         string? noise = e["knownNoise"] is JsonObject n ? Str(n["reason"]) ?? Str(n["id"]) : null;
         string? allowed = e["allowedBy"] is JsonObject a ? Str(a["reason"]) ?? Str(a["match"]) : null;
-        return new Diagnostic(Str(e["level"]) ?? "", Str(e["category"]) ?? "", Str(e["stage"]) ?? "", firstLine, text, noise, allowed);
+        return new Diagnostic(Str(e["level"]) ?? "", Str(e["category"]) ?? "", Str(e["stage"]) ?? "", firstLine, text, noise, allowed,
+            Str(e["supersededBy"]));
     }
 
     private static BillCheck ReadBill(JsonObject c)

@@ -10,7 +10,7 @@ namespace RimWorldValidation.Gui;
 /// ready, so screens can be checked without a person at the window (cloud
 /// screenshots). Each step is one object: {"tab": "mods"}, {"apply": RunSettings
 /// as JSON}, {"importModsConfig": true}, {"selectMod": packageId},
-/// {"run": true} (starts a validation), {"waitRun": true} (until it ends), {"waitSeconds": n} (time for input from outside, e.g. xdotool), {"screenshot": path}
+/// {"openResult": run folder}, {"run": true} (starts a validation), {"waitRun": true} (until it ends), {"waitSeconds": n} (time for input from outside, e.g. xdotool), {"screenshot": path}
 /// or {"quit": true}. A step it does not know, or one that
 /// cannot be done, ends the GUI with exit code 5.
 /// </summary>
@@ -84,6 +84,11 @@ internal sealed class ScriptRunner(IReadOnlyList<JsonObject> steps)
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
                 ScreenCapture.CaptureScreenshot(Path.GetFullPath(path));
                 return CaptureFrames;
+            case "openResult":
+                string runDir = value?.GetValue<string>() ?? throw new InvalidOperationException("openResult needs a run folder");
+                GuiState.OpenResult(runDir);
+                MainWindow.Instance?.Select("results");
+                return SettleFrames;
             case "run":
                 if (!RunController.Start(GuiState.CurrentSettings()))
                 {

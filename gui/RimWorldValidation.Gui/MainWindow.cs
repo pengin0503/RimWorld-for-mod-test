@@ -43,8 +43,8 @@ internal sealed class MainWindow : Window
         [
             new ModsTab(),
             new SettingsTab(),
-            new PendingTab("results", "結果"),
-            new PendingTab("history", "履歴"),
+            new ResultsTab(),
+            new HistoryTab(),
         ];
         Selected = _tabs[0];
         _records = _tabs.Select(tab => new TabRecord(tab.Label, () => Selected = tab, () => Selected == tab)).ToList();
@@ -87,18 +87,5 @@ internal sealed class MainWindow : Window
         Widgets.DrawMenuSection(body);
         TabDrawer.DrawTabs(body, _records);
         Selected.Draw(body.ContractedBy(16f));
-    }
-}
-
-/// <summary>Placeholder until the tab is implemented.</summary>
-internal sealed class PendingTab(string id, string label) : IGuiTab
-{
-    public string Id => id;
-
-    public string Label => label;
-
-    public void Draw(Rect rect)
-    {
-        Widgets.Label(rect, "準備中です。");
     }
 }

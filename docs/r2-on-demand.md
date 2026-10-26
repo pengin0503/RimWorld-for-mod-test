@@ -10,7 +10,7 @@
 | `Workshop/<数字ID>/` | Steam Workshop の MOD |
 | バケット直下 | 誤ってアップロードされた Windows 版（このツールの取得対象外） |
 
-既定バケット名は `rimworld-17`。2026-10-26 に Codex Cloud から `Game-Linux/Version.txt` の HEAD/GET が成功したとユーザーが報告。新しい統合CLIでの実MOD検証は未実施。正確なキーは読取権限のある環境で確認する。
+既定バケット名は `rimworld-17`。2026-10-26 に Codex Cloud から `Game-Linux/Version.txt` の HEAD/GET が成功したとユーザーが報告。同日のコミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified` となったこともユーザー報告で確認。今回の修正後の実R2取得・実ゲーム処理は未再実行。正確なキーは読取権限のある環境で確認する。
 
 ## 認証
 

@@ -10,8 +10,8 @@ from zipfile import ZipFile
 from tools import codex_workflow as cw
 
 
-def sample_index(path):
-    doc = {"schema_version": 1, "mods": [
+def sample_index(path, schema_version=1):
+    doc = {"schema_version": schema_version, "mods": [
         {"workshop_id": "2009463077", "package_id": "brrainz.harmony",
          "name": "Harmony", "supported_versions": ["1.7"]},
         {"workshop_id": "1234567890", "package_id": "author.example",
@@ -23,6 +23,23 @@ def sample_index(path):
 
 
 class CodexWorkflowTests(unittest.TestCase):
+    def test_string_schema_supports_lookup_and_exact_resolution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "index.zip"
+            sample_index(archive, schema_version="1")
+            index = cw.load_index(archive)
+            self.assertEqual(cw.lookup(index, "harm")["mods"][0]["packageId"], "brrainz.harmony")
+            self.assertEqual(cw.resolve(index, "brrainz.harmony")["workshopId"], "2009463077")
+
+    def test_index_rejects_unsupported_schema_types_and_versions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "index.zip"
+            for version in (True, False, 1.0, None, "01", "2", 2, [], {}):
+                with self.subTest(version=version):
+                    sample_index(archive, schema_version=version)
+                    with self.assertRaises(cw.WorkflowError):
+                        cw.load_index(archive)
+
     def test_index_archive_load_and_exact_id(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "index.zip"
@@ -108,7 +125,7 @@ class CodexWorkflowTests(unittest.TestCase):
             checkout = sandbox / "repository"
             private = sandbox / "private-assets"
             with patch.object(cw, "__file__", str(checkout / "tools" / "codex_workflow.py")):
-                self.assertEqual(cw._safe_private(private), private)
+                self.assertEqual(cw._safe_private(private), private.resolve())
                 self.assertTrue(private.is_dir())
 
     def test_index_selection_checks_duplicates_before_network(self):
@@ -184,7 +201,7 @@ class CodexWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             archive = root / "private-index.zip"
-            sample_index(archive)
+            sample_index(archive, schema_version="1")
             private = root / "private"
             content = b'<ModMetaData><name>Example</name><packageId>author.example</packageId></ModMetaData>'
 
@@ -219,10 +236,13 @@ class CodexWorkflowTests(unittest.TestCase):
 
             class FakeR2:
                 def list_prefix(self, prefix):
-                    return [{"key": prefix + "About/About.xml", "size": 80}]
+                    return [{"key": prefix + "About/About.xml", "size": 80},
+                            {"key": prefix + "1.7/Assemblies/Mod.dll", "size": 100}]
 
                 def get(self, key, dest, size, *, refresh=False):
                     dest.parent.mkdir(parents=True, exist_ok=True)
+                    if not key.endswith("About/About.xml"):
+                        raise AssertionError("payload downloaded before package ID was verified")
                     dest.write_text("<ModMetaData><packageId>evil.other</packageId></ModMetaData>")
                     return "downloaded"
 
@@ -263,6 +283,14 @@ class CodexWorkflowTests(unittest.TestCase):
         self.assertTrue(cw.mod_validation_asset(
             "Workshop/123/Languages/Japanese (日本語)/Keyed/a.xml", language="Japanese"))
 
+    def test_non_english_scope_keeps_english_fallback(self):
+        for folder in ("English", "Japanese (日本語)"):
+            with self.subTest(folder=folder):
+                self.assertTrue(cw.mod_validation_asset(
+                    f"Workshop/123/1.7/Languages/{folder}/Keyed/a.xml", language="Japanese"))
+        self.assertFalse(cw.mod_validation_asset(
+            "Workshop/123/Languages/German/Keyed/a.xml", language="Japanese"))
+
     def test_scoped_mod_fetch_does_not_download_textures_or_old_versions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -296,6 +324,9 @@ class CodexWorkflowTests(unittest.TestCase):
                 result = cw.fetch_mods(args)
             self.assertEqual(result["fetched"][0]["r2"]["selected"], 2)
             self.assertEqual(result["fetched"][0]["r2"]["skipped"], 2)
+            self.assertEqual(result["fetched"][0]["r2"]["downloaded"], 2)
+            self.assertEqual(pulled, ["Workshop/1234567890/About/About.xml",
+                                      "Workshop/1234567890/1.7/Assemblies/New.dll"])
             self.assertFalse(any("/Textures/" in k or "/1.5/" in k for k in pulled))
 
 

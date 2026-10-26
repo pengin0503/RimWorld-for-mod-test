@@ -62,7 +62,10 @@ def load_index(archive: Path) -> dict:
             data = json.loads(z.read(member).decode("utf-8"))
     except (OSError, BadZipFile, ValueError, UnicodeError, KeyError) as error:
         raise WorkflowError("cannot load private MOD index ZIP") from error
-    if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("mods"), list):
+    if not isinstance(data, dict) or not isinstance(data.get("mods"), list):
+        raise WorkflowError("unsupported MOD index schema")
+    schema = data.get("schema_version")
+    if not ((type(schema) is int and schema == 1) or (type(schema) is str and schema == "1")):
         raise WorkflowError("unsupported MOD index schema")
     return data
 
@@ -115,13 +118,25 @@ def _fetch(r2: r2_assets.R2, prefix: str, dest: Path, *, runtime=False,
         items = [item for item in items if game_runtime_asset(item["key"])]
     if include is not None:
         items = [item for item in items if include(item["key"])]
+    counts = _selection_counts(listed, items)
+    counts.update(_download(r2, prefix, dest, items, refresh=refresh))
+    return counts
+
+
+def _selection_counts(listed: list[dict], items: list[dict]) -> dict:
     if not items:
         raise WorkflowError("requested R2 prefix has no matching files")
     size = sum(item["size"] for item in items)
     if len(items) > r2_assets.MAX_OBJECTS or size > r2_assets.MAX_BYTES:
         raise WorkflowError("R2 selection exceeds safety caps; narrow the request")
-    counts = {"selected": len(items), "skipped": len(listed) - len(items),
-              "listedBytes": size, "downloaded": 0, "cached": 0}
+    return {"selected": len(items), "skipped": len(listed) - len(items),
+            "listedBytes": size, "downloaded": 0, "cached": 0}
+
+
+def _download(r2: r2_assets.R2, prefix: str, dest: Path, items: list[dict], *, refresh=False) -> dict:
+    counts = {"downloaded": 0, "cached": 0}
+    if not items:
+        return counts
     # AWS CLI get-object is one subprocess per object; bounded parallelism avoids
     # a multi-hour sequential download while keeping R2 requests scoped.
     with ThreadPoolExecutor(max_workers=min(4, len(items))) as pool:
@@ -181,8 +196,8 @@ def mod_validation_asset(key: str, *, version: str = "1.7", language: str = "Eng
         return name.endswith(".dll")
     if top == "languages":
         return (len(parts) >= 3 and
-                (parts[1].casefold() == language.casefold() or
-                 parts[1].casefold().startswith(language.casefold() + " (")) and
+                any(parts[1].casefold() == lang or parts[1].casefold().startswith(lang + " (")
+                    for lang in {"english", language.casefold()}) and
                 name.endswith((".xml", ".txt")))
     return False
 
@@ -232,9 +247,16 @@ def fetch_mods(args) -> dict:
     r2 = r2_client(args.aws)
     for mod in selected:
         destination = root / "mods" / mod["workshopId"]
-        include = None if args.scope == "all" else (lambda k: mod_validation_asset(k, language=args.language))
-        summary = _fetch(r2, f"Workshop/{mod['workshopId']}/", destination,
-                         include=include, refresh=args.refresh)
+        prefix = f"Workshop/{mod['workshopId']}/"
+        listed = r2.list_prefix(prefix)
+        items = [item for item in listed if args.scope == "all" or
+                 mod_validation_asset(item["key"], language=args.language)]
+        summary = _selection_counts(listed, items)
+        metadata = [item for item in items if item["key"].startswith(prefix + "About/") and
+                    item["key"].casefold().endswith((".xml", ".txt"))]
+        if not any(item["key"] == prefix + "About/About.xml" for item in metadata):
+            raise WorkflowError("selected MOD is missing About/About.xml")
+        summary.update(_download(r2, prefix, destination, metadata, refresh=args.refresh))
         about = destination / "About" / "About.xml"
         if not about.is_file():
             raise WorkflowError("selected MOD is missing About/About.xml")
@@ -247,6 +269,10 @@ def fetch_mods(args) -> dict:
         package_id = (meta.findtext("packageId") or "").strip()
         if package_id.casefold() != mod["packageId"].casefold():
             raise WorkflowError("private index and downloaded MOD disagree on packageId")
+        metadata_keys = {item["key"] for item in metadata}
+        payload = [item for item in items if item["key"] not in metadata_keys]
+        for outcome, count in _download(r2, prefix, destination, payload, refresh=args.refresh).items():
+            summary[outcome] += count
         fetched.append({"workshopId": mod["workshopId"], "name": mod["name"],
                         "r2": summary, "scope": args.scope})
     mods = [{"path": str((root / "mods" / m["workshopId"]).absolute()),

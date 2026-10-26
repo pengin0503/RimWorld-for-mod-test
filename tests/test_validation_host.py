@@ -785,14 +785,16 @@ class RunTests(TempCase):
 
     def test_memory_limit_stops_the_worker(self):
         self.fx.mod('memory')
-        result, _ = self.fx.run(['*memory'], limits={'memoryMiB': 512})
+        result, out = self.fx.run(['*memory'], limits={'memoryMiB': 512})
         process = result['process']['target']
         self.assertEqual(process['killedFor'], 'memoryLimit')
         self.assertEqual(result['status'], 'incomplete')
         # Windows: a Job Object refuses the allocation (hard limit); Linux: the Controller polls and kills.
         self.assertEqual(process['enforcement']['memoryHard'], WINDOWS)
         self.assertEqual(process['enforcement']['memoryMeasure'], 'jobCommit' if WINDOWS else 'groupRss')
-        self.assertLessEqual(process['peakRssBytes'], 512 * 1024 * 1024 if WINDOWS else 10 ** 12)
+        if WINDOWS:
+            # Hard limit: the 700 MB allocation itself was refused inside the fake Worker.
+            self.assertIn('MemoryError', (out / 'target' / 'stderr.log').read_text(errors='replace'))
 
     def test_baseline_cache_is_reused_only_for_identical_inputs(self):
         self.fx.mod('dep')

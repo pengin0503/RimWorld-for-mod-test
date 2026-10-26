@@ -8,7 +8,7 @@ Windows x64 でも `run` は動きます（W1。描画なし）。ただし Wind
 
 - スナップショットは、そのスナップショットと同じ OS 用のゲームでしか使えません。別 OS 用なら `platformMismatch` で `blocked`。
 - 実行ディレクトリはシンボリックリンクではなく、ファイルのハードリンク（別ドライブなどで作れなければ複製）とフォルダのジャンクションで作ります。管理者権限や開発者モードは要りません。使った方式の数は `process.<run>.linkModes` に出ます。
-- Worker は Job Object の中で動きます。メモリ上限はジョブ全体の確保量に対するハードな上限（`memoryHard=true`、`memoryMeasure=jobCommit`）で、時間切れ・Ctrl+C・子プロセスの残存はジョブごと止めます。
+- Worker は Job Object の中で動きます。メモリ上限はジョブ全体の確保量に対するハードな上限（`memoryHard=true`、`memoryMeasure=jobCommit`）で、上限を超える確保はその場で失敗します。時間切れ・Ctrl+C・子プロセスの残存はジョブごと止めます。上限で止まったときの `peakRssBytes` は、拒否された確保要求も数えるので上限より大きく出ることがあります。
 - Worker に渡す環境変数は `PATH`・`SystemRoot`・`SystemDrive`・`windir` だけを引き継ぎ、`USERPROFILE`・`APPDATA`・`LOCALAPPDATA`・`TEMP`・`TMP` は実行ディレクトリの中を指します。
 
 ## 1. 準備（初回のみ）

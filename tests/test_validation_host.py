@@ -22,6 +22,37 @@ import zipfile
 from tools import validation_host as vh
 
 LINUX = sys.platform.startswith('linux')
+WINDOWS = sys.platform == 'win32'
+HOST_PLATFORM = 'windows-x64' if WINDOWS else 'linux-x64'
+OTHER_PLATFORM = 'linux-x64' if WINDOWS else 'windows-x64'
+
+
+def pid_alive(pid):
+    """Whether a process still runs (a zombie waiting for its parent counts as gone)."""
+    if WINDOWS:
+        import ctypes
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        handle = kernel32.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE | QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            return kernel32.WaitForSingleObject(ctypes.c_void_p(handle), 0) == 0x102  # WAIT_TIMEOUT
+        finally:
+            kernel32.CloseHandle(ctypes.c_void_p(handle))
+    try:
+        return 'Z' not in Path(f'/proc/{pid}/stat').read_text().split(')')[1][:3]
+    except FileNotFoundError:
+        return False
+
+
+def wait_until_gone(pid, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return True
+        time.sleep(0.1)
+    return False
 
 FAKE_WORKER = textwrap.dedent('''\
     #!/usr/bin/env python3
@@ -150,11 +181,11 @@ class Fixture:
         self.adapters = {'fake-9.9.1': {
             'version': '9.9.1 rev1',
             'sha256': {'Assembly-CSharp.dll': sha(b'fake Assembly-CSharp.dll')},
-            'qualified': {('linux-x64', 'waylith'): {'levels': ('A', 'B'), 'runtimeSha256': {}, 'evidence': 'test'}},
+            'qualified': {(platform, 'waylith'): {'levels': ('A', 'B'), 'runtimeSha256': {}, 'evidence': 'test'}},
         }}
         self.worker = root / 'worker'
         self.worker.mkdir()
-        script = self.worker / vh.WORKER_NAME
+        script = self.worker / layout['workerExe']  # Windows tests run this script with Python (TempCase)
         script.write_text(FAKE_WORKER, encoding='utf-8')
         script.chmod(script.stat().st_mode | stat.S_IXUSR)
         (self.worker / f'{vh.WORKER_NAME}.dll').write_bytes(b'fake worker assembly')
@@ -189,7 +220,8 @@ class Fixture:
         path.write_text(json.dumps(body, ensure_ascii=False), encoding='utf-8')
         return path
 
-    def run(self, mods, *, platform='linux-x64', **kwargs):
+    def run(self, mods, *, platform=None, **kwargs):
+        platform = platform or self.platform
         options = {k: kwargs.pop(k) for k in ('runtime', 'baseline_cache', 'allow_unknown_build', 'keep_run_dirs')
                    if k in kwargs}
         out = self.root / f'out-{self.count + 1}'
@@ -199,12 +231,21 @@ class Fixture:
 
 
 class TempCase(unittest.TestCase):
+    fixture_platform = 'linux-x64'
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
         self.addCleanup(self.make_writable)
-        self.fx = Fixture(self.root)
+        self.fx = Fixture(self.root, self.fixture_platform)
+        if WINDOWS:
+            # The fake Worker is a Python script: Windows cannot execute it by its shebang.
+            patcher = mock.patch.object(vh, 'worker_command', lambda host, request: [
+                sys.executable, str(host / vh.BUILD_FILES[self.fixture_platform]['workerExe']),
+                '--worker-request', str(request)])
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def make_writable(self):
         for current, dirs, files in os.walk(self.root):
@@ -543,8 +584,10 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual((status, [r['code'] for r in reasons]), ('incomplete', ['translationErrorsError']))
 
 
-@unittest.skipUnless(LINUX, 'running the Worker is implemented for Linux only')
+@unittest.skipUnless(LINUX or WINDOWS, 'running the Worker is implemented for Linux and Windows only')
 class RunTests(TempCase):
+    fixture_platform = HOST_PLATFORM
+
     def setUp(self):
         super().setUp()
         self.fx.prepare()
@@ -665,7 +708,7 @@ class RunTests(TempCase):
         self.fx.mod('target')
         out = self.root / 'out-local'
         result = vh.run_validation(snapshot, self.fx.request(['*target']), out, self.fx.worker, adapters=self.fx.adapters,
-                                   platform='linux-x64', keep_run_dirs=True)
+                                   platform=HOST_PLATFORM, keep_run_dirs=True)
         self.assertEqual(result['status'], 'passed', result.get('reasons'))
         self.assertEqual(sorted(os.listdir(out / 'target' / 'host' / 'Mods')), ['target'])
 
@@ -713,17 +756,12 @@ class RunTests(TempCase):
         self.assertEqual(result['process']['target']['killedFor'], 'timeout')
         self.assertIn('timeout', [r['code'] for r in result['reasons']])
         child = int((out / 'target' / 'child.pid').read_text(encoding='utf-8'))
-        for _ in range(50):
-            if not Path(f'/proc/{child}').exists() or 'Z' in Path(f'/proc/{child}/stat').read_text().split(')')[1][:3]:
-                break
-            time.sleep(0.1)
-        else:
-            self.fail('a descendant of the Worker survived the timeout kill')
+        self.assertTrue(wait_until_gone(child), 'a descendant of the Worker survived the timeout kill')
 
     def test_interrupted_supervision_kills_the_worker(self):
         run_dir = self.root / 'interrupted'
         (run_dir / 'host').mkdir(parents=True)
-        script = run_dir / 'host' / vh.WORKER_NAME
+        script = run_dir / 'host' / vh.BUILD_FILES[HOST_PLATFORM]['workerExe']
         script.write_text(f'#!{sys.executable}\nimport os, time\nopen({str(run_dir / "pid")!r}, "w").write(str(os.getpid()))\n'
                           'time.sleep(600)\n', encoding='utf-8')
         script.chmod(0o755)
@@ -737,7 +775,7 @@ class RunTests(TempCase):
         with mock.patch.object(vh.time, 'sleep', interrupt), self.assertRaises(KeyboardInterrupt):
             vh.supervise(run_dir, dict(vh.DEFAULT_LIMITS), dict(os.environ), poll=0.05)
         pid = int((run_dir / 'pid').read_text(encoding='utf-8'))
-        self.assertFalse(Path(f'/proc/{pid}').exists() and 'Z' not in Path(f'/proc/{pid}/stat').read_text().split(')')[1][:3])
+        self.assertTrue(wait_until_gone(pid), 'the Worker survived an interrupted supervision')
 
     def test_log_limit_stops_the_worker(self):
         self.fx.mod('noisy')
@@ -748,8 +786,13 @@ class RunTests(TempCase):
     def test_memory_limit_stops_the_worker(self):
         self.fx.mod('memory')
         result, _ = self.fx.run(['*memory'], limits={'memoryMiB': 512})
-        self.assertEqual(result['process']['target']['killedFor'], 'memoryLimit')
-        self.assertFalse(result['process']['target']['enforcement']['memoryHard'])
+        process = result['process']['target']
+        self.assertEqual(process['killedFor'], 'memoryLimit')
+        self.assertEqual(result['status'], 'incomplete')
+        # Windows: a Job Object refuses the allocation (hard limit); Linux: the Controller polls and kills.
+        self.assertEqual(process['enforcement']['memoryHard'], WINDOWS)
+        self.assertEqual(process['enforcement']['memoryMeasure'], 'jobCommit' if WINDOWS else 'groupRss')
+        self.assertLessEqual(process['peakRssBytes'], 512 * 1024 * 1024 if WINDOWS else 10 ** 12)
 
     def test_baseline_cache_is_reused_only_for_identical_inputs(self):
         self.fx.mod('dep')
@@ -768,7 +811,7 @@ class RunTests(TempCase):
         other = self.root / 'snapshot-other'
         vh.prepare_game(self.fx.game, other, log=lambda *_: None)
         fourth = vh.run_validation(other, self.fx.request(['dep', '*target']), self.root / 'out-other', self.fx.worker,
-                                   adapters=self.fx.adapters, platform='linux-x64', baseline_cache=cache)
+                                   adapters=self.fx.adapters, platform=HOST_PLATFORM, baseline_cache=cache)
         self.assertFalse(fourth['diagnostics']['baselineCached'])
 
     def test_blocked_before_start(self):
@@ -776,7 +819,7 @@ class RunTests(TempCase):
         self.fx.mod('official', 'ludeon.rimworld.fake')
         cases = [
             ('platformUnsupported', ['*target'], {'platform': 'osx-arm64'}),
-            ('platformMismatch', ['*target'], {'platform': 'windows-x64'}),
+            ('platformMismatch', ['*target'], {'platform': OTHER_PLATFORM}),
             ('invalidRequest', ['*target'], {'levels': ['A', 'B', 'C'], 'tests': ['t1']}),
             ('officialContentMissing', ['*target'], {'official': ['Core', 'Biotech']}),
             ('languageMissing', ['*target'], {'language': 'Klingon'}),
@@ -791,17 +834,19 @@ class RunTests(TempCase):
                 self.assertEqual(result['reasons'][0]['code'], code)
                 self.assertEqual(vh.EXIT_CODES[result['status']], 2)
 
-    def test_windows_snapshot_is_not_run_on_linux(self):
-        (self.root / 'win').mkdir()
-        windows = Fixture(self.root / 'win', 'windows-x64')
-        windows.prepare()
-        windows.mod('target')
-        result = vh.run_validation(windows.snapshot, windows.request(['*target']), self.root / 'out-win', windows.worker,
-                                   adapters=windows.adapters, platform='linux-x64')
+    def test_other_platform_snapshot_is_not_run(self):
+        (self.root / 'other').mkdir()
+        other = Fixture(self.root / 'other', OTHER_PLATFORM)
+        other.prepare()
+        other.mod('target')
+        result = vh.run_validation(other.snapshot, other.request(['*target']), self.root / 'out-other', other.worker,
+                                   adapters=other.adapters, platform=HOST_PLATFORM)
         self.assertEqual((result['status'], result['reasons'][0]['code']), ('blocked', 'platformMismatch'))
 
     def test_controller_error_is_reported_as_incomplete(self):
         self.fx.mod('target')
+        if WINDOWS:
+            self.skipTest('Windows has no execute permission bit')
         (self.fx.worker / vh.WORKER_NAME).chmod(0o644)
         if os.geteuid() == 0 and os.access(self.fx.worker / vh.WORKER_NAME, os.X_OK):
             self.skipTest('cannot make the fake Worker unexecutable')
@@ -828,14 +873,14 @@ class RunTests(TempCase):
         out.mkdir()
         (out / 'keep.txt').write_text('x', encoding='utf-8')
         result = vh.run_validation(self.fx.snapshot, self.fx.request(['*target']), out, self.fx.worker,
-                                   adapters=self.fx.adapters, platform='linux-x64')
+                                   adapters=self.fx.adapters, platform=HOST_PLATFORM)
         self.assertEqual(result['reasons'][0]['code'], 'outputNotEmpty')
         self.assertEqual((out / 'keep.txt').read_text(encoding='utf-8'), 'x')
         (out / 'inputs').mkdir()
         (out / 'inputs' / 'evidence.txt').write_text('y', encoding='utf-8')
         (out / 'result.json').write_text('{"old": true}', encoding='utf-8')
         result = vh.run_validation(self.fx.snapshot, self.fx.request(['*target']), out, self.fx.worker,
-                                   adapters=self.fx.adapters, platform='linux-x64')
+                                   adapters=self.fx.adapters, platform=HOST_PLATFORM)
         self.assertEqual(result['reasons'][0]['code'], 'outputNotEmpty')
         self.assertEqual((out / 'inputs' / 'evidence.txt').read_text(encoding='utf-8'), 'y')
         self.assertEqual((out / 'result.json').read_text(encoding='utf-8'), '{"old": true}')
@@ -864,8 +909,10 @@ class MapRequestTests(TempCase):
                 vh.validate_request(dict(base, **fields), self.root)
 
 
-@unittest.skipUnless(LINUX, 'running the Worker is implemented for Linux only')
+@unittest.skipUnless(LINUX or WINDOWS, 'running the Worker is implemented for Linux and Windows only')
 class MapTests(TempCase):
+    fixture_platform = HOST_PLATFORM
+
     def setUp(self):
         super().setUp()
         self.fx.prepare()
@@ -896,7 +943,7 @@ class MapTests(TempCase):
 
     def test_qualified_map_can_pass_and_mismatch_fails(self):
         for adapter in self.fx.adapters.values():
-            adapter['qualified'][('linux-x64', 'waylith')]['features'] = ('map',)
+            adapter['qualified'][(HOST_PLATFORM, 'waylith')]['features'] = ('map',)
         result, _ = self.fx.run(['*ruins'], map={})
         self.assertEqual(result['status'], 'passed')
         self.assertEqual(result['map']['fidelity'], 'qualified')
@@ -936,7 +983,7 @@ class MapTests(TempCase):
 
     def test_cached_baseline_keeps_its_map_observation(self):
         for adapter in self.fx.adapters.values():
-            adapter['qualified'][('linux-x64', 'waylith')]['features'] = ('map',)
+            adapter['qualified'][(HOST_PLATFORM, 'waylith')]['features'] = ('map',)
         cache = self.root / 'cache'
         first, out = self.fx.run(['*ruins'], map={}, baseline_cache=cache)
         self.assertEqual(first['status'], 'passed')

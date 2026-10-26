@@ -821,18 +821,49 @@ def _dir_bytes(paths):
     return total
 
 
+def worker_command(host, request_path):
+    """The Worker's command line: the apphost built for this platform."""
+    name = WORKER_NAME + ('.exe' if os.name == 'nt' else '')
+    return [str(host / name), '--worker-request', str(request_path)]
+
+
+def _win_job():
+    try:
+        import win_job
+    except ImportError:  # imported as tools.validation_host
+        from tools import win_job
+    return win_job
+
+
 def supervise(run_dir, limits, environment, *, poll=0.2):
-    """Start the Worker in its own process group and enforce time, memory and log limits."""
+    """Start the Worker in its own process group (Windows: Job Object) and enforce time, memory and log limits."""
     host = run_dir / 'host'
-    command = [str(host / WORKER_NAME), '--worker-request', str(run_dir / 'worker-request.json')]
+    command = worker_command(host, run_dir / 'worker-request.json')
     memory_limit = limits['memoryMiB'] * 1024 * 1024
     log_limit = limits['logMiB'] * 1024 * 1024
     log_paths = [run_dir / 'stdout.log', run_dir / 'stderr.log', run_dir / 'events.jsonl', run_dir / 'userdata' / 'logs']
+    windows = os.name == 'nt'
+    job = _win_job().Job(memory_limit) if windows else None
     started = time.monotonic()
-    with open(run_dir / 'stdout.log', 'wb') as out, open(run_dir / 'stderr.log', 'wb') as err:
-        process = subprocess.Popen(command, cwd=host, env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                   start_new_session=True)
+    try:
+        with open(run_dir / 'stdout.log', 'wb') as out, open(run_dir / 'stderr.log', 'wb') as err:
+            if windows:
+                process = job.start(command, cwd=host, env=environment, stdout=out, stderr=err)
+            else:
+                process = subprocess.Popen(command, cwd=host, env=environment, stdin=subprocess.DEVNULL, stdout=out,
+                                           stderr=err, start_new_session=True)
+    except BaseException:
+        if job:
+            job.close()
+        raise
     pgid = process.pid
+
+    def kill_all():
+        if windows:
+            job.terminate()
+        else:
+            os.killpg(pgid, signal.SIGKILL)
+
     peak, killed, return_code, stray = 0, None, None, False
     try:
         while True:
@@ -840,16 +871,22 @@ def supervise(run_dir, limits, environment, *, poll=0.2):
             if return_code is not None:
                 break
             elapsed = time.monotonic() - started
-            rss = _process_group_rss(pgid)
-            peak = max(peak, rss)
+            if windows:
+                # The job refuses commits over the limit; the Worker then fails or exits by itself.
+                over_memory = 'memoryLimit' in job.poll_messages()
+                peak = job.peak_memory()
+            else:
+                rss = _process_group_rss(pgid)
+                peak = max(peak, rss)
+                over_memory = rss > memory_limit
             if elapsed > limits['timeoutSeconds']:
                 killed = 'timeout'
-            elif rss > memory_limit:
+            elif over_memory:
                 killed = 'memoryLimit'
             elif _dir_bytes(log_paths) > log_limit:
                 killed = 'logLimit'
             if killed:
-                os.killpg(pgid, signal.SIGKILL)
+                kill_all()
                 return_code = process.wait()
                 break
             time.sleep(poll)
@@ -857,30 +894,55 @@ def supervise(run_dir, limits, environment, *, poll=0.2):
         # Also on Ctrl+C or any error: the Worker runs in its own session and would not see
         # the terminal's interrupt, so it must never outlive the Controller's supervision.
         if process.poll() is None:
-            os.killpg(pgid, signal.SIGKILL)
+            kill_all()
             process.wait()
-        # The Worker exits with Environment.Exit; anything left in its group is a stray descendant.
-        stray = _group_alive(pgid)
-        if stray:
-            os.killpg(pgid, signal.SIGKILL)
+        if windows:
+            # A Worker that hit the job's memory limit may have exited on its own before the next poll.
+            if killed is None and 'memoryLimit' in job.poll_messages():
+                killed = 'memoryLimit'
+            stray = job.active_processes() > 0
+            if stray:
+                job.terminate()
+            peak = max(peak, job.peak_memory())
+            job.close()
+        else:
+            # The Worker exits with Environment.Exit; anything left in its group is a stray descendant.
+            stray = _group_alive(pgid)
+            if stray:
+                os.killpg(pgid, signal.SIGKILL)
+    if windows:
+        enforcement = {'timeout': 'TerminateJobObject', 'memory': 'Job Object JOB_MEMORY (committed bytes) + DOTNET_GCHeapHardLimit',
+                       'memoryHard': True, 'memoryMeasure': 'jobCommit'}
+    else:
+        enforcement = {'timeout': 'SIGKILL to process group', 'memory': 'polled group RSS + DOTNET_GCHeapHardLimit',
+                       'memoryHard': False, 'memoryMeasure': 'groupRss'}
     return {
         'command': [Path(command[0]).name, *command[1:2]], 'exitCode': return_code, 'killedFor': killed,
         'strayProcessesKilled': stray, 'seconds': round(time.monotonic() - started, 3), 'peakRssBytes': peak,
         'logBytes': _dir_bytes(log_paths),
-        'enforcement': {'timeout': 'SIGKILL to process group', 'memory': 'polled group RSS + DOTNET_GCHeapHardLimit',
-                        'memoryHard': False, 'logs': 'polled size', 'pollSeconds': poll},
+        'enforcement': {**enforcement, 'logs': 'polled size', 'pollSeconds': poll},
     }
 
 
 def worker_environment(run_dir, limits, runtime):
-    env = {
-        'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
-        'HOME': str(run_dir / 'home'), 'TMPDIR': str(run_dir / 'tmp'),
-        'XDG_CONFIG_HOME': str(run_dir / 'home' / '.config'), 'XDG_DATA_HOME': str(run_dir / 'home' / '.local' / 'share'),
-        'XDG_CACHE_HOME': str(run_dir / 'home' / '.cache'), 'LANG': 'C.UTF-8',
-        'DOTNET_CLI_TELEMETRY_OPTOUT': '1', 'DOTNET_NOLOGO': '1',
-        'DOTNET_GCHeapHardLimit': format(limits['memoryMiB'] * 1024 * 1024, 'x'),
-    }
+    home = run_dir / 'home'
+    if os.name == 'nt':
+        # Only the system locations are inherited; every per-user folder points into the run directory.
+        env = {name: os.environ[name] for name in ('PATH', 'SystemRoot', 'SystemDrive', 'windir') if name in os.environ}
+        env.update({'USERPROFILE': str(home), 'APPDATA': str(home / 'AppData' / 'Roaming'),
+                    'LOCALAPPDATA': str(home / 'AppData' / 'Local'),
+                    'TEMP': str(run_dir / 'tmp'), 'TMP': str(run_dir / 'tmp')})
+        for folder in ('Roaming', 'Local'):
+            (home / 'AppData' / folder).mkdir(parents=True, exist_ok=True)
+    else:
+        env = {
+            'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+            'HOME': str(home), 'TMPDIR': str(run_dir / 'tmp'),
+            'XDG_CONFIG_HOME': str(home / '.config'), 'XDG_DATA_HOME': str(home / '.local' / 'share'),
+            'XDG_CACHE_HOME': str(home / '.cache'), 'LANG': 'C.UTF-8',
+        }
+    env.update({'DOTNET_CLI_TELEMETRY_OPTOUT': '1', 'DOTNET_NOLOGO': '1',
+                'DOTNET_GCHeapHardLimit': format(limits['memoryMiB'] * 1024 * 1024, 'x')})
     if runtime == 'standard' and os.environ.get('DOTNET_ROOT'):
         env['DOTNET_ROOT'] = os.environ['DOTNET_ROOT']
     return env
@@ -1354,17 +1416,17 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
                           f'running the Worker is implemented for {" and ".join(BUILD_FILES)} only; this is {result["platform"]}')
         if runtime not in ('waylith', 'standard'):
             raise Blocked('runtimeUnsupported', f'unknown runtime {runtime}')
-        worker_dir = Path(worker_dir).resolve()
-        if not (worker_dir / WORKER_NAME).is_file() or not (worker_dir / f'{WORKER_NAME}.dll').is_file():
-            raise Blocked('workerMissing', f'Worker build not found in {worker_dir}; build worker/RimWorldValidation.Worker first')
-        result['tool']['workerSha256'] = sha256_file(worker_dir / f'{WORKER_NAME}.dll')
-
         mark = time.monotonic()
         snapshot = load_snapshot(snapshot_dir, full=verify_full, official=request['official'])
         timings['verifySnapshotSeconds'] = round(time.monotonic() - mark, 3)
         if snapshot['buildPlatform'] != result['platform']:
             raise Blocked('platformMismatch', f'the snapshot holds the {snapshot["buildPlatform"]} build of the game; '
                           f'this host is {result["platform"]}')
+        worker_dir = Path(worker_dir).resolve()
+        worker_exe = BUILD_FILES[result['platform']]['workerExe']
+        if not (worker_dir / worker_exe).is_file() or not (worker_dir / f'{WORKER_NAME}.dll').is_file():
+            raise Blocked('workerMissing', f'Worker build not found in {worker_dir}; build worker/RimWorldValidation.Worker first')
+        result['tool']['workerSha256'] = sha256_file(worker_dir / f'{WORKER_NAME}.dll')
         missing = [f for f in request['official'] if f not in snapshot['officialContent']]
         if missing:
             raise Blocked('officialContentMissing', 'snapshot lacks official content: ' + ', '.join(missing))

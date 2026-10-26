@@ -119,7 +119,7 @@ internal static class Boot
             return;
         }
         _stopCode = code;
-        Console.Error.WriteLine($"stopping ({code}): {reason}");
+        Console.Error.WriteLine($"stopping ({code}): {reason} (frame {UnityEngine.Time.frameCount}, {UnityEngine.Time.realtimeSinceStartup:F1} s)");
         _app?.Quit(code);
     }
 

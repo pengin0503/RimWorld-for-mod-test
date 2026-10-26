@@ -41,7 +41,7 @@ internal sealed class MainWindow : Window
         forcePause = false;
         _tabs =
         [
-            new PendingTab("mods", "MOD"),
+            new ModsTab(),
             new PendingTab("settings", "検証内容"),
             new PendingTab("results", "結果"),
             new PendingTab("history", "履歴"),

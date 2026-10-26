@@ -119,6 +119,8 @@ internal static class Boot
             return;
         }
         _stopCode = code;
+        // A validation started from the GUI ends with it (gui_host.py also stops the whole process tree).
+        RunController.Cancel();
         Console.Error.WriteLine($"stopping ({code}): {reason} (frame {UnityEngine.Time.frameCount}, {UnityEngine.Time.realtimeSinceStartup:F1} s)");
         _app?.Quit(code);
     }

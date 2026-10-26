@@ -205,6 +205,23 @@ public class RequestBuilderTests
         Assert.Throws<RequestBuildException>(() => RequestBuilder.Build(Minimal() with { Mods = [] }));
         Assert.Throws<RequestBuildException>(() => RequestBuilder.Build(Minimal() with { Mods = [new ModChoice("/m/a", false)] }));
     }
+
+    [Theory]
+    [InlineData("", "BakeFlour", "レシピ")]
+    [InlineData("Make_Flour", " ", "材料")]
+    public void empty_bill_fields_are_reported(string recipe, string thing, string mentioned)
+    {
+        var error = Assert.Throws<RequestBuildException>(() =>
+            RequestBuilder.Build(Minimal() with { Bill = new BillChoice(recipe, thing, true, true) }));
+        Assert.Contains(mentioned, error.Message);
+    }
+
+    [Fact]
+    public void empty_map_seed_is_reported()
+    {
+        var error = Assert.Throws<RequestBuildException>(() => RequestBuilder.Build(Minimal() with { Map = new MapChoice("  ", null) }));
+        Assert.Contains("種", error.Message);
+    }
 }
 
 public class ModsConfigReaderTests
@@ -250,6 +267,22 @@ public class RunHistoryTests
         Assert.Equal((true, "passed"), (entries[1].HasResult, entries[1].Status));
         Assert.Equal(["Flour"], entries[1].TargetNames);
         Assert.False(entries[2].HasResult);
+    }
+
+    [Fact]
+    public void history_marks_cancelled_runs_and_names_targets_from_the_request()
+    {
+        using var temp = new TempDir();
+        temp.Write("20261026-130000/request.json", """
+            {"mods": [{"path": "/m/Harmony", "target": false}, {"path": "C:\\Mods\\Flour", "target": true}]}
+            """);
+        File.WriteAllText(Path.Combine(temp.Path, "20261026-130000", RunHistory.CancelledFile), "");
+        temp.Write("20261026-140000/request.json", "not json");
+        var entries = RunHistory.List(temp.Path);
+        Assert.Equal((false, false), (entries[0].HasResult, entries[0].Cancelled));
+        Assert.Empty(entries[0].TargetNames);
+        Assert.Equal((false, true), (entries[1].HasResult, entries[1].Cancelled));
+        Assert.Equal(["Flour"], entries[1].TargetNames);
     }
 
     [Fact]

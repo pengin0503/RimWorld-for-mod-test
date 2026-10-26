@@ -10,7 +10,7 @@ namespace RimWorldValidation.Gui;
 /// ready, so screens can be checked without a person at the window (cloud
 /// screenshots). Each step is one object: {"tab": "mods"}, {"apply": RunSettings
 /// as JSON}, {"importModsConfig": true}, {"selectMod": packageId},
-/// {"waitSeconds": n} (time for input from outside, e.g. xdotool), {"screenshot": path}
+/// {"run": true} (starts a validation), {"waitRun": true} (until it ends), {"waitSeconds": n} (time for input from outside, e.g. xdotool), {"screenshot": path}
 /// or {"quit": true}. A step it does not know, or one that
 /// cannot be done, ends the GUI with exit code 5.
 /// </summary>
@@ -21,12 +21,22 @@ internal sealed class ScriptRunner(IReadOnlyList<JsonObject> steps)
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private int _index, _waitUntil = -1;
     private float _waitUntilTime;
+    private Func<bool>? _waitFor;
 
     public void Update(int frame)
     {
         if (_waitUntil < 0)
         {
             _waitUntil = frame + 60;  // the first frames after loading still settle textures
+        }
+        if (_waitFor != null)
+        {
+            if (!_waitFor())
+            {
+                return;
+            }
+            _waitFor = null;
+            _waitUntil = frame + SettleFrames;
         }
         if (frame < _waitUntil || Time.realtimeSinceStartup < _waitUntilTime || _index >= steps.Count)
         {
@@ -74,6 +84,15 @@ internal sealed class ScriptRunner(IReadOnlyList<JsonObject> steps)
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
                 ScreenCapture.CaptureScreenshot(Path.GetFullPath(path));
                 return CaptureFrames;
+            case "run":
+                if (!RunController.Start(GuiState.CurrentSettings()))
+                {
+                    throw new InvalidOperationException($"the validation did not start: {RunController.StartError}");
+                }
+                return SettleFrames;
+            case "waitRun":
+                _waitFor = () => !RunController.Running;
+                return SettleFrames;
             case "waitSeconds":
                 _waitUntilTime = Time.realtimeSinceStartup + (value?.GetValue<float>() ?? throw new InvalidOperationException("waitSeconds needs a number"));
                 return SettleFrames;

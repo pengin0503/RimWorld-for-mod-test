@@ -42,7 +42,7 @@ internal sealed class MainWindow : Window
         _tabs =
         [
             new ModsTab(),
-            new PendingTab("settings", "検証内容"),
+            new SettingsTab(),
             new PendingTab("results", "結果"),
             new PendingTab("history", "履歴"),
         ];

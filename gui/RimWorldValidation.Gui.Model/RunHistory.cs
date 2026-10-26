@@ -1,18 +1,22 @@
 using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace RimWorldValidation.Gui.Model;
 
 public sealed record HistoryEntry(string Id, string Dir, bool HasResult, string? Status, string? StartedAt,
-    IReadOnlyList<string> TargetNames);
+    IReadOnlyList<string> TargetNames, bool Cancelled = false);
 
 /// <summary>
 /// The results folder holds one folder per GUI run: request.json and, once the
-/// Controller finished, result/result.json.
+/// Controller finished, result/result.json. A run stopped from the GUI also
+/// holds the empty file "cancelled".
 /// </summary>
 public static class RunHistory
 {
     public const string RequestFile = "request.json";
     public const string ResultFolder = "result";
+    public const string CancelledFile = "cancelled";
 
     public static string ResultJson(string runDir) => Path.Combine(runDir, ResultFolder, "result.json");
 
@@ -42,9 +46,27 @@ public static class RunHistory
                     // A run still writing or broken: listed without a result.
                 }
             }
-            entries.Add(new HistoryEntry(id, dir, summary != null, summary?.Status, summary?.StartedAt, summary?.TargetNames ?? []));
+            entries.Add(new HistoryEntry(id, dir, summary != null, summary?.Status, summary?.StartedAt,
+                summary?.TargetNames ?? RequestTargetNames(Path.Combine(dir, RequestFile)),
+                File.Exists(Path.Combine(dir, CancelledFile))));
         }
         return entries.OrderByDescending(e => e.Id, StringComparer.Ordinal).ToList();
+    }
+
+    // Without a result (still running, stopped or crashed) the targets come from the request the GUI wrote.
+    private static IReadOnlyList<string> RequestTargetNames(string requestPath)
+    {
+        try
+        {
+            return JsonNode.Parse(File.ReadAllText(requestPath))?["mods"] is JsonArray mods
+                ? mods.OfType<JsonObject>().Where(m => ResultSummary.Bool(m["target"]) == true)
+                    .Select(m => ResultSummary.LeafName(ResultSummary.Str(m["path"]))).ToList()
+                : [];
+        }
+        catch (Exception e) when (e is JsonException or IOException or InvalidOperationException)
+        {
+            return [];
+        }
     }
 
     public static string NewRunDir(string resultsDir, DateTime now)

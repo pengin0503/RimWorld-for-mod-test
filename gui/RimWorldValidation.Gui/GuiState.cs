@@ -24,8 +24,22 @@ internal static class GuiState
     /// <summary>Last message about the MOD list (an import, a MOD not found), shown on the MOD tab.</summary>
     public static string? ModsNotice;
 
-    /// <summary>The choices of the other tabs (levels, language, map, bill, extra JSON); MODs and official content are above.</summary>
-    public static RunSettings Options = new() { Language = "Japanese" };
+    // The choices of the settings tab. A is always run.
+    public static bool LevelB;
+    /// <summary>The request's language: the English part of the game's language folder name ("Japanese").</summary>
+    public static string Language = "Japanese";
+    public static bool MapEnabled;
+    public static string MapSeed = "rwmt";
+    public static string? MapBiome;
+    public static bool BillEnabled;
+    public static string BillRecipe = "", BillThing = "";
+    public static bool BillVisible = true, BillAllowed = true;
+    public static string ExtraJson = "";
+
+    /// <summary>The run shown on the result tab, its result, or why it could not be read.</summary>
+    public static string? ShownRunDir;
+    public static ResultSummary? ShownResult;
+    public static string? ShownError;
 
     private static bool _initialized;
 
@@ -144,6 +158,45 @@ internal static class GuiState
         return missing;
     }
 
+    public static void OpenResult(string runDir)
+    {
+        ShownRunDir = runDir;
+        ShownResult = null;
+        ShownError = null;
+        string path = RunHistory.ResultJson(runDir);
+        if (!File.Exists(path))
+        {
+            ShownError = File.Exists(Path.Combine(runDir, RunHistory.CancelledFile))
+                ? "この検証は途中で中止したため、結果がありません。"
+                : "結果がまだありません（実行中か、結果を書く前に止まりました）。";
+            return;
+        }
+        try
+        {
+            ShownResult = ResultSummary.Load(path);
+        }
+        catch (Exception e) when (e is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            ShownError = $"結果を読めませんでした：{e.Message}";
+        }
+    }
+
+    /// <summary>Everything chosen on the tabs, as the request builder takes it.</summary>
+    public static RunSettings CurrentSettings()
+    {
+        EnsureInitialized();
+        return new RunSettings
+        {
+            Official = OfficialMods.Where(m => m.IsCoreMod || Expansions.Contains(m.FolderName)).Select(m => m.FolderName).ToList(),
+            Mods = Active.Select(m => new ModChoice(OriginalPath(m), IsTarget(m))).ToList(),
+            Language = Language,
+            LevelB = LevelB,
+            Map = MapEnabled ? new MapChoice(MapSeed, string.IsNullOrWhiteSpace(MapBiome) ? null : MapBiome) : null,
+            Bill = BillEnabled ? new BillChoice(BillRecipe.Trim(), BillThing.Trim(), BillVisible, BillAllowed) : null,
+            ExtraJson = string.IsNullOrWhiteSpace(ExtraJson) ? null : ExtraJson,
+        };
+    }
+
     /// <summary>Sets every choice at once (test scripts). A MOD path the GUI does not offer is an error.</summary>
     public static void Apply(RunSettings settings)
     {
@@ -170,7 +223,17 @@ internal static class GuiState
         }
         Selected = Active.FirstOrDefault();
         ModsNotice = null;
-        Options = settings with { Official = [], Mods = [] };
+        LevelB = settings.LevelB;
+        Language = settings.Language;
+        MapEnabled = settings.Map != null;
+        MapSeed = settings.Map?.Seed ?? "rwmt";
+        MapBiome = settings.Map?.Biome;
+        BillEnabled = settings.Bill != null;
+        BillRecipe = settings.Bill?.Recipe ?? "";
+        BillThing = settings.Bill?.Thing ?? "";
+        BillVisible = settings.Bill?.Visible ?? true;
+        BillAllowed = settings.Bill?.Allowed ?? true;
+        ExtraJson = settings.ExtraJson ?? "";
     }
 
     /// <summary>

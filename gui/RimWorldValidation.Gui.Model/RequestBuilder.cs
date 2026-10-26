@@ -61,6 +61,14 @@ public static class RequestBuilder
         };
         if (settings.Bill is BillChoice bill)
         {
+            if (string.IsNullOrWhiteSpace(bill.Recipe))
+            {
+                throw new RequestBuildException("製造指示の材料：レシピの defName を入れてください。");
+            }
+            if (string.IsNullOrWhiteSpace(bill.Thing))
+            {
+                throw new RequestBuildException("製造指示の材料：調べる材料の defName を入れてください。");
+            }
             levels.Add("C");
             request["tests"] = new JsonArray(BillCase);
             expectations["billIngredients"] = new JsonArray(new JsonObject
@@ -70,6 +78,10 @@ public static class RequestBuilder
         }
         if (settings.Map is MapChoice map)
         {
+            if (string.IsNullOrWhiteSpace(map.Seed))
+            {
+                throw new RequestBuildException("マップの種（seed）を入れてください。");
+            }
             var mapObject = new JsonObject { ["seed"] = map.Seed };
             if (!string.IsNullOrWhiteSpace(map.Biome))
             {

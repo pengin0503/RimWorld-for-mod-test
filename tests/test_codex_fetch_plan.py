@@ -77,7 +77,7 @@ class FetchPlanTests(unittest.TestCase):
         self.assertEqual([m['packageId'] for m in request['mods']],['author.example','me.local'])
         self.assertEqual([m['target'] for m in request['mods']],[False,True])
         self.assertEqual(request['mods'][1]['expectedLoadFolders'],['1.7',''])
-        self.assertTrue(request['mods'][1]['path'].endswith('/local/MyMod'))
+        self.assertEqual(Path(request['mods'][1]['path']).parts[-2:],('local','MyMod'))
         self.assertEqual(result['local']['packageId'],'me.local')
 
     def test_local_target_missing_dependency_blocks_before_payload(self):
@@ -97,7 +97,8 @@ class FetchPlanTests(unittest.TestCase):
         with self.assertRaises(c.WorkflowError) as exc:
             root=Path(directory.name)/'x';(root/'About').mkdir(parents=True)
             (root/'About/About.xml').write_bytes(b'<ModMetaData><packageId>me.local</packageId></ModMetaData>')
-            (root/'Defs').symlink_to('/etc')
+            try:(root/'Defs').symlink_to(root/'About',target_is_directory=True)
+            except OSError:self.skipTest('symbolic links need extra privileges here')
             c.local_mod_plan(root,{'ludeon.rimworld'})
         self.assertEqual(exc.exception.code,'invalidLocalMod')
 

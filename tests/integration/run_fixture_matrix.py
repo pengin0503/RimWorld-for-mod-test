@@ -106,6 +106,22 @@ CASES = {
 }
 
 
+# Reasons a run on a platform/runtime that is not qualified adds on its own.
+UNQUALIFIED_REASONS = {'experimental', 'mapNotQualified'}
+
+
+def matches(expected_status, expected_codes, status, codes, *, experimental):
+    """Whether a case behaved as expected. On an unqualified platform the Controller turns
+    passed/failed into incomplete; the run must then show the same findings and nothing else."""
+    if not experimental or expected_status in ('incomplete', 'blocked'):
+        return status == expected_status and all(c in codes for c in expected_codes)
+    if status != 'incomplete' or 'experimental' not in codes:
+        return False
+    if expected_status == 'passed':
+        return set(codes) <= UNQUALIFIED_REASONS
+    return all(c in codes for c in expected_codes)
+
+
 def build_fixtures(out, snapshot, harmony_dll):
     staged = out / 'fixtures'
     if staged.exists():
@@ -153,9 +169,11 @@ def main(argv=None):
         result = validation_host.run_validation(args.snapshot, request_path, case_dir / 'out', args.worker, runtime=runtime,
                                                 baseline_cache=out / 'baseline-cache')
         codes = [r['code'] for r in result.get('reasons', [])]
-        good = result['status'] == expected_status and all(c in codes for c in expected_codes)
+        experimental = result.get('fidelity') == 'experimental' and runtime == 'waylith'
+        good = matches(expected_status, expected_codes, result['status'], codes, experimental=experimental)
         ok &= good
-        rows.append({'case': name, 'runtime': runtime, 'expected': expected_status, 'status': result['status'],
+        rows.append({'case': name, 'platform': result.get('platform'), 'runtime': runtime, 'expected': expected_status,
+                     'status': result['status'],
                      'executionStatus': result['executionStatus'], 'fidelity': result.get('fidelity'), 'reasons': codes,
                      'newDiagnostics': [e['message'].splitlines()[0][:160] for e in (result.get('diagnostics') or {}).get('newInTarget', [])],
                      'baselineCached': (result.get('diagnostics') or {}).get('baselineCached'),

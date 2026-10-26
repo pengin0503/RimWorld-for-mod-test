@@ -22,6 +22,37 @@ import zipfile
 from tools import validation_host as vh
 
 LINUX = sys.platform.startswith('linux')
+WINDOWS = sys.platform == 'win32'
+HOST_PLATFORM = 'windows-x64' if WINDOWS else 'linux-x64'
+OTHER_PLATFORM = 'linux-x64' if WINDOWS else 'windows-x64'
+
+
+def pid_alive(pid):
+    """Whether a process still runs (a zombie waiting for its parent counts as gone)."""
+    if WINDOWS:
+        import ctypes
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        handle = kernel32.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE | QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            return kernel32.WaitForSingleObject(ctypes.c_void_p(handle), 0) == 0x102  # WAIT_TIMEOUT
+        finally:
+            kernel32.CloseHandle(ctypes.c_void_p(handle))
+    try:
+        return 'Z' not in Path(f'/proc/{pid}/stat').read_text().split(')')[1][:3]
+    except FileNotFoundError:
+        return False
+
+
+def wait_until_gone(pid, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return True
+        time.sleep(0.1)
+    return False
 
 FAKE_WORKER = textwrap.dedent('''\
     #!/usr/bin/env python3
@@ -118,27 +149,29 @@ def sha(data):
 class Fixture:
     """A synthetic game folder, snapshot, fake Worker and mods in a temporary directory."""
 
-    def __init__(self, root):
+    def __init__(self, root, platform='linux-x64'):
         self.root = root
+        self.platform = platform
+        layout = vh.BUILD_FILES[platform]
         self.game = root / 'game-source'
-        for name in vh.REQUIRED_GAME_FILES:
+        for name in vh.required_game_files(platform):
             path = self.game / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(f'fake {name}'.encode())
         (self.game / 'Version.txt').write_text('9.9.1 rev1\n', encoding='utf-8')
-        (self.game / 'RimWorld').write_bytes(b'official executable - must never be linked or run')
+        (self.game / layout['host']).write_bytes(b'official executable - must never be linked or run')
         (self.game / 'Other.dll').write_bytes(b'other')
         self.about(self.game / 'Data' / 'Core', 'Ludeon.RimWorld')
         self.about(self.game / 'Data' / 'Royalty', 'Ludeon.RimWorld.Royalty')
         languages = self.game / 'Data' / 'Core' / 'Languages'
         (languages / 'English').mkdir(parents=True)
         (languages / 'Japanese (日本語).tar').write_bytes(b'tar')
-        target = '.NETCoreApp,Version=v10.0/linux-x64'
+        target = f'.NETCoreApp,Version=v10.0/{"win-x64" if platform == "windows-x64" else "linux-x64"}'
         (self.game / 'RimWorld.deps.json').write_text(json.dumps({
             'runtimeTarget': {'name': target},
             'targets': {target: {'RimWorld/1.0.0': {'runtime': {'RimWorld.dll': {}}},
                                  'runtimepack.Fake/1.0': {'runtime': {'System.Private.CoreLib.dll': {}},
-                                                          'native': {'libcoreclr.so': {}}}}},
+                                                          'native': {layout['coreclr']: {}}}}},
             'libraries': {'RimWorld/1.0.0': {'type': 'project'}, 'runtimepack.Fake/1.0': {'type': 'runtimepack'}},
         }), encoding='utf-8')
         (self.game / 'RimWorld.runtimeconfig.json').write_text(json.dumps({'runtimeOptions': {
@@ -148,11 +181,11 @@ class Fixture:
         self.adapters = {'fake-9.9.1': {
             'version': '9.9.1 rev1',
             'sha256': {'Assembly-CSharp.dll': sha(b'fake Assembly-CSharp.dll')},
-            'qualified': {('linux-x64', 'waylith'): {'levels': ('A', 'B'), 'runtimeSha256': {}, 'evidence': 'test'}},
+            'qualified': {(platform, 'waylith'): {'levels': ('A', 'B'), 'runtimeSha256': {}, 'evidence': 'test'}},
         }}
         self.worker = root / 'worker'
         self.worker.mkdir()
-        script = self.worker / vh.WORKER_NAME
+        script = self.worker / layout['workerExe']  # Windows tests run this script with Python (TempCase)
         script.write_text(FAKE_WORKER, encoding='utf-8')
         script.chmod(script.stat().st_mode | stat.S_IXUSR)
         (self.worker / f'{vh.WORKER_NAME}.dll').write_bytes(b'fake worker assembly')
@@ -187,7 +220,8 @@ class Fixture:
         path.write_text(json.dumps(body, ensure_ascii=False), encoding='utf-8')
         return path
 
-    def run(self, mods, *, platform='linux-x64', **kwargs):
+    def run(self, mods, *, platform=None, **kwargs):
+        platform = platform or self.platform
         options = {k: kwargs.pop(k) for k in ('runtime', 'baseline_cache', 'allow_unknown_build', 'keep_run_dirs')
                    if k in kwargs}
         out = self.root / f'out-{self.count + 1}'
@@ -197,12 +231,21 @@ class Fixture:
 
 
 class TempCase(unittest.TestCase):
+    fixture_platform = 'linux-x64'
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
         self.addCleanup(self.make_writable)
-        self.fx = Fixture(self.root)
+        self.fx = Fixture(self.root, self.fixture_platform)
+        if WINDOWS:
+            # The fake Worker is a Python script: Windows cannot execute it by its shebang.
+            patcher = mock.patch.object(vh, 'worker_command', lambda host, request: [
+                sys.executable, str(host / vh.BUILD_FILES[self.fixture_platform]['workerExe']),
+                '--worker-request', str(request)])
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def make_writable(self):
         for current, dirs, files in os.walk(self.root):
@@ -218,6 +261,14 @@ class RequestTests(TempCase):
         self.fx.mod('one')
         return vh.load_request(self.fx.request(['*one'], **fields))
 
+    def load_mod(self, **mod_fields):
+        self.fx.mod('one')
+        path = self.fx.request(['*one'])
+        body = json.loads(path.read_text(encoding='utf-8'))
+        body['mods'][0].update(mod_fields)
+        path.write_text(json.dumps(body), encoding='utf-8')
+        return vh.load_request(path)
+
     def test_minimal_request_gets_defaults_and_absolute_paths(self):
         request = self.load()
         self.assertEqual(request['official'], ['Core'])
@@ -225,6 +276,11 @@ class RequestTests(TempCase):
         self.assertEqual(request['limits'], vh.DEFAULT_LIMITS)
         self.assertTrue(Path(request['mods'][0]['path']).is_absolute())
         self.assertEqual(len(request['sha256']), 64)
+
+    def test_planned_load_folders_are_carried_to_the_mod(self):
+        request = self.load_mod(expectedLoadFolders=['Mods/Foo/1.7', '1.7', ''])
+        self.assertEqual(request['mods'][0]['expectedLoadFolders'], ['Mods/Foo/1.7', '1.7', ''])
+        self.assertNotIn('expectedLoadFolders', self.load()['mods'][0])
 
     def test_invalid_requests_are_rejected(self):
         cases = {
@@ -255,6 +311,11 @@ class RequestTests(TempCase):
                 with self.assertRaises(vh.RequestError):
                     self.load(**fields)
 
+    def test_invalid_planned_load_folders_are_rejected(self):
+        for folders in ('1.7', [], ['../x'], ['/x'], ['a\\b'], ['', ''], [1], ['a//b'], [' 1.7']):
+            with self.subTest(folders=folders), self.assertRaises(vh.RequestError):
+                self.load_mod(expectedLoadFolders=folders)
+
     def test_a_target_mod_is_required(self):
         self.fx.mod('one')
         with self.assertRaises(vh.RequestError):
@@ -262,6 +323,37 @@ class RequestTests(TempCase):
 
 
 class SnapshotTests(TempCase):
+    # IDENTITY_FILES before Windows support; Linux fingerprints must not change.
+    LINUX_IDENTITY = ('Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
+                      'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', 'libcoreclr.so',
+                      'System.Private.CoreLib.dll')
+
+    def test_windows_build_is_recognised(self):
+        linux = self.fx.prepare()
+        self.assertEqual(linux['buildPlatform'], 'linux-x64')
+        digest = hashlib.sha256()
+        for rel in self.LINUX_IDENTITY:
+            digest.update(f'{rel}\0{linux["files"][rel]["sha256"]}\n'.encode())
+        self.assertEqual(linux['fingerprint'], digest.hexdigest())
+        (self.root / 'win').mkdir()
+        windows = Fixture(self.root / 'win', 'windows-x64')
+        info = vh.prepare_game(windows.game, self.root / 'snapshot-windows', log=lambda *_: None)
+        self.assertEqual(info['buildPlatform'], 'windows-x64')
+        self.assertNotEqual(info['fingerprint'], linux['fingerprint'])
+        (windows.game / 'coreclr.dll').unlink()
+        with self.assertRaises(vh.Blocked) as caught:
+            vh.prepare_game(windows.game, self.root / 'snapshot-broken', log=lambda *_: None)
+        self.assertEqual(caught.exception.code, 'missingGameFiles')
+
+    def test_old_snapshot_without_platform_is_inferred(self):
+        info = self.fx.prepare()
+        record = self.fx.snapshot / 'snapshot.json'
+        record.chmod(0o644)
+        data = json.loads(record.read_text(encoding='utf-8'))
+        del data['buildPlatform']
+        record.write_text(json.dumps(data), encoding='utf-8')
+        self.assertEqual(vh.load_snapshot(self.fx.snapshot)['buildPlatform'], info['buildPlatform'])
+
     def test_snapshot_is_read_only_copy_with_manifest_and_adapter(self):
         info = self.fx.prepare()
         game = self.fx.snapshot / 'game'
@@ -351,6 +443,24 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual((status, execution, reasons, fresh), ('passed', 'completed', [], []))
         self.assertEqual((stages['A']['status'], stages['B']['status'], stages['C']['status']),
                          ('completed', 'completed', 'notRequested'))
+
+    def test_planned_load_folders_must_match_what_the_game_loaded(self):
+        mods = [dict(self.mods[0], expectedLoadFolders=['1.7', ''])]
+        running = lambda folders: worker_result(runningMods=[
+            {'packageId': 'Ludeon.RimWorld', 'loadFolders': ['']},
+            {'packageId': 'Test.Target', 'loadFolders': folders}])
+        def run(worker):
+            return vh.evaluate(self.request, mods, worker, None, [], worker_result(), None, [self.warning], {}, 'qualified')
+        self.assertEqual(run(running(['1.7', '']))[0], 'passed')
+        for folders in (['1.6', ''], [''], ['', '1.7']):
+            with self.subTest(folders=folders):
+                status, _, reasons, _, _ = run(running(folders))
+                self.assertEqual(status, 'incomplete')
+                self.assertIn('loadFolderMismatch', [r['code'] for r in reasons])
+        status, _, reasons, _, _ = run(worker_result(runningMods=[]))
+        self.assertEqual((status, [r['code'] for r in reasons]), ('incomplete', ['loadFolderMismatch']))
+        # Without a plan nothing is compared, as before.
+        self.assertEqual(self.evaluate(worker=running(['x']))[0], 'passed')
 
     def test_status_table(self):
         warning, error, request = self.warning, self.error, self.request
@@ -474,8 +584,10 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual((status, [r['code'] for r in reasons]), ('incomplete', ['translationErrorsError']))
 
 
-@unittest.skipUnless(LINUX, 'running the Worker is implemented for Linux only')
+@unittest.skipUnless(LINUX or WINDOWS, 'running the Worker is implemented for Linux and Windows only')
 class RunTests(TempCase):
+    fixture_platform = HOST_PLATFORM
+
     def setUp(self):
         super().setUp()
         self.fx.prepare()
@@ -500,6 +612,24 @@ class RunTests(TempCase):
         prefs = (out / 'target' / 'userdata' / 'Config' / 'Prefs.xml').read_text(encoding='utf-8')
         self.assertIn('<devMode>true</devMode><resetModsConfigOnCrash>false</resetModsConfigOnCrash>', prefs)
         self.assertEqual(json.loads((out / 'result.json').read_text(encoding='utf-8'))['status'], 'passed')
+
+    def test_run_host_is_removed_and_links_are_counted(self):
+        self.fx.mod('target')
+        result, out = self.fx.run(['*target'])
+        self.assertEqual(result['status'], 'passed', result.get('reasons'))
+        game = Path(self.fx.snapshot) / 'game'
+        linked = [n for n in os.listdir(game) if n not in vh.GAME_EXCLUDED]
+        kinds = {'hardlink', 'copy', 'junction'} if os.name == 'nt' else {'symlink'}
+        for name in ('baseline', 'target'):
+            process = result['process'][name]
+            self.assertFalse((out / name / 'host').exists())
+            self.assertNotIn('cleanupError', process)
+            self.assertLessEqual(set(process['linkModes']), kinds)
+            self.assertEqual(sum(process['linkModes'].values()), len(linked) + 1)  # + Data/Core
+        if os.name == 'nt':
+            self.assertEqual(result['process']['target']['linkModes'].get('copy', 0), 0)
+        self.assertEqual(vh.load_snapshot(self.fx.snapshot, full=True)['fileCount'],
+                         json.loads((Path(self.fx.snapshot) / 'snapshot.json').read_text(encoding='utf-8'))['fileCount'])
 
     def test_new_error_from_target_fails(self):
         self.fx.mod('bad')
@@ -578,7 +708,7 @@ class RunTests(TempCase):
         self.fx.mod('target')
         out = self.root / 'out-local'
         result = vh.run_validation(snapshot, self.fx.request(['*target']), out, self.fx.worker, adapters=self.fx.adapters,
-                                   platform='linux-x64', keep_run_dirs=True)
+                                   platform=HOST_PLATFORM, keep_run_dirs=True)
         self.assertEqual(result['status'], 'passed', result.get('reasons'))
         self.assertEqual(sorted(os.listdir(out / 'target' / 'host' / 'Mods')), ['target'])
 
@@ -626,17 +756,12 @@ class RunTests(TempCase):
         self.assertEqual(result['process']['target']['killedFor'], 'timeout')
         self.assertIn('timeout', [r['code'] for r in result['reasons']])
         child = int((out / 'target' / 'child.pid').read_text(encoding='utf-8'))
-        for _ in range(50):
-            if not Path(f'/proc/{child}').exists() or 'Z' in Path(f'/proc/{child}/stat').read_text().split(')')[1][:3]:
-                break
-            time.sleep(0.1)
-        else:
-            self.fail('a descendant of the Worker survived the timeout kill')
+        self.assertTrue(wait_until_gone(child), 'a descendant of the Worker survived the timeout kill')
 
     def test_interrupted_supervision_kills_the_worker(self):
         run_dir = self.root / 'interrupted'
         (run_dir / 'host').mkdir(parents=True)
-        script = run_dir / 'host' / vh.WORKER_NAME
+        script = run_dir / 'host' / vh.BUILD_FILES[HOST_PLATFORM]['workerExe']
         script.write_text(f'#!{sys.executable}\nimport os, time\nopen({str(run_dir / "pid")!r}, "w").write(str(os.getpid()))\n'
                           'time.sleep(600)\n', encoding='utf-8')
         script.chmod(0o755)
@@ -650,7 +775,7 @@ class RunTests(TempCase):
         with mock.patch.object(vh.time, 'sleep', interrupt), self.assertRaises(KeyboardInterrupt):
             vh.supervise(run_dir, dict(vh.DEFAULT_LIMITS), dict(os.environ), poll=0.05)
         pid = int((run_dir / 'pid').read_text(encoding='utf-8'))
-        self.assertFalse(Path(f'/proc/{pid}').exists() and 'Z' not in Path(f'/proc/{pid}/stat').read_text().split(')')[1][:3])
+        self.assertTrue(wait_until_gone(pid), 'the Worker survived an interrupted supervision')
 
     def test_log_limit_stops_the_worker(self):
         self.fx.mod('noisy')
@@ -660,9 +785,16 @@ class RunTests(TempCase):
 
     def test_memory_limit_stops_the_worker(self):
         self.fx.mod('memory')
-        result, _ = self.fx.run(['*memory'], limits={'memoryMiB': 512})
-        self.assertEqual(result['process']['target']['killedFor'], 'memoryLimit')
-        self.assertFalse(result['process']['target']['enforcement']['memoryHard'])
+        result, out = self.fx.run(['*memory'], limits={'memoryMiB': 512})
+        process = result['process']['target']
+        self.assertEqual(process['killedFor'], 'memoryLimit')
+        self.assertEqual(result['status'], 'incomplete')
+        # Windows: a Job Object refuses the allocation (hard limit); Linux: the Controller polls and kills.
+        self.assertEqual(process['enforcement']['memoryHard'], WINDOWS)
+        self.assertEqual(process['enforcement']['memoryMeasure'], 'jobCommit' if WINDOWS else 'groupRss')
+        if WINDOWS:
+            # Hard limit: the 700 MB allocation itself was refused inside the fake Worker.
+            self.assertIn('MemoryError', (out / 'target' / 'stderr.log').read_text(errors='replace'))
 
     def test_baseline_cache_is_reused_only_for_identical_inputs(self):
         self.fx.mod('dep')
@@ -681,14 +813,15 @@ class RunTests(TempCase):
         other = self.root / 'snapshot-other'
         vh.prepare_game(self.fx.game, other, log=lambda *_: None)
         fourth = vh.run_validation(other, self.fx.request(['dep', '*target']), self.root / 'out-other', self.fx.worker,
-                                   adapters=self.fx.adapters, platform='linux-x64', baseline_cache=cache)
+                                   adapters=self.fx.adapters, platform=HOST_PLATFORM, baseline_cache=cache)
         self.assertFalse(fourth['diagnostics']['baselineCached'])
 
     def test_blocked_before_start(self):
         self.fx.mod('target')
         self.fx.mod('official', 'ludeon.rimworld.fake')
         cases = [
-            ('platformUnsupported', ['*target'], {'platform': 'windows-x64'}),
+            ('platformUnsupported', ['*target'], {'platform': 'osx-arm64'}),
+            ('platformMismatch', ['*target'], {'platform': OTHER_PLATFORM}),
             ('invalidRequest', ['*target'], {'levels': ['A', 'B', 'C'], 'tests': ['t1']}),
             ('officialContentMissing', ['*target'], {'official': ['Core', 'Biotech']}),
             ('languageMissing', ['*target'], {'language': 'Klingon'}),
@@ -703,8 +836,19 @@ class RunTests(TempCase):
                 self.assertEqual(result['reasons'][0]['code'], code)
                 self.assertEqual(vh.EXIT_CODES[result['status']], 2)
 
+    def test_other_platform_snapshot_is_not_run(self):
+        (self.root / 'other').mkdir()
+        other = Fixture(self.root / 'other', OTHER_PLATFORM)
+        other.prepare()
+        other.mod('target')
+        result = vh.run_validation(other.snapshot, other.request(['*target']), self.root / 'out-other', other.worker,
+                                   adapters=other.adapters, platform=HOST_PLATFORM)
+        self.assertEqual((result['status'], result['reasons'][0]['code']), ('blocked', 'platformMismatch'))
+
     def test_controller_error_is_reported_as_incomplete(self):
         self.fx.mod('target')
+        if WINDOWS:
+            self.skipTest('Windows has no execute permission bit')
         (self.fx.worker / vh.WORKER_NAME).chmod(0o644)
         if os.geteuid() == 0 and os.access(self.fx.worker / vh.WORKER_NAME, os.X_OK):
             self.skipTest('cannot make the fake Worker unexecutable')
@@ -731,14 +875,14 @@ class RunTests(TempCase):
         out.mkdir()
         (out / 'keep.txt').write_text('x', encoding='utf-8')
         result = vh.run_validation(self.fx.snapshot, self.fx.request(['*target']), out, self.fx.worker,
-                                   adapters=self.fx.adapters, platform='linux-x64')
+                                   adapters=self.fx.adapters, platform=HOST_PLATFORM)
         self.assertEqual(result['reasons'][0]['code'], 'outputNotEmpty')
         self.assertEqual((out / 'keep.txt').read_text(encoding='utf-8'), 'x')
         (out / 'inputs').mkdir()
         (out / 'inputs' / 'evidence.txt').write_text('y', encoding='utf-8')
         (out / 'result.json').write_text('{"old": true}', encoding='utf-8')
         result = vh.run_validation(self.fx.snapshot, self.fx.request(['*target']), out, self.fx.worker,
-                                   adapters=self.fx.adapters, platform='linux-x64')
+                                   adapters=self.fx.adapters, platform=HOST_PLATFORM)
         self.assertEqual(result['reasons'][0]['code'], 'outputNotEmpty')
         self.assertEqual((out / 'inputs' / 'evidence.txt').read_text(encoding='utf-8'), 'y')
         self.assertEqual((out / 'result.json').read_text(encoding='utf-8'), '{"old": true}')
@@ -767,8 +911,10 @@ class MapRequestTests(TempCase):
                 vh.validate_request(dict(base, **fields), self.root)
 
 
-@unittest.skipUnless(LINUX, 'running the Worker is implemented for Linux only')
+@unittest.skipUnless(LINUX or WINDOWS, 'running the Worker is implemented for Linux and Windows only')
 class MapTests(TempCase):
+    fixture_platform = HOST_PLATFORM
+
     def setUp(self):
         super().setUp()
         self.fx.prepare()
@@ -799,7 +945,7 @@ class MapTests(TempCase):
 
     def test_qualified_map_can_pass_and_mismatch_fails(self):
         for adapter in self.fx.adapters.values():
-            adapter['qualified'][('linux-x64', 'waylith')]['features'] = ('map',)
+            adapter['qualified'][(HOST_PLATFORM, 'waylith')]['features'] = ('map',)
         result, _ = self.fx.run(['*ruins'], map={})
         self.assertEqual(result['status'], 'passed')
         self.assertEqual(result['map']['fidelity'], 'qualified')
@@ -839,7 +985,7 @@ class MapTests(TempCase):
 
     def test_cached_baseline_keeps_its_map_observation(self):
         for adapter in self.fx.adapters.values():
-            adapter['qualified'][('linux-x64', 'waylith')]['features'] = ('map',)
+            adapter['qualified'][(HOST_PLATFORM, 'waylith')]['features'] = ('map',)
         cache = self.root / 'cache'
         first, out = self.fx.run(['*ruins'], map={}, baseline_cache=cache)
         self.assertEqual(first['status'], 'passed')

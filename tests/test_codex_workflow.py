@@ -246,6 +246,7 @@ class CodexWorkflowTests(unittest.TestCase):
             self.assertEqual(request["levels"], ["A"])
             self.assertEqual(request["mods"][0]["packageId"], "author.example")
             self.assertTrue(request["mods"][0]["target"])
+            self.assertEqual(request["mods"][0]["expectedLoadFolders"], [""])
             self.assertEqual(result["fetched"][0]["workshopId"], "1234567890")
             self.assertIsInstance(cw.validation_host.validate_request(request, request_path.parent), dict)
 

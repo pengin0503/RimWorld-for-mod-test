@@ -226,15 +226,65 @@ def private_index(args, root: Path) -> Path:
     return archive
 
 
+def _local_files(root: Path) -> list[str]:
+    files = []
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise WorkflowError("local MOD contains a symbolic link", "invalidLocalMod")
+        if path.is_file():
+            files.append(path.relative_to(root).as_posix())
+    return files
+
+
+def _local_metadata(root: Path):
+    raw = Path(root).expanduser().absolute()
+    if any(part.is_symlink() for part in (raw, *raw.parents)) or not raw.is_dir():
+        raise WorkflowError("local MOD must be a real directory", "invalidLocalMod")
+    files = _local_files(raw)
+    abouts = [f for f in files if f.casefold() == "about/about.xml"]
+    configs = [f for f in files if f.casefold() == "loadfolders.xml"]
+    if len(abouts) != 1 or len(configs) > 1:
+        raise WorkflowError("Missing or ambiguous MOD metadata", "invalidModMetadata")
+    try:
+        meta = mod_load_plan.parse_xml((raw / abouts[0]).read_bytes())
+    except mod_load_plan.LoadPlanError as exc:
+        raise WorkflowError(str(exc), exc.code) from exc
+    package_id = (meta.findtext("packageId") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.]+", package_id):
+        raise WorkflowError("local MOD has no usable packageId", "invalidModMetadata")
+    return raw, files, configs, meta, package_id
+
+
+def local_mod_plan(root: Path, active: set) -> dict:
+    """Plan a MOD built outside R2 (e.g. the user's own repository) with the same rules."""
+    raw, files, configs, meta, package_id = _local_metadata(root)
+    active = set(active) | {package_id.casefold()}
+    try:
+        missing = mod_load_plan.missing_dependencies(meta, active)
+        if missing:
+            raise WorkflowError("Missing required dependencies: " + ", ".join(missing), "missingDependencies")
+        config = (raw / configs[0]).read_bytes() if configs else None
+        folders = mod_load_plan.load_folders(files, config, active)
+    except mod_load_plan.LoadPlanError as exc:
+        raise WorkflowError(str(exc), exc.code) from exc
+    return {"path": str(raw), "packageId": package_id, "loadFolders": folders}
+
+
 def fetch_mods(args) -> dict:
     root = _safe_private(args.private_root)
+    local_target = getattr(args, "local_target", None)
+    if bool(args.target) == bool(local_target):
+        raise WorkflowError("give exactly one of --target or --local-target", "invalidTarget")
+    local_id = _local_metadata(local_target)[4] if local_target else None
     index = load_index(private_index(args, root))
-    selected = [resolve(index, name) for name in list(args.dependency or []) + [args.target]]
+    selected = [resolve(index, name) for name in list(args.dependency or []) + ([args.target] if args.target else [])]
     if any(not m["packageId"] for m in selected):
         raise WorkflowError("index has no packageId for a selected MOD")
     ids = [m["workshopId"] for m in selected]
     if len(ids) != len(set(ids)):
         raise WorkflowError("same Workshop MOD appears as target and dependency")
+    if local_id and local_id.casefold() in {m["packageId"].casefold() for m in selected}:
+        raise WorkflowError("local MOD repeats a MOD selected from the index", "duplicateMod")
     if (root / "request.json").exists():
         raise WorkflowError("request.json exists; preserve edits and use a new private root")
     official = getattr(args, "official", None) or ["Core"]
@@ -242,6 +292,8 @@ def fetch_mods(args) -> dict:
     if not official or official[0] != "Core" or len(set(official)) != len(official) or set(official)-allowed:
         raise WorkflowError("official must begin with Core and contain supported unique DLCs", "invalidOfficialContent")
     active = {m["packageId"].casefold() for m in selected}
+    if local_id:
+        active.add(local_id.casefold())
     active.update("ludeon.rimworld" if n == "Core" else "ludeon.rimworld."+n.casefold() for n in official)
     fetched = []
     r2 = r2_client(args.aws)
@@ -272,6 +324,7 @@ def fetch_mods(args) -> dict:
         except mod_load_plan.LoadPlanError as exc:
             raise WorkflowError(str(exc), exc.code) from exc
         prepared.append((mod, destination, prefix, listed, metadata, metadata_counts, folders))
+    local = local_mod_plan(local_target, active) if local_target else None
     for mod, destination, prefix, listed, metadata, counts, folders in prepared:
         metadata_keys = {i["key"] for i in metadata}
         items = [i for i in listed if args.scope == "all" or i["key"] in metadata_keys or
@@ -287,15 +340,21 @@ def fetch_mods(args) -> dict:
             summary[outcome] += count
         fetched.append({"workshopId": mod["workshopId"], "name": mod["name"],
                         "r2": summary, "scope": args.scope, "loadFolders": folders})
+    # The Controller compares these with the folders the game actually loaded.
+    planned = {item["workshopId"]: item["loadFolders"] for item in fetched}
     mods = [{"path": str((root / "mods" / m["workshopId"]).absolute()),
-             "packageId": m["packageId"], "target": m is selected[-1]} for m in selected]
+             "packageId": m["packageId"], "target": local is None and m is selected[-1],
+             "expectedLoadFolders": planned[m["workshopId"]]} for m in selected]
+    if local:
+        mods.append({"path": local["path"], "packageId": local["packageId"], "target": True,
+                     "expectedLoadFolders": local["loadFolders"]})
     request = {"recordType": "modValidationRequest", "schemaVersion": 1,
                "levels": ["A"], "official": official, "language": args.language,
                "mods": mods, "expectations": {}}
     req_path = root / "request.json"
     req_path.write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.chmod(req_path, 0o600)
-    return {"status": "modsReady", "fetched": fetched, "request": str(req_path),
+    return {"status": "modsReady", "fetched": fetched, "local": local, "request": str(req_path),
             "validationLevel": "A",
             "note": "Load folders and required dependencies checked against the complete request; "
                     "resources outside loader inputs still require explicit retrieval"}
@@ -359,7 +418,8 @@ def main(argv=None) -> int:
             sub.add_argument("--refresh", action="store_true")
         if name == "fetch-mods":
             sub.add_argument("--index-zip")
-            sub.add_argument("--target", required=True)
+            sub.add_argument("--target", help="target MOD from the private index")
+            sub.add_argument("--local-target", help="target MOD folder built locally (not fetched from R2)")
             sub.add_argument("--dependency", action="append", default=[])
             sub.add_argument("--language", default="English")
             sub.add_argument("--scope", choices=("validation", "all"), default="validation")

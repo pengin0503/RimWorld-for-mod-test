@@ -41,17 +41,37 @@ OFFICIAL_ORDER = ('Core', 'Royalty', 'Ideology', 'Biotech', 'Anomaly', 'Odyssey'
 EXPANSION_IDS = tuple(f'ludeon.rimworld.{name.lower()}' for name in OFFICIAL_ORDER[1:])
 # Mods: the install's own local mods never join a run; only the requested ones are copied into host/Mods.
 GAME_EXCLUDED = {'RimWorld', 'RimWorld.exe', 'RimWorld.deps.json', 'RimWorld.runtimeconfig.json', 'Data', 'Mods'}
-REQUIRED_GAME_FILES = (
+# Per-platform layout of the official build. Managed game files are the same on both;
+# the host executable, the native runtime and the Worker's apphost differ.
+BUILD_FILES = {
+    'linux-x64': {'host': 'RimWorld', 'native': ('libhostfxr.so', 'libcoreclr.so'), 'coreclr': 'libcoreclr.so',
+                  'workerExe': WORKER_NAME},
+    'windows-x64': {'host': 'RimWorld.exe', 'native': ('hostfxr.dll', 'coreclr.dll'), 'coreclr': 'coreclr.dll',
+                    'workerExe': WORKER_NAME + '.exe'},
+}
+_COMMON_GAME_FILES = (
     'Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
     'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', 'Assets.zip',
-    'libhostfxr.so', 'libcoreclr.so', 'System.Private.CoreLib.dll', 'Data/Core/About/About.xml',
 )
-# Files whose content decides which adapter applies; re-hashed on every run.
-IDENTITY_FILES = (
-    'Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
-    'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', 'libcoreclr.so',
-    'System.Private.CoreLib.dll',
-)
+
+
+def required_game_files(platform):
+    return (*_COMMON_GAME_FILES, *BUILD_FILES[platform]['native'], 'System.Private.CoreLib.dll',
+            'Data/Core/About/About.xml')
+
+
+def identity_files(platform):
+    """Files whose content decides which adapter applies; re-hashed on every run."""
+    return ('Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
+            'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', BUILD_FILES[platform]['coreclr'],
+            'System.Private.CoreLib.dll')
+
+
+def detect_build_platform(files):
+    """The platform a game folder was built for, from its native runtime files."""
+    present = set(files)
+    found = [name for name, layout in BUILD_FILES.items() if layout['coreclr'] in present]
+    return found[0] if len(found) == 1 else None
 
 # Builds the Worker has been checked against. ``qualifiedLevels`` is only granted
 # for the platform/runtime pair that was compared with the official headless boot
@@ -140,7 +160,12 @@ def prepare_game(source, snapshot, *, log=print):
     """Copy the user's game folder into a private read-only snapshot with a SHA-256 manifest."""
     source = Path(source).resolve()
     snapshot = Path(snapshot).resolve()
-    missing = [name for name in REQUIRED_GAME_FILES if not (source / name).is_file()]
+    build_platform = detect_build_platform(name for layout in BUILD_FILES.values() for name in layout['native']
+                                           if (source / name).is_file())
+    expected = required_game_files(build_platform) if build_platform else required_game_files('linux-x64')
+    missing = [name for name in expected if not (source / name).is_file()]
+    if build_platform is None and not missing:
+        missing = ['a native runtime of exactly one supported platform']
     if missing:
         raise Blocked('missingGameFiles', 'game folder lacks required files: ' + ', '.join(missing))
     if snapshot.exists():
@@ -171,7 +196,8 @@ def prepare_game(source, snapshot, *, log=print):
         'officialContent': _official_folders(game),
         'fileCount': len(manifest), 'totalBytes': sum(e['size'] for e in manifest.values()),
         'symlinks': links,
-        'fingerprint': _fingerprint(manifest),
+        'buildPlatform': build_platform,
+        'fingerprint': _fingerprint(manifest, build_platform),
         'adapter': match_adapter(manifest)[0],
         'timings': {'copySeconds': round(copied - started, 3), 'hashSeconds': round(hashed - copied, 3),
                     'totalSeconds': round(time.monotonic() - started, 3)},
@@ -188,9 +214,9 @@ def _official_folders(game):
     return [name for name in OFFICIAL_ORDER if (data / name / 'About' / 'About.xml').is_file()]
 
 
-def _fingerprint(manifest):
+def _fingerprint(manifest, platform):
     digest = hashlib.sha256()
-    for rel in IDENTITY_FILES:
+    for rel in identity_files(platform):
         entry = manifest.get(rel)
         digest.update(f'{rel}\0{entry["sha256"] if entry else "-"}\n'.encode())
     return digest.hexdigest()
@@ -223,7 +249,10 @@ def load_snapshot(snapshot, *, full=False, official=()):
                 problems.append(rel)
         except FileNotFoundError:
             problems.append(rel)
-    for rel in (manifest if full else [r for r in IDENTITY_FILES if r in manifest]):
+    info.setdefault('buildPlatform', detect_build_platform(manifest))
+    if info['buildPlatform'] is None:
+        raise Blocked('snapshotInvalid', 'the snapshot does not hold the runtime of exactly one supported platform')
+    for rel in (manifest if full else [r for r in identity_files(info['buildPlatform']) if r in manifest]):
         if rel not in problems and sha256_file(game / rel) != manifest[rel]['sha256']:
             problems.append(rel)
     for folder in official:
@@ -269,7 +298,7 @@ KNOWN_NOISE = (
                'differ from run to run, so they cannot be matched against the baseline'},
 )
 TRANSLATION_SUMMARY = re.compile(r'^Translation data for language .+ has \d+ errors\. Generate translation report for more info\.$')
-MOD_KEYS = {'path', 'packageId', 'target'}
+MOD_KEYS = {'path', 'packageId', 'target', 'expectedLoadFolders'}
 EXPECTATION_KEYS = {
     'defs': ({'type', 'defName', 'exists'}, set()),
     'defValues': ({'type', 'defName', 'path', 'equals'}, set()),
@@ -337,8 +366,18 @@ def validate_request(request, base):
         _require(isinstance(mod.get('target', False), bool), f'mods[{index}].target must be a boolean')
         if 'packageId' in mod:
             _require(isinstance(mod['packageId'], str) and mod['packageId'], f'mods[{index}].packageId must be a string')
-        resolved.append({'path': str((base / mod['path']).resolve()), 'packageId': mod.get('packageId'),
-                         'target': mod.get('target', False)})
+        entry = {'path': str((base / mod['path']).resolve()), 'packageId': mod.get('packageId'),
+                 'target': mod.get('target', False)}
+        if 'expectedLoadFolders' in mod:
+            folders = mod['expectedLoadFolders']
+            _require(isinstance(folders, list) and folders and all(isinstance(f, str) for f in folders)
+                     and len(set(folders)) == len(folders)
+                     and all(f == '' or (f == f.strip() and '\\' not in f
+                                         and all(part not in ('', '.', '..') for part in f.split('/')))
+                             for f in folders),
+                     f'mods[{index}].expectedLoadFolders must be distinct relative folders ("" is the mod root)')
+            entry['expectedLoadFolders'] = list(folders)
+        resolved.append(entry)
     _require(any(m['target'] for m in resolved), 'at least one mod must have "target": true')
 
     language = request.get('language', 'English')
@@ -586,6 +625,8 @@ def inspect_mods(request, inputs_dir=None):
                      'archive': archive,
                      'files': len(files), 'bytes': size, 'sha256': digest.hexdigest(), 'fileHashes': entries,
                      'harmonyAssemblies': sorted(rel for rel in files if rel.lower().endswith('/0harmony.dll'))})
+        if 'expectedLoadFolders' in mod:
+            mods[-1]['expectedLoadFolders'] = mod['expectedLoadFolders']
     return mods
 
 
@@ -604,7 +645,9 @@ def _official_package_id(game, folder):
 
 
 def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expectations, run_id, nonce, deadline):
-    """Create host/ (symlinks to the read-only snapshot + copied mods + Worker) and userdata/."""
+    """Create host/ (links to the read-only snapshot + copied mods + Worker) and userdata/.
+
+    Returns the expected mod order and the count of each link kind made into the snapshot."""
     game = Path(snapshot['path']) / 'game'
     host = run_dir / 'host'
     userdata = run_dir / 'userdata'
@@ -621,12 +664,28 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
             if key.startswith('runtimepack.'):
                 for section in ('runtime', 'native'):
                     runtime_pack.update(Path(f).name for f in value.get(section, {}))
+    link_modes = {}
+
+    def link(source, destination):
+        if os.name == 'nt':
+            # Windows symlinks need admin rights or Developer Mode: hard links and junctions instead.
+            win_fs = _win_fs()
+            if source.is_dir():
+                win_fs.link_dir(source, destination)
+                mode = 'junction'
+            else:
+                mode = win_fs.link_file(source, destination)
+        else:
+            os.symlink(source, destination)
+            mode = 'symlink'
+        link_modes[mode] = link_modes.get(mode, 0) + 1
+
     for name in sorted(os.listdir(game)):
         if name in GAME_EXCLUDED or name in runtime_pack:
             continue
-        os.symlink(game / name, host / name)
+        link(game / name, host / name)
     for folder in request['official']:
-        os.symlink(game / 'Data' / folder, host / 'Data' / folder)
+        link(game / 'Data' / folder, host / 'Data' / folder)
     for mod in mods:
         destination = host / 'Mods' / mod['folderName']
         source = Path(mod['sourcePath'])
@@ -688,7 +747,29 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
         worker_request['map'] = {**{k: v for k, v in request['map'].items() if k != 'imageScale'},
                                  'observationPath': str(run_dir / MAP_OBSERVATION)}
     _write_json(run_dir / 'worker-request.json', worker_request)
-    return order
+    return order, link_modes
+
+
+def _win_fs():
+    try:
+        import win_fs
+    except ImportError:  # imported as tools.validation_host
+        from tools import win_fs
+    return win_fs
+
+
+def remove_run_host(host):
+    """Delete a run's host/ folder without touching the snapshot it links to. Returns an error text or None."""
+    if not host.exists():
+        return None
+    try:
+        if os.name == 'nt':
+            _win_fs().remove_tree(host)
+        else:
+            shutil.rmtree(host)
+    except OSError as error:
+        return f'{type(error).__name__}: {error}'
+    return None
 
 
 def _xml_text(value):
@@ -740,18 +821,49 @@ def _dir_bytes(paths):
     return total
 
 
+def worker_command(host, request_path):
+    """The Worker's command line: the apphost built for this platform."""
+    name = WORKER_NAME + ('.exe' if os.name == 'nt' else '')
+    return [str(host / name), '--worker-request', str(request_path)]
+
+
+def _win_job():
+    try:
+        import win_job
+    except ImportError:  # imported as tools.validation_host
+        from tools import win_job
+    return win_job
+
+
 def supervise(run_dir, limits, environment, *, poll=0.2):
-    """Start the Worker in its own process group and enforce time, memory and log limits."""
+    """Start the Worker in its own process group (Windows: Job Object) and enforce time, memory and log limits."""
     host = run_dir / 'host'
-    command = [str(host / WORKER_NAME), '--worker-request', str(run_dir / 'worker-request.json')]
+    command = worker_command(host, run_dir / 'worker-request.json')
     memory_limit = limits['memoryMiB'] * 1024 * 1024
     log_limit = limits['logMiB'] * 1024 * 1024
     log_paths = [run_dir / 'stdout.log', run_dir / 'stderr.log', run_dir / 'events.jsonl', run_dir / 'userdata' / 'logs']
+    windows = os.name == 'nt'
+    job = _win_job().Job(memory_limit) if windows else None
     started = time.monotonic()
-    with open(run_dir / 'stdout.log', 'wb') as out, open(run_dir / 'stderr.log', 'wb') as err:
-        process = subprocess.Popen(command, cwd=host, env=environment, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                   start_new_session=True)
+    try:
+        with open(run_dir / 'stdout.log', 'wb') as out, open(run_dir / 'stderr.log', 'wb') as err:
+            if windows:
+                process = job.start(command, cwd=host, env=environment, stdout=out, stderr=err)
+            else:
+                process = subprocess.Popen(command, cwd=host, env=environment, stdin=subprocess.DEVNULL, stdout=out,
+                                           stderr=err, start_new_session=True)
+    except BaseException:
+        if job:
+            job.close()
+        raise
     pgid = process.pid
+
+    def kill_all():
+        if windows:
+            job.terminate()
+        else:
+            os.killpg(pgid, signal.SIGKILL)
+
     peak, killed, return_code, stray = 0, None, None, False
     try:
         while True:
@@ -759,16 +871,22 @@ def supervise(run_dir, limits, environment, *, poll=0.2):
             if return_code is not None:
                 break
             elapsed = time.monotonic() - started
-            rss = _process_group_rss(pgid)
-            peak = max(peak, rss)
+            if windows:
+                # The job refuses commits over the limit; the Worker then fails or exits by itself.
+                over_memory = 'memoryLimit' in job.poll_messages()
+                peak = job.peak_memory()
+            else:
+                rss = _process_group_rss(pgid)
+                peak = max(peak, rss)
+                over_memory = rss > memory_limit
             if elapsed > limits['timeoutSeconds']:
                 killed = 'timeout'
-            elif rss > memory_limit:
+            elif over_memory:
                 killed = 'memoryLimit'
             elif _dir_bytes(log_paths) > log_limit:
                 killed = 'logLimit'
             if killed:
-                os.killpg(pgid, signal.SIGKILL)
+                kill_all()
                 return_code = process.wait()
                 break
             time.sleep(poll)
@@ -776,30 +894,55 @@ def supervise(run_dir, limits, environment, *, poll=0.2):
         # Also on Ctrl+C or any error: the Worker runs in its own session and would not see
         # the terminal's interrupt, so it must never outlive the Controller's supervision.
         if process.poll() is None:
-            os.killpg(pgid, signal.SIGKILL)
+            kill_all()
             process.wait()
-        # The Worker exits with Environment.Exit; anything left in its group is a stray descendant.
-        stray = _group_alive(pgid)
-        if stray:
-            os.killpg(pgid, signal.SIGKILL)
+        if windows:
+            # A Worker that hit the job's memory limit may have exited on its own before the next poll.
+            if killed is None and 'memoryLimit' in job.poll_messages():
+                killed = 'memoryLimit'
+            stray = job.active_processes() > 0
+            if stray:
+                job.terminate()
+            peak = max(peak, job.peak_memory())
+            job.close()
+        else:
+            # The Worker exits with Environment.Exit; anything left in its group is a stray descendant.
+            stray = _group_alive(pgid)
+            if stray:
+                os.killpg(pgid, signal.SIGKILL)
+    if windows:
+        enforcement = {'timeout': 'TerminateJobObject', 'memory': 'Job Object JOB_MEMORY (committed bytes) + DOTNET_GCHeapHardLimit',
+                       'memoryHard': True, 'memoryMeasure': 'jobCommit'}
+    else:
+        enforcement = {'timeout': 'SIGKILL to process group', 'memory': 'polled group RSS + DOTNET_GCHeapHardLimit',
+                       'memoryHard': False, 'memoryMeasure': 'groupRss'}
     return {
         'command': [Path(command[0]).name, *command[1:2]], 'exitCode': return_code, 'killedFor': killed,
         'strayProcessesKilled': stray, 'seconds': round(time.monotonic() - started, 3), 'peakRssBytes': peak,
         'logBytes': _dir_bytes(log_paths),
-        'enforcement': {'timeout': 'SIGKILL to process group', 'memory': 'polled group RSS + DOTNET_GCHeapHardLimit',
-                        'memoryHard': False, 'logs': 'polled size', 'pollSeconds': poll},
+        'enforcement': {**enforcement, 'logs': 'polled size', 'pollSeconds': poll},
     }
 
 
 def worker_environment(run_dir, limits, runtime):
-    env = {
-        'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
-        'HOME': str(run_dir / 'home'), 'TMPDIR': str(run_dir / 'tmp'),
-        'XDG_CONFIG_HOME': str(run_dir / 'home' / '.config'), 'XDG_DATA_HOME': str(run_dir / 'home' / '.local' / 'share'),
-        'XDG_CACHE_HOME': str(run_dir / 'home' / '.cache'), 'LANG': 'C.UTF-8',
-        'DOTNET_CLI_TELEMETRY_OPTOUT': '1', 'DOTNET_NOLOGO': '1',
-        'DOTNET_GCHeapHardLimit': format(limits['memoryMiB'] * 1024 * 1024, 'x'),
-    }
+    home = run_dir / 'home'
+    if os.name == 'nt':
+        # Only the system locations are inherited; every per-user folder points into the run directory.
+        env = {name: os.environ[name] for name in ('PATH', 'SystemRoot', 'SystemDrive', 'windir') if name in os.environ}
+        env.update({'USERPROFILE': str(home), 'APPDATA': str(home / 'AppData' / 'Roaming'),
+                    'LOCALAPPDATA': str(home / 'AppData' / 'Local'),
+                    'TEMP': str(run_dir / 'tmp'), 'TMP': str(run_dir / 'tmp')})
+        for folder in ('Roaming', 'Local'):
+            (home / 'AppData' / folder).mkdir(parents=True, exist_ok=True)
+    else:
+        env = {
+            'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+            'HOME': str(home), 'TMPDIR': str(run_dir / 'tmp'),
+            'XDG_CONFIG_HOME': str(home / '.config'), 'XDG_DATA_HOME': str(home / '.local' / 'share'),
+            'XDG_CACHE_HOME': str(home / '.cache'), 'LANG': 'C.UTF-8',
+        }
+    env.update({'DOTNET_CLI_TELEMETRY_OPTOUT': '1', 'DOTNET_NOLOGO': '1',
+                'DOTNET_GCHeapHardLimit': format(limits['memoryMiB'] * 1024 * 1024, 'x')})
     if runtime == 'standard' and os.environ.get('DOTNET_ROOT'):
         env['DOTNET_ROOT'] = os.environ['DOTNET_ROOT']
     return env
@@ -991,6 +1134,18 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         if not order or not order.get('matches'):
             incomplete.append({'code': 'modOrderMismatch', 'detail': 'the mods that actually loaded differ from the request',
                                'expected': (order or {}).get('expected'), 'actual': (order or {}).get('actual')})
+        planned = [m for m in mods if 'expectedLoadFolders' in m]
+        if planned:
+            # A limited fetch was planned for these folders; a different selection by the
+            # game means inputs may be missing, so the run cannot vouch for the mod.
+            loaded = {str(r.get('packageId', '')).lower(): r.get('loadFolders')
+                      for r in worker.get('runningMods') or [] if isinstance(r, dict)}
+            differ = [{'packageId': m['packageId'], 'expected': m['expectedLoadFolders'],
+                       'actual': loaded.get(m['packageId'].lower())}
+                      for m in planned if loaded.get(m['packageId'].lower()) != m['expectedLoadFolders']]
+            if differ:
+                incomplete.append({'code': 'loadFolderMismatch', 'mods': differ,
+                                   'detail': 'the game loaded other folders than the fetched inputs were planned for'})
         if language_check and worker.get('activeLanguage') != request['language']:
             incomplete.append({'code': 'languageNotApplied',
                                'detail': f'active language is {worker.get("activeLanguage")}, requested {request["language"]}'})
@@ -1256,19 +1411,22 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
             raise Blocked('invalidRequest', str(error)) from None
         result['request'].update({'sha256': request['sha256'], 'levels': request['levels'], 'official': request['official'],
                                   'language': request['language'], 'limits': request['limits']})
-        if result['platform'] != 'linux-x64':
+        if result['platform'] not in BUILD_FILES:
             raise Blocked('platformUnsupported',
-                          f'running the Worker is implemented for linux-x64 only; this is {result["platform"]}')
+                          f'running the Worker is implemented for {" and ".join(BUILD_FILES)} only; this is {result["platform"]}')
         if runtime not in ('waylith', 'standard'):
             raise Blocked('runtimeUnsupported', f'unknown runtime {runtime}')
-        worker_dir = Path(worker_dir).resolve()
-        if not (worker_dir / WORKER_NAME).is_file() or not (worker_dir / f'{WORKER_NAME}.dll').is_file():
-            raise Blocked('workerMissing', f'Worker build not found in {worker_dir}; build worker/RimWorldValidation.Worker first')
-        result['tool']['workerSha256'] = sha256_file(worker_dir / f'{WORKER_NAME}.dll')
-
         mark = time.monotonic()
         snapshot = load_snapshot(snapshot_dir, full=verify_full, official=request['official'])
         timings['verifySnapshotSeconds'] = round(time.monotonic() - mark, 3)
+        if snapshot['buildPlatform'] != result['platform']:
+            raise Blocked('platformMismatch', f'the snapshot holds the {snapshot["buildPlatform"]} build of the game; '
+                          f'this host is {result["platform"]}')
+        worker_dir = Path(worker_dir).resolve()
+        worker_exe = BUILD_FILES[result['platform']]['workerExe']
+        if not (worker_dir / worker_exe).is_file() or not (worker_dir / f'{WORKER_NAME}.dll').is_file():
+            raise Blocked('workerMissing', f'Worker build not found in {worker_dir}; build worker/RimWorldValidation.Worker first')
+        result['tool']['workerSha256'] = sha256_file(worker_dir / f'{WORKER_NAME}.dll')
         missing = [f for f in request['official'] if f not in snapshot['officialContent']]
         if missing:
             raise Blocked('officialContentMissing', 'snapshot lacks official content: ' + ', '.join(missing))
@@ -1325,14 +1483,18 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         run_id = f'{result["runId"]}-{name}'
         nonce = secrets.token_hex(16)
         mark = time.monotonic()
-        order = build_run_dir(run_dir, snapshot, request, run_mods, worker_dir, runtime,
-                              expectations=run_expectations, run_id=run_id, nonce=nonce, deadline=deadline)
+        order, link_modes = build_run_dir(run_dir, snapshot, request, run_mods, worker_dir, runtime,
+                                          expectations=run_expectations, run_id=run_id, nonce=nonce,
+                                          deadline=deadline)
         prepared = time.monotonic() - mark
         wall = time.time()
         process = supervise(run_dir, limits, worker_environment(run_dir, limits, runtime))
+        process['linkModes'] = link_modes
         worker, problem, events = read_worker_output(run_dir, run_id, nonce, wall, limits['diagnostics'] + 10)
         if not keep_run_dirs:
-            shutil.rmtree(run_dir / 'host', ignore_errors=True)
+            cleanup_error = remove_run_host(run_dir / 'host')
+            if cleanup_error:
+                process['cleanupError'] = cleanup_error
         return {'runDir': str(run_dir), 'order': order, 'prepareSeconds': round(prepared, 3), 'process': process,
                 'worker': worker, 'problem': problem, 'events': events}
 

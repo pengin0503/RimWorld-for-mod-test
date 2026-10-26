@@ -34,7 +34,7 @@ Controller は Worker の match をそのまま信用せず、ケース/期待�
 ## 残る作業
 
 - 独立した参照経路での比較とケース固有の資格判定。既存 A/B・マップの qualified を流用しない。
-- ユーザーの `rimworld-VCE-Flour-Patch` 本体を使う検証。索引に当該自作 MOD の一致は未確認なので、ソース About とビルド入力の同一性を確認し、依存 Workshop MOD は正規索引→R2 の必要範囲で取得する。今回自作 fixture を本体の成功へ読み替えない。
+- ~~ユーザーの `rimworld-VCE-Flour-Patch` 本体を使う検証。~~ 2026-10-26 に実施：不具合版は全組で非表示（不一致を検出）、v0.1.0 と main は全組で表示。[記録](2026-10-26-flour-mod-c-run.md)。人の過去の報告とは同じ向きだが、描画との比較ではないので適格化には使わない。
 - Windows での実画面描画、既存 Bill 移行、実際のクラフト、イベント/クエストは別範囲。
 
 実装計画：[bill-ingredient-options](../superpowers/plans/2026-10-26-bill-ingredient-options.md)。要求・結果：[C の契約](../contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental)。

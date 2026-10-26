@@ -1,12 +1,19 @@
-# 実ゲーム処理による MOD 検証の使い方（Linux）
+# 実ゲーム処理による MOD 検証の使い方（Linux・Windows）
 
 `tools/validation_host.py` は、利用者が用意した RimWorld Linux 版のゲーム DLL を使い、MOD の実際の読み込み（A）と DLL・Harmony の登録（B）を検証して終了します。公式ゲーム実行ファイルは起動しません。ゲーム画面・メインメニュー・プレイ機能はありません。判定の意味は [契約](contracts/mod-validation-v1.md) を参照してください。
 
-A/B とマップ生成の現在の対応：Linux x86_64、ゲーム同梱の WaylithClr、RimWorld 1.7.4985 rev1269。この組だけが `qualified` です。Windows での `run` は未対応で `blocked` を返します。
+A/B とマップ生成の現在の対応：Linux x86_64、ゲーム同梱の WaylithClr、RimWorld 1.7.4985 rev1269。この組だけが `qualified` です。
+
+Windows x64 でも `run` は動きます（W1。描画なし）。2026-10-26 にユーザーの PC の実ゲームで、fixture 行列 22 ケースと C の 6 ケースが Linux と同じ判定になりました（[記録](research/2026-10-26-windows-w1-real-game.md)）。ただし公式との比較はまだなので、結果は常に `experimental`（全体は `incomplete`）です。Linux での合格を Windows の合格とは読み替えません。Windows では次の点が Linux と違います（[設計](superpowers/specs/2026-10-26-windows-host-design.md)）。
+
+- スナップショットは、そのスナップショットと同じ OS 用のゲームでしか使えません。別 OS 用なら `platformMismatch` で `blocked`。
+- 実行ディレクトリはシンボリックリンクではなく、ファイルのハードリンク（別ドライブなどで作れなければ複製）とフォルダのジャンクションで作ります。管理者権限や開発者モードは要りません。使った方式の数は `process.<run>.linkModes` に出ます。
+- Worker は Job Object の中で動きます。メモリ上限はジョブ全体の確保量に対するハードな上限（`memoryHard=true`、`memoryMeasure=jobCommit`）で、上限を超える確保はその場で失敗します。時間切れ・Ctrl+C・子プロセスの残存はジョブごと止めます。上限で止まったときの `peakRssBytes` は、拒否された確保要求も数えるので上限より大きく出ることがあります。
+- Worker に渡す環境変数は `PATH`・`SystemRoot`・`SystemDrive`・`windir` だけを引き継ぎ、`USERPROFILE`・`APPDATA`・`LOCALAPPDATA`・`TEMP`・`TMP` は実行ディレクトリの中を指します。
 
 ## 1. 準備（初回のみ）
 
-必要なもの：Python 3.12+、.NET SDK 10（Worker のビルド用）、RimWorld Linux 版のフォルダ。
+必要なもの：Python 3.12+、.NET SDK 10（Worker のビルド用）、実行する OS 用の RimWorld のフォルダ。Windows でも下の同じコマンドで Worker をビルドします。`worker/bin` に `RimWorldValidationWorker.exe` ができていることを確かめてください（公開 CI でも確認しています）。
 
 ```bash
 dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin

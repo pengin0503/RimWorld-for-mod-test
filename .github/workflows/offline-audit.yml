@@ -49,6 +49,10 @@ jobs:
         run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
       - name: Bound category traversal before game predicates (synthetic only)
         run: dotnet run --project tests/worker/CategoryTree -c Release
+      - name: Windows build has the apphost the Controller starts
+        if: runner.os == 'Windows'
+        shell: bash
+        run: test -f worker/bin/RimWorldValidationWorker.exe
       - name: Worker refuses to run without a Controller request
         shell: bash
         run: |

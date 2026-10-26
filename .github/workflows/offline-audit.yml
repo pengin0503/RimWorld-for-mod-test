@@ -29,6 +29,25 @@ jobs:
       - name: Test synthetic inputs only
         run: python -m unittest discover -s tests -v
 
+  # The GUI's game-independent part. The GUI itself references the game's DLLs
+  # and is built only where the game is installed (never here).
+  gui-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test the GUI model (warnings are errors)
+        run: dotnet test gui/RimWorldValidation.Gui.Model.Tests -c Release
+
   # Builds the validation Worker without any game file: it binds every game
   # member by reflection at run time. Real-game runs stay private.
   worker-build:

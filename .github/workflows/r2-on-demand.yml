@@ -1,0 +1,77 @@
+name: R2 on-demand asset lookup
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 'Exact file or one Workshop MOD'
+        type: choice
+        options: [file, mod]
+        required: true
+      object_key:
+        description: 'For file: exact Game-Linux/... or Workshop/<ID>/... key'
+        type: string
+        required: false
+      workshop_id:
+        description: 'For mod: numeric Workshop ID'
+        type: string
+        required: false
+      scope:
+        description: 'For mod: About metadata, XML, or entire MOD'
+        type: choice
+        options: [about, xml, all]
+        default: about
+        required: true
+      dry_run:
+        description: 'List only (no Get); exact file is not verified'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      R2_BUCKET: rimworld-17
+      OBJECT_KEY: ${{ inputs.object_key }}
+      WORKSHOP_ID: ${{ inputs.workshop_id }}
+      KIND: ${{ inputs.kind }}
+      SCOPE: ${{ inputs.scope }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Validate private configuration and AWS CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AWS_ACCESS_KEY_ID" && test -n "$AWS_SECRET_ACCESS_KEY"
+          test -n "$R2_ENDPOINT"
+          aws --version
+      - name: Read only requested private assets (do not publish)
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--dest "$RUNNER_TEMP/r2-private")
+          if [[ "$DRY_RUN" == "true" ]]; then args+=(--dry-run); fi
+          if [[ "$KIND" == "file" ]]; then
+            test -n "$OBJECT_KEY"
+            python tools/r2_assets.py file --key "$OBJECT_KEY" "${args[@]}"
+          elif [[ "$KIND" == "mod" ]]; then
+            test -n "$WORKSHOP_ID"
+            python tools/r2_assets.py mod --workshop-id "$WORKSHOP_ID" --scope "$SCOPE" "${args[@]}"
+          else
+            echo 'Invalid kind' >&2
+            exit 2
+          fi

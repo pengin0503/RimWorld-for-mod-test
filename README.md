@@ -56,3 +56,7 @@ AI の通常の検証先は Linux、Windows は利用者自身の検証先とし
 ゲーム DLL、実行ファイル、ランタイム、Data、アセット、逆コンパイル本文、個人設定・セーブ・生ログは公開しません。正規の利用者が用意したファイルを私有領域で使います。Anomaly は対象外。公開 CI は自作 fixture に限定します。
 
 [旧 headless 設計](docs/superpowers/specs/2026-10-25-headless-validation-design.md)と[旧二用途設計](docs/superpowers/specs/2026-10-25-dual-use-design.md)は経緯の記録です。公式実行ファイルを製品から起動する方針と、通常起動の入口を作る方針は最新仕様で取り消しています。旧資料の判断を新しい要件として復活させないでください。
+
+## Cloudflare R2 からのオンデマンド資材取得
+
+[Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。R2 の Secrets 設定と実接続テストは未実施です。

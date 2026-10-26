@@ -6,7 +6,7 @@
 
 既存の Linux x86_64、RimWorld 1.7.4985 rev1269、同梱 WaylithClr 10.0.13-waylithclr.dev のゲームスナップショットを再利用。ゲーム/Workshop の追加取得は 0 ファイル。R2 上の変更なし。公開ソースは自作 fixture とホストだけ。
 
-Worker の A ロード完了後、検査中だけ新規 Game を作り、ロード済み RecipeDef から実 `BillUtility.MakeNewBill` を呼ぶ。UI と同じ親フィルターの表示 root と実 Listing_TreeThingFilter を構築し、カテゴリ/材料の実表示判定、初期の発見状態、Bill の実許可状態を読む。Def の追加・書換え、許可の強制変更、UI の stub、描画、ワールド、マップ、ゲーム開始、tick、セーブはない。Current.Game は finally で復元する。GameComponent コンストラクターは通るので、そこで起こる診断も比較対象になる。
+Worker の A ロード完了後、検査中だけ新規 Game を作り、ロード済み RecipeDef から実 `BillUtility.MakeNewBill` を呼ぶ。UI と同じ親フィルターの表示 root と実 Listing_TreeThingFilter を構築し、カテゴリ/材料の実表示判定、初期の発見状態、Bill の実許可状態を読む。ホスト側に検査のための Def 追加・書換え、許可の強制変更、UI の stub はない。描画、ワールド、マップ、ゲーム開始、tick、セーブも行わない。MOD コンストラクター自身による副作用の普遍的な不在を証明したものではない。Current.Game は finally で復元する。GameComponent コンストラクターは通るので、そこで起こる診断も比較対象になる。
 
 この新規 Game はロード後のホスト文脈内にあり、プレイ中のセーブの状態は再現しない。GameComponent の開始処理やマップに依存する MOD はこのケースの対象外で、観測不能なら incomplete。描画コールバックでだけ項目を隠す処理も対象外。
 
@@ -38,3 +38,11 @@ Controller は Worker の match をそのまま信用せず、ケース/期待�
 - Windows での実画面描画、既存 Bill 移行、実際のクラフト、イベント/クエストは別範囲。
 
 実装計画：[bill-ingredient-options](../superpowers/plans/2026-10-26-bill-ingredient-options.md)。要求・結果：[C の契約](../contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental)。
+
+## 回帰確認と独立レビュー
+
+既存の実ゲーム行列の `ok`（A）と `harmony-ok`（A/B）は両方 passed / qualified、追加理由なし。公開 Python テストは 173 件中 172 成功、Windows 専用 1 件スキップ。Worker Release は警告/エラー 0。
+
+独立レビューの重要指摘を 2 件修正した。ゲームの再帰的なカテゴリ判定や表示 root 解決より先に、生のカテゴリ構造を上限付きで確認する。ゲーム不要の C# ハーネスで循環・深度 129・20001 ノードを拒否し、拒否前に表示判定が一度も呼ばれないこと、深度 128 と 20000 ノードの境界、非表示祖先の伝播を 9 assertion で確認。先に表示判定を呼ぶ故障を入れた一時コピーではテストが失敗した。CI の Linux/Windows Worker ジョブでも実行する。
+
+もう 1 件は `parentAllows` / `specialFilterDisallows` の厳密な真偽値と、`context=freshGameNewBill` / `rendered=false`、非表示理由と成分の整合性の検査。不足・異なる文脈・矛盾を再現する回帰テストを失敗→成功にした。実 UI の Visible を MOD が意図して上書きする可能性は残し、親/特殊フィルターの観測だけで実表示判定を独自実装し直さない。

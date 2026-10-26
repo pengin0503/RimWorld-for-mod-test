@@ -16,7 +16,8 @@ def request():
 
 def observation(**actual):
     values = dict(paneEligible=True, categoryReachable=True, categoryVisible=True, itemVisible=True,
-                  visible=True, allowed=True, hiddenByDiscovery=False, reasons=[])
+                  visible=True, allowed=True, hiddenByDiscovery=False, parentAllows=True, specialFilterDisallows=False,
+                  context='freshGameNewBill', rendered=False, reasons=[])
     values.update(actual)
     return {'caseId': CASE, 'expected': dict(ITEM), 'actual': values, 'outcome': 'match'}
 
@@ -66,6 +67,25 @@ class BillEvaluationTests(unittest.TestCase):
         self.assertEqual(result[0:2], ('blocked', 'completed'))
         self.assertEqual(result[3]['C']['status'], 'blocked')
         self.assertIn('billIngredientApiUnavailable', [r['code'] for r in result[2]])
+
+    def test_ui_predicate_override_is_observed_without_reimplementing_it(self):
+        # A MOD may intentionally override Visible even when a special filter disallows the item.
+        result = self.evaluate([observation(specialFilterDisallows=True, reasons=['specialFilterDisallows'])])
+        self.assertEqual(result[3]['C']['status'], 'completed')
+
+    def test_rejects_missing_or_contradictory_context_and_filter_evidence(self):
+        variants = [observation(context='existingSave'), observation(rendered=True), observation(parentAllows='bad'),
+                    observation(specialFilterDisallows=None), observation(parentAllows=False),
+                    observation(specialFilterDisallows=True)]
+        for key in ('context', 'rendered', 'parentAllows', 'specialFilterDisallows'):
+            row = observation()
+            del row['actual'][key]
+            variants.append(row)
+        for row in variants:
+            with self.subTest(row=row):
+                result = self.evaluate([row])
+                self.assertEqual(result[3]['C']['status'], 'incomplete')
+                self.assertIn('billIngredientObservationIncomplete', [r['code'] for r in result[2]])
 
     def test_missing_duplicate_other_identity_and_invalid_context_are_incomplete(self):
         variants = [[], [observation(), observation()], [dict(observation(), caseId='other')],

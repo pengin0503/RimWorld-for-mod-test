@@ -1,6 +1,6 @@
 # RimWorld MOD 検証専用ホスト：仕様・設計案
 
-日付：2026-10-25（日本時間）。状態：**Linux x86_64 で主案の成立を確認し、A/B を実装済み（2026-10-25 更新）**。実装と結果は [製品計画](../plans/test-only-host-product.md)、[呼出し経路](../../research/test-host-entrypoints.md)、[適格化](../../research/test-host-qualification.md)、[性能](../../research/test-host-performance.md)、[契約](../../contracts/mod-validation-v1.md) を参照。以下の本文は設計時点の記述で、§3 と §11 の「現状」は更新前の状態を指す。Windows 実行、C、D は未実装。
+日付：2026-10-25（日本時間）。状態：**Linux x86_64 で主案の成立を確認し、A/B を実装済み（2026-10-25 更新）**。実装と結果は [製品計画](../plans/test-only-host-product.md)、[呼出し経路](../../research/test-host-entrypoints.md)、[適格化](../../research/test-host-qualification.md)、[性能](../../research/test-host-performance.md)、[契約](../../contracts/mod-validation-v1.md) を参照。以下の本文は設計時点の記述で、§3 と §11 の「現状」は更新前の状態を指す。Windows 実行・D は未実装。2026-10-26 に C の新規 Bill 材料候補ケースを追加（非描画・experimental、[契約](../../contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental)）。
 
 ## 1. 原点と文書の優先順位
 

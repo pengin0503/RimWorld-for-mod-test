@@ -24,6 +24,7 @@ public static class BillIngredientOptions
         {
             current = Reflect.StaticProperty(GameType("Verse.Current"), "Game");
             previous = current.GetValue(null);
+            ValidateCategoryRegistry();
             // Bill's real constructor needs a real UniqueIDsManager. The fresh Game also
             // defines the initial undiscovered-item state. Never start/finalize/tick it.
             object game = Activator.CreateInstance(GameType("Verse.Game"))!;
@@ -158,39 +159,48 @@ public static class BillIngredientOptions
         };
     }
 
+    private static void ValidateCategoryRegistry()
+    {
+        // DisplayRootCategory can itself search descendants in the registry. Validate
+        // every registered subtree before resolving that root or constructing a Bill.
+        object registry = Reflect.StaticField(GameType("Verse.ThingCategoryNodeDatabase"), "allThingCategoryNodes")
+            .GetValue(null) ?? throw new CaseContextException("categoryMissing", "category registry is unavailable");
+        int count = 0;
+        foreach (object node in Objects(registry))
+        {
+            if (++count > 20000) throw new CategoryTreeLimitException();
+            BoundedCategoryTree.Observe(Reflect.Member(node, "catDef")!,
+                category => Objects(Reflect.Member(category, "childCategories")!), _ => true);
+        }
+    }
+
     private static (bool Reachable, bool Visible) Reachable(object root, object thing, object listing, MethodInfo visible)
     {
-        bool reachable = false, shown = false;
-        int count = 0;
-        var path = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        Walk(root, true, 0);
-        return (reachable, shown);
-
-        void Walk(object node, bool ancestorsVisible, int depth)
-        {
-            if (depth > 128 || ++count > 20000 || !path.Add(node))
+        object rootCategory = Reflect.Member(root, "catDef")!;
+        List<BoundedCategoryTree.Entry> entries = BoundedCategoryTree.Observe(rootCategory,
+            category => Objects(Reflect.Member(category, "childCategories")!), category =>
             {
-                throw new CaseContextException("categoryTraversalLimit", "cyclic or oversized ingredient category tree");
-            }
-            object category = Reflect.Member(node, "catDef")!;
-            if (Objects(Reflect.Member(category, "SortedChildThingDefs")!).Any(t => ReferenceEquals(t, thing)))
+                object node = Reflect.Member(category, "treeNode")
+                    ?? throw new CaseContextException("categoryMissing", "category node is unavailable");
+                return (bool)visible.Invoke(listing, [node])!;
+            });
+        bool reachable = false, shown = false;
+        foreach (BoundedCategoryTree.Entry entry in entries)
+        {
+            if (Objects(Reflect.Member(entry.Node, "SortedChildThingDefs")!).Any(t => ReferenceEquals(t, thing)))
             {
                 reachable = true;
-                shown |= ancestorsVisible;
+                shown |= entry.Visible;
             }
-            foreach (object child in Objects(Reflect.Member(node, "ChildCategoryNodes")!))
-            {
-                bool childVisible = (bool)visible.Invoke(listing, [child])!;
-                Walk(child, ancestorsVisible && childVisible, depth + 1);
-            }
-            path.Remove(node);
         }
+        return (reachable, shown);
     }
 
     private static Dictionary<string, object?> Error(JsonElement item, Exception error)
     {
         while (error is TargetInvocationException { InnerException: { } inner }) error = inner;
         string reason = error is CaseContextException context ? context.Reason
+            : error is CategoryTreeLimitException ? "categoryTraversalLimit"
             : error is AdapterMismatchException or MissingMemberException ? "apiUnavailable" : "observationError";
         return new() { ["caseId"] = CaseId, ["expected"] = item.Clone(), ["outcome"] = "error",
             ["reason"] = reason, ["error"] = Diagnostics.TruncateUtf8(error.Message, 16 * 1024) };

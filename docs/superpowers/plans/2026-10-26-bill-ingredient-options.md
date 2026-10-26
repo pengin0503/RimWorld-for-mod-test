@@ -44,7 +44,7 @@
 
 ### Task 2: Fixed Worker observer and private behavioral cases
 
-**Files:** Create `worker/RimWorldValidation.Worker/BillIngredientOptions.cs`; modify `Checks.cs`; create self-made `tests/fixtures/validation-mods/billingredients` and private runner `tests/integration/run_bill_ingredients.py`.
+**Files:** Create `worker/RimWorldValidation.Worker/BillIngredientOptions.cs` and `BoundedCategoryTree.cs`; public game-free C# harness `tests/worker/CategoryTree/`; modify `Checks.cs`; create self-made `tests/fixtures/validation-mods/billingredients` and private runner `tests/integration/run_bill_ingredients.py`.
 
 **Interfaces:** `BillIngredientOptions.Write(json, expectations)` reads loaded game state only. Case runs post-load within existing checks/main thread/watchdog bounds. Reflection bound to fixed type/member names. New Bill through recipe MakeNewBill; tree root chosen by actual filter UI; special filters and category/item predicates from actual listing. Explicit `contextUnavailable`, `defMissing`, `paneNotEditable`, `categoryMissing`, `apiUnavailable`, `observationError` outcomes stay incomplete.
 
@@ -59,11 +59,21 @@
 
 **Interfaces:** Public contract and scope describe only implemented non-rendered case and actual qualification state.
 
-- [ ] Record observed build/runtime, fixture inputs, exact outcomes and remaining private-MOD validation scope without private paths/logs/assets.
-- [ ] Run full Python suite and Worker Release build; inspect diff for private data.
-- [ ] Independent whole-change review; fix important findings with RED→GREEN regressions.
-- [ ] Commit, push specified branch to PR #9, update PR summary. Do not merge.
+- [x] Record observed build/runtime, fixture inputs, exact outcomes and remaining private-MOD validation scope without private paths/logs/assets.
+- [x] Run full Python suite and Worker Release build; inspect diff for private data.
+- [x] Independent whole-change review; fix important findings with RED→GREEN regressions.
+- [x] Commit, push specified branch to PR #9, update PR summary. Do not merge.
 
 ## Execution ledger
 
 User approved the design and explicitly instructed implementation/progress; execute inline without another plan approval pause. Existing user-selected branch/checkout is retained. Source-built user's Flour MOD and R2 dependencies are a follow-up if this first case is experimental; no unverified substitution or game payload download is needed to implement/verify the generic observer.
+
+## Review resolutions and implementation decisions
+
+- Existing specified branch and inline implementation retained after explicit design approval; no extra approval round or worktree.
+- Real Bill construction requires a fresh temporary Game/UniqueIDsManager. Restore Current.Game, use initial discovery state, no map/start/tick/render/save. This is not an existing-save UI context; map/start-dependent behavior can remain unobserved.
+- Whole C requests remain experimental/incomplete until independent reference qualification; six fixture cases are implementation evidence only. Flour MOD compatibility is not established by these fixtures.
+- Missing API can block C after A has executed. Preserve executionStatus, so consumers must inspect stage and execution status rather than assume every blocked result never ran.
+- Windows rendering, events/quests, ticks, crafting completion and migration remain excluded; their bugs are not covered. Scope metadata was corrected accordingly without implying extra coverage.
+- Observer code changes no Def allowances to force results. MOD constructors can change process globals; no universal absence of their side effects is asserted.
+- Fresh reviewer found two Important issues: preflight raw categories before recursive game predicates/root resolution, and require context/filter/reason evidence in Controller. Both fixed with regressions; no Critical/deferred Minor findings. The reviewer did not independently repeat the full suite/build/private runs; implementer directly ran them and inspected results.

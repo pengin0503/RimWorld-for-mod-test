@@ -1081,7 +1081,7 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
 
 
 BILL_CASE = 'bill-ingredient-options.v1'
-BILL_COMPONENTS = ('paneEligible', 'categoryReachable', 'categoryVisible', 'itemVisible', 'hiddenByDiscovery', 'visible', 'allowed')
+BILL_COMPONENTS = ('paneEligible', 'categoryReachable', 'categoryVisible', 'itemVisible', 'hiddenByDiscovery', 'parentAllows', 'specialFilterDisallows', 'visible', 'allowed')
 
 
 def evaluate_bill_ingredients(request, checks):
@@ -1099,10 +1099,19 @@ def evaluate_bill_ingredients(request, checks):
             good = (isinstance(row, dict) and row.get('caseId') == BILL_CASE and row.get('expected') == wanted
                     and row.get('outcome') in ('match', 'mismatch') and isinstance(actual, dict)
                     and all(type(actual.get(k)) is bool for k in BILL_COMPONENTS)
+                    and actual.get('context') == 'freshGameNewBill' and actual.get('rendered') is False
                     and actual.get('paneEligible') is True and actual.get('categoryReachable') is True
                     and actual.get('visible') == (actual.get('categoryVisible') and actual.get('itemVisible') and not actual.get('hiddenByDiscovery'))
                     and isinstance(actual.get('reasons'), list)
                     and all(isinstance(r, str) for r in actual['reasons']))
+            if good:
+                reason_flags = {'categoryNotVisible': not actual['categoryVisible'],
+                                'parentFilterDisallows': not actual['parentAllows'],
+                                'specialFilterDisallows': actual['specialFilterDisallows'],
+                                'itemNotVisible': not actual['itemVisible'],
+                                'undiscoveredItem': actual['hiddenByDiscovery']}
+                wanted_reasons = {key for key, present in reason_flags.items() if present}
+                good = set(actual['reasons']) == wanted_reasons and len(actual['reasons']) == len(wanted_reasons)
             if not good:
                 valid = False
                 continue
@@ -1422,9 +1431,9 @@ def _scope(request, stages):
         checked.append('non-rendered new-bill ingredient option predicates (experimental); see stages.C')
     not_checked = [
         'other languages than ' + request['language'],
-        ('the game start after map generation (Game.FinalizeInit, GameComponent.StartedNewGame), ticks, UI, rendering, '
+        ('the game start after map generation (Game.FinalizeInit, GameComponent.StartedNewGame), ticks, rendered UI, rendering, '
          'audio output or Steam' if request['map'] else
-         'anything that needs a map, a game, ticks, UI, rendering, audio output or Steam'),
+         'map activity, started gameplay, ticks, rendered UI, rendering, audio output or Steam'),
         'runtime behavior outside the requested fixed C case; events, quests and ticks',
         'behaviour on other platforms or runtimes than the one recorded in "runtime"',
     ]

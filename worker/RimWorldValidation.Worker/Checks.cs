@@ -99,6 +99,7 @@ public sealed class Checks(GameApi api)
         }
         json.WriteEndArray();
         new HarmonyInspector().Write(json, Items(expectations, "harmonyPatches").ToList());
+        BillIngredientOptions.Write(json, expectations);
         json.WriteEndObject();
     }
 

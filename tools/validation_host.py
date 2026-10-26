@@ -1066,7 +1066,9 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
     for event in fresh:
         event['mentionsTargets'] = _mentions(event, mods)
 
-    if incomplete:
+    if stages['C']['status'] == 'blocked':
+        status = 'blocked'
+    elif incomplete:
         status = 'incomplete'
     elif failed:
         status = 'failed'
@@ -1079,7 +1081,7 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
 
 
 BILL_CASE = 'bill-ingredient-options.v1'
-BILL_COMPONENTS = ('paneEligible', 'categoryReachable', 'categoryVisible', 'itemVisible', 'visible', 'allowed')
+BILL_COMPONENTS = ('paneEligible', 'categoryReachable', 'categoryVisible', 'itemVisible', 'hiddenByDiscovery', 'visible', 'allowed')
 
 
 def evaluate_bill_ingredients(request, checks):
@@ -1098,7 +1100,7 @@ def evaluate_bill_ingredients(request, checks):
                     and row.get('outcome') in ('match', 'mismatch') and isinstance(actual, dict)
                     and all(type(actual.get(k)) is bool for k in BILL_COMPONENTS)
                     and actual.get('paneEligible') is True and actual.get('categoryReachable') is True
-                    and actual.get('visible') == (actual.get('categoryVisible') and actual.get('itemVisible'))
+                    and actual.get('visible') == (actual.get('categoryVisible') and actual.get('itemVisible') and not actual.get('hiddenByDiscovery'))
                     and isinstance(actual.get('reasons'), list)
                     and all(isinstance(r, str) for r in actual['reasons']))
             if not good:
@@ -1106,13 +1108,20 @@ def evaluate_bill_ingredients(request, checks):
                 continue
             matches = actual['visible'] == wanted['visible'] and actual['allowed'] == wanted['allowed']
             stage['checks'].append({'expected': wanted, 'actual': actual, 'outcome': 'match' if matches else 'mismatch'})
+    api_unavailable = (isinstance(rows, list) and len(rows) == len(expected) and any(
+        isinstance(row, dict) and row.get('caseId') == BILL_CASE and row.get('expected') == wanted
+        and row.get('outcome') == 'error' and row.get('reason') == 'apiUnavailable'
+        for wanted, row in zip(expected, rows)))
+    if api_unavailable:
+        stage['status'] = 'blocked'
+        incomplete.append({'code': 'billIngredientApiUnavailable', 'detail': 'required C adapter API is unavailable; A load observations are retained'})
     if not valid:
         incomplete.append({'code': 'billIngredientObservationIncomplete',
                            'detail': 'missing, invalid or unresolved bill ingredient observations'})
     bad = sum(row['outcome'] == 'mismatch' for row in stage['checks'])
     if bad:
         failed.append({'code': 'billIngredientMismatch', 'detail': f'{bad} bill ingredient expectations did not match'})
-    stage['status'] = 'incomplete' if not valid else 'failed' if bad else 'completed'
+    stage['status'] = 'blocked' if api_unavailable else 'incomplete' if not valid else 'failed' if bad else 'completed'
     return stage, incomplete, failed
 
 
@@ -1266,7 +1275,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         if qualification:
             runtime_ok = all(snapshot['files'].get(rel, {}).get('sha256') == value
                              for rel, value in qualification['runtimeSha256'].items())
-            levels_ok = set(request['levels']) - {'C'} <= set(qualification['levels'])  # C has a separate case qualification gate
+            levels_ok = set(request['levels']) <= set(qualification['levels'])
             fidelity = 'qualified' if runtime_ok and levels_ok else 'experimental'
         else:
             fidelity = 'experimental'

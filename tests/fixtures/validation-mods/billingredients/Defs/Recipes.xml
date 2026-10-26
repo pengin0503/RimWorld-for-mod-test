@@ -1,0 +1,24 @@
+<Defs>
+  <ThingDef ParentName="RoughPlantBase">
+    <defName>RWMT_BillGrain</defName><label>fixture plant grain</label><description>Self-made plant-food input.</description>
+    <graphicData><texPath>Things/Item/Resource/Steel</texPath><graphicClass>Graphic_StackCount</graphicClass></graphicData>
+    <thingCategories><li>PlantFoodRaw</li></thingCategories>
+    <statBases><MarketValue>1</MarketValue><Mass>0.1</Mass><Nutrition>0.1</Nutrition></statBases>
+  </ThingDef>
+  <RecipeDef Name="RWMT_BillBase" Abstract="True">
+    <label>bill options fixture</label><description>Self-made ingredient-list fixture.</description><jobString>Testing.</jobString>
+    <workAmount>10</workAmount><workSkill>Cooking</workSkill><products><MealSimple>1</MealSimple></products>
+    <ingredients><li><filter><thingDefs><li>RWMT_BillGrain</li><li>RawCorn</li></thingDefs></filter><count>1</count></li></ingredients>
+    <fixedIngredientFilter><thingDefs><li>RWMT_BillGrain</li><li>RawCorn</li></thingDefs></fixedIngredientFilter>
+    <defaultIngredientFilter><thingDefs><li>RWMT_BillGrain</li></thingDefs></defaultIngredientFilter>
+  </RecipeDef>
+  <RecipeDef ParentName="RWMT_BillBase"><defName>RWMT_BillOptions</defName></RecipeDef>
+  <RecipeDef ParentName="RWMT_BillBase">
+    <defName>RWMT_BillHidden</defName>
+    <fixedIngredientFilter><specialFiltersToDisallow><li>AllowPlantFood</li></specialFiltersToDisallow></fixedIngredientFilter>
+  </RecipeDef>
+  <RecipeDef ParentName="RWMT_BillBase">
+    <defName>RWMT_BillFixed</defName>
+    <ingredients Inherit="False"><li><filter><thingDefs><li>RWMT_BillGrain</li></thingDefs></filter><count>1</count></li></ingredients>
+  </RecipeDef>
+</Defs>

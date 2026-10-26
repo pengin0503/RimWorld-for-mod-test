@@ -86,7 +86,7 @@ CASES = {
     'harmony-no-expectation': (case('AB', ['harmonylib', '*harmonyok']), 'incomplete', ['noExpectedPatches'], 'waylith'),
     'harmony-not-provided': (case('AB', ['*harmonyok'], {'harmonyPatches': [HARMONY_OK]}), 'blocked', ['harmonyMissing'], 'waylith'),
     'level-c': (case('ABC', ['harmonylib', '*harmonyok'], {'harmonyPatches': [HARMONY_OK]}, tests=['any']),
-                'blocked', ['levelUnsupported'], 'waylith'),
+                'blocked', ['invalidRequest'], 'waylith'),
     # All DLCs take longer than the 5 s Worker deadline that a 10 s limit leaves.
     'timeout': (case('A', ['*okxml'], official=('Core', 'Royalty', 'Ideology', 'Biotech', 'Odyssey'),
                      limits={'timeoutSeconds': 10}), 'incomplete', ['workerInterrupted'], 'waylith'),

@@ -40,8 +40,8 @@ Worker 実行、Job Object、Windows での公式比較、検証 GUI の実処�
 
 ### C / D
 
-C はテスト ID・上限・有限な実メソッド呼出しの interface という方針までで、製品コードは未実装。今回ユーザーは、以前の小麦粉代替 MOD で発生した「必要な材料がクラフト画面に表示されない」不具合を例に、他 MOD でも同様の欠落を検出したいと明確化した。対象例は `pengin0503/rimworld-VCE-Flour-Patch` と確認済み。イベント・クエストについても、発生することだけでなく、選択肢を選んだ後の動作が意図どおりかを確かめたいという要求がある。
+棚卸し時点で C は interface の方針のみだった。ユーザー承認後、材料一覧の固定ケースを実装した（[実装記録](2026-10-26-bill-ingredient-options.md)、非描画・experimental）。今回ユーザーは、以前の小麦粉代替 MOD で発生した「必要な材料がクラフト画面に表示されない」不具合を例に、他 MOD でも同様の欠落を検出したいと明確化した。対象例は `pengin0503/rimworld-VCE-Flour-Patch` と確認済み。イベント・クエストについても、発生することだけでなく、選択肢を選んだ後の動作が意図どおりかを確かめたいという要求がある。
 
-データに材料があることと、画面の候補として現れることは別。私有 DLL の `Dialog_BillConfig.DoIngredientConfigPane` → `ThingFilterUI.DoThingFilterConfigWindow` → `Listing_TreeThingFilter` の表示判定を調査した。小麦粉 MOD の既存ソースにも、材料の許可と UI の特殊フィルターでの非表示が食い違う回帰ケースがある。これを既存ホストが C 検証できるとはまだ主張しない。
+データに材料があることと、画面の候補として現れることは別。私有 DLL の `Dialog_BillConfig.DoIngredientConfigPane` → `ThingFilterUI.DoThingFilterConfigWindow` → `Listing_TreeThingFilter` の表示判定を調査した。小麦粉 MOD の既存ソースにも、材料の許可と UI の特殊フィルターでの非表示が食い違う回帰ケースがある。その後、自作 fixture の実 Def でホストの表示候補観測を確認したが、小麦粉 MOD 本体の C 合格とは主張しない。
 
-ユーザーは Linux では描画せず、Windows 版で実画面を描画する方針を明示した。Linux で表示候補・許可状態を検査することと、描画・見切れ・レイアウトを確認することは区別する。[最初の C ケースの設計案](../superpowers/specs/2026-10-26-crafting-material-options-design.md)を作成した。これはまだ製品実装・適格化ではなく、設計をレビューしてから実装計画に落とす。D は別計画で、tick 上限・観測・期待値を含む実装計画は存在しない。任意の A 成功を C/D 成功に読み替えず、製品では引き続き `blocked`。既存の計画を全て完了した、という報告にはしない。
+ユーザーは Linux では描画せず、Windows 版で実画面を描画する方針を明示した。Linux で表示候補・許可状態を検査することと、描画・見切れ・レイアウトを確認することは区別する。[最初の C ケースの設計案](../superpowers/specs/2026-10-26-crafting-material-options-design.md)を作成した。その設計をユーザーが承認し、実装計画と experimental な固定ケースへ進んだ。適格化は未完了。D は別計画で、tick 上限・観測・期待値を含む実装計画は存在しない。任意の A 成功を C/D 成功に読み替えず、未知の C ケースは `blocked`、実装済みの材料候補ケースは適格化まで `incomplete`。既存の計画を全て完了した、という報告にはしない。

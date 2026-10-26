@@ -1,6 +1,6 @@
 # Bill ingredient options Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Linux の非描画 C ケースで、新規 Bill の材料表示候補と許可状態を観測する。
 
@@ -36,11 +36,11 @@
 
 **Interfaces:** `expectations.billIngredients`: 1–128 distinct `(recipe, thing)` objects, each exactly `recipe`, `thing`, `visible`, `allowed`; names match existing DEF_NAME (1–128 ASCII name chars), booleans strict. `tests` must equal `["bill-ingredient-options.v1"]` for C, empty otherwise. Worker emits `checks.billIngredients[]` each with caseId/expected/actual/outcome; actual has paneEligible/categoryReachable/categoryVisible/itemVisible/visible/allowed/reasons. Missing or invalid observations => incomplete.
 
-- [ ] Write request tests for valid case and malformed/duplicate/unbounded inputs; evaluation tests for missing/partial/duplicate/error/mismatch/unqualified observations, including false expectation with invalid context; baseline dispatch test.
-- [ ] Run `python -m unittest tests.test_bill_ingredients -v`; observe missing feature failures.
-- [ ] Implement validation, dispatch and independent Controller boolean comparison. Remove blanket C block. Keep C feature fidelity experimental explicitly (`cNotQualified`) until evidence reviewed.
-- [ ] Run focused tests and full suite; expect green with existing Windows-only skip.
-- [ ] Commit contract and tests.
+- [x] Write request tests for valid case and malformed/duplicate/unbounded inputs; evaluation tests for missing/partial/duplicate/error/mismatch/unqualified observations, including false expectation with invalid context; baseline dispatch test.
+- [x] Run `python -m unittest tests.test_bill_ingredients -v`; observe missing feature failures.
+- [x] Implement validation, dispatch and independent Controller boolean comparison. Remove blanket C block. Keep C feature fidelity experimental explicitly (`cNotQualified`) until evidence reviewed.
+- [x] Run focused tests and full suite; expect green with existing Windows-only skip.
+- [x] Commit contract and tests.
 
 ### Task 2: Fixed Worker observer and private behavioral cases
 
@@ -48,10 +48,10 @@
 
 **Interfaces:** `BillIngredientOptions.Write(json, expectations)` reads loaded game state only. Case runs post-load within existing checks/main thread/watchdog bounds. Reflection bound to fixed type/member names. New Bill through recipe MakeNewBill; tree root chosen by actual filter UI; special filters and category/item predicates from actual listing. Explicit `contextUnavailable`, `defMissing`, `paneNotEditable`, `categoryMissing`, `apiUnavailable`, `observationError` outcomes stay incomplete.
 
-- [ ] Create XML fixture recipes with editable, all-fixed and special-filter-hidden ingredients plus control recipe; runner asserts explicit positive/negative outcomes and no Def mutation. Run against old Worker to observe missing checks.
-- [ ] Implement observer with constructor invocation, exact API binding, bounded category traversal (depth 128, nodes 20000) and structured components/reasons. No drawing and no synthetic UI stub.
-- [ ] Build Release; run private fixture cases against cached snapshot (no download). Positive/fault/missing/fixed-context outcomes expected and recorded; remain experimental unless independent reference supports qualification.
-- [ ] Commit source/fixtures/runner only.
+- [x] Create XML fixture recipes with editable, all-fixed and special-filter-hidden ingredients plus control recipe; runner asserts explicit positive/negative outcomes and no Def mutation. Run against old Worker to observe missing checks.
+- [x] Implement observer with constructor invocation, exact API binding, bounded category traversal (depth 128, nodes 20000) and structured components/reasons. No drawing and no synthetic UI stub.
+- [x] Build Release; run private fixture cases against cached snapshot (no download). Positive/fault/missing/fixed-context outcomes expected and recorded; remain experimental unless independent reference supports qualification.
+- [x] Commit source/fixtures/runner only.
 
 ### Task 3: Evidence, docs and final review
 

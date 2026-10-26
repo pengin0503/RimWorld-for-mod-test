@@ -16,7 +16,7 @@ def request():
 
 def observation(**actual):
     values = dict(paneEligible=True, categoryReachable=True, categoryVisible=True, itemVisible=True,
-                  visible=True, allowed=True, reasons=[])
+                  visible=True, allowed=True, hiddenByDiscovery=False, reasons=[])
     values.update(actual)
     return {'caseId': CASE, 'expected': dict(ITEM), 'actual': values, 'outcome': 'match'}
 
@@ -61,12 +61,18 @@ class BillEvaluationTests(unittest.TestCase):
         self.assertIn('billIngredientMismatch', [r['code'] for r in result[2]])
         self.assertEqual(result[3]['C']['status'], 'failed')
 
+    def test_api_unavailable_blocks_c_without_hiding_completed_load(self):
+        result = self.evaluate([dict(observation(), outcome='error', reason='apiUnavailable')])
+        self.assertEqual(result[0:2], ('blocked', 'completed'))
+        self.assertEqual(result[3]['C']['status'], 'blocked')
+        self.assertIn('billIngredientApiUnavailable', [r['code'] for r in result[2]])
+
     def test_missing_duplicate_other_identity_and_invalid_context_are_incomplete(self):
         variants = [[], [observation(), observation()], [dict(observation(), caseId='other')],
                     [dict(observation(), expected=dict(ITEM, thing='Steel'))],
                     [dict(observation(), outcome='error', reason='defMissing')],
                     [observation(paneEligible=False)], [observation(categoryReachable=False)],
-                    [observation(allowed=1)], [observation(visible=True, itemVisible=False)],
+                    [observation(allowed=1)], [observation(hiddenByDiscovery=True, visible=True)], [observation(visible=True, itemVisible=False)],
                     [dict(observation(), actual=None)]]
         for rows in variants:
             with self.subTest(rows=rows):
@@ -83,6 +89,7 @@ class BillDispatchTests(tvh.TempCase):
         result, out = self.fx.run(['*one'], levels=['A', 'C'], tests=[CASE],
                                   expectations={'billIngredients': [ITEM]}, keep_run_dirs=True)
         self.assertNotEqual(result['status'], 'blocked', result['reasons'])
+        self.assertEqual(result['fidelity'], 'experimental')
         # The real Controller creates these requests; fake Worker is only a subprocess boundary.
         requests = [json.loads(p.read_text()) for p in out.rglob('worker-request.json')]
         self.assertEqual(len(requests), 2)

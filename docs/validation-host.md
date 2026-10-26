@@ -60,7 +60,9 @@ python3 tools/validation_host.py prepare-game --source /private/rimworld-linux -
 "expectations": {"mapThings": [{"type": "ThingDef", "defName": "MyMod_Ruin", "minCount": 1}]}
 ```
 
-`--out/map.png` が対象込みのマップ、`--out/map-baseline.png` が対象を外したマップです。対象 MOD の物はマゼンタで描かれます。ゲームの見た目ではなく、地形・岩・建物・植物・物・ポーン・屋根を色分けした模式図です。詳しい項目と判定は [契約のマップ生成](contracts/mod-validation-v1.md#マップ生成) を参照してください。マップ生成はまだ公式の quick test との比較で確かめていないため、`map` を付けた実行は問題がなくても `incomplete`（`mapNotQualified`）になります。
+`--out/map.png` が対象込みのマップ、`--out/map-baseline.png` が対象を外したマップです。対象 MOD の物はマゼンタで描かれます。ゲームの見た目ではなく、地形・岩・建物・植物・物・石の破片・ポーン・屋根を色分けした模式図です。詳しい項目と判定は [契約のマップ生成](contracts/mod-validation-v1.md#マップ生成) を参照してください。
+
+マップ生成は Linux x64＋WaylithClr＋1.7.4985 rev1269 で公式の quick test と比べて適格化済みです（[マップ生成の適格化](research/map-qualification.md)）。このビルドでは**同じ種でも実行のたびに少し違うマップになります（公式も同じ）**。2 枚の画像は MOD と関係のない場所でも違って見えます。ランダムに置かれる物の正確な個数を `mapThings` の期待値にしないでください。
 
 ## 3. 実行
 
@@ -85,6 +87,7 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 - `diagnostics.newInTarget`：対象 MOD を入れたときだけ出たエラー・警告（本文の先頭と全文）。
 - `diagnostics.translationErrors.newInTarget`：対象で増えた個々の翻訳エラー（例：MOD が公式 Def の comp を消したため、公式翻訳の注入先がなくなった）。ゲームのログは「翻訳データに N 件のエラー」と件数しか出しませんが、判定はこの 1 件ずつの差で行います。
 - `checks`：期待値ごとの実値と一致結果。Harmony は実際に登録されたパッチの一覧も含みます。
+- `diagnostics.newInTarget[].knownNoise`：MOD と関係のないエンジンのメッセージとして、判定から外したもの（例：マップ生成後の終了時に出るネイティブメモリ解放漏れの警告）。理由付きで残ります。
 - `scope.notChecked`：確認していない範囲（ほかの言語、マップ・tick・UI・描画・音声出力・Steam が必要な処理、パッチの実行時の効果、ほかの OS）。`map` を付けた場合は、生成したマップ以外（ほかの種・バイオーム、ゲーム開始後、tick）。
 - `map`：マップ生成の結果（画像のパス、凡例、対象 MOD が置いた物と位置、`mapThings` の結果）。
 
@@ -93,7 +96,7 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 ## AI に任せる流れ（iPad から）
 
 1. iPad から AI に MOD（または変更内容）と確認したいことを伝える。
-2. AI がクラウドの Linux でスナップショットを用意し（ゲームファイルが必要。PC 上のフォルダを一度受け渡す）、要求ファイルを作って `run` する。
+2. AI がクラウドの Linux でスナップショットを用意し（ゲームファイルは Cloudflare R2 の `Game-Linux/`、MOD は `Workshop/<ID>/` から必要な分だけ取得。MOD はユーザーの索引で選ぶ）、要求ファイルを作って `run` する。
 3. `failed` なら AI が MOD のソースや XML を直して再実行する。`blocked`/`incomplete` なら理由（入力不足など）を報告する。
 4. AI が修正済み MOD と、使ったビルド・構成・検証範囲・未確認事項を報告する。遊ぶときは利用者が通常どおりゲームを起動する。
 
@@ -111,4 +114,4 @@ python3 tests/integration/run_fixture_matrix.py --snapshot /private/rw-snapshot 
 python3 experiments/official-comparison/compare_official.py --map --snapshot /private/rw-snapshot --harmony-dll /private/0Harmony.dll --out /private/compare-map
 ```
 
-`mapprobe` fixture が公式側の種を製品の既定値に揃え、両方で生成直後のマップの指紋（地形・屋根・物の一覧のハッシュ、ポーンの位置）を記録します。指紋とマップ生成終了までのエラーが一致すれば、そのビルドの `qualified.features` に `map` を加えられます。
+`mapprobe` fixture が公式側の種を製品の既定値に揃え、両方で生成直後のマップの設定と個数（物・カテゴリ・ThingDef・TerrainDef ごと）を記録します。生成が毎回違うため、各 `--repeat` 回（既定 5）動かして、設定とマップ生成終了までのエラーが全回で同一で、個数が公式のばらつきの範囲に入るかを比べます。`--reanalyze` で、残した実行から比較だけをやり直せます。基準は [マップ生成の適格化](research/map-qualification.md) を参照してください。

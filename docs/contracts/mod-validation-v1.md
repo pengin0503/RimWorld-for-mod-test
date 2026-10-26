@@ -74,7 +74,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 3. **failed**：上記がなく、qualified な範囲で期待値の不一致、期待パッチの未登録、ロード例外、対象で新たに出た error/warning（`allow` で外したものを除く）、対象で増えた翻訳エラー（同）のいずれかを確認。
 4. **passed**：上記のいずれもない。限定範囲の合格で、`scope.notChecked` は未検証。
 
-incomplete でも、確認できた不一致や新しい診断は `reasons` と `diagnostics` に残します（例：`experimental` と `newErrors` の併記）。警告も合格の障害です。要求の `allow` で明示した場合だけ、個々の診断を判定から外します。外した診断も `diagnostics.newInTarget` に `allowedBy`（一致した規則と理由）付きで残り、件数は `diagnostics.allowedInTarget` に出ます。ツール側に組み込みの許可リストはありません。
+incomplete でも、確認できた不一致や新しい診断は `reasons` と `diagnostics` に残します（例：`experimental` と `newErrors` の併記）。警告も合格の障害です。要求の `allow` で明示した場合だけ、個々の診断を判定から外します。外した診断も `diagnostics.newInTarget` に `allowedBy`（一致した規則と理由）付きで残り、件数は `diagnostics.allowedInTarget` に出ます。ツール側に組み込まれているのは、MOD と関係のないエンジンのメッセージだけです（`KNOWN_NOISE`。現在はマップ生成後の終了時に出るネイティブメモリ解放漏れの警告 1 種類。レベル・カテゴリ・Worker の段階・本文全体が一致した場合だけ）。これも `knownNoise`（識別子と理由）付きで残り、件数は `diagnostics.knownNoiseInTarget` に出ます。
 
 ## マップ生成
 
@@ -98,18 +98,19 @@ incomplete でも、確認できた不一致や新しい診断は `reasons` と 
 | `imageScale` | 画像の 1 セルあたりの画素数 1〜8（判定には影響しない） |
 | `maxListedThings` | `map-observation.json` に位置付きで列挙する物の上限（既定 20000。植物・汚れ・自然の岩は数のみ） |
 
-実行しない公式の手順（結果の `map.skippedOfficialSteps`）：Play シーン・カメラ・音楽・UI、`MapGenerator.GenerateMap` 後の `Game.InitNewGame` の残り（`Game.FinalizeInit`、`Scenario.PostGameStart`、`GameComponent.StartedNewGame` など）、tick。したがってゲーム開始時や時間経過で MOD が置く物は写りません。
+実行しない公式の手順（結果の `map.skippedOfficialSteps`）：Play シーン・カメラ・UI（代わりに、ワールドとマップの生成が触る部品だけを置く：`Start` を呼ばない `Root_Play` が持つ `SoundRoot`・`MusicManagerPlay`・初期化しない `UIRoot_Play`、`CameraDriver` のない Camera オブジェクト）、`MapGenerator.GenerateMap` 後の `Game.InitNewGame` の残り（`Game.FinalizeInit`、`Scenario.PostGameStart`、`GameComponent.StartedNewGame` など）、tick。したがってゲーム開始時や時間経過で MOD が置く物は写りません。
 
 結果：
 
 - `stages.map`：`completed` / `failed` / `incomplete` / `notStarted` と `fidelity`。
 - `map.image`（`--out/map.png`）と `map.baselineImage`（対象を外したベースラインのマップ）。1 セル 1 色の模式図で、ゲームの描画ではありません。対象 MOD の物はマゼンタ、対象 MOD の地形は薄いマゼンタ。凡例とセル数は `map.legend`。
 - `map.summary`（タイル、バイオーム、地形の特徴、MapGeneratorDef、実行した GenStep 数、物の数）、`map.targetContent`（MOD 別の数、対象 MOD の物・地形と位置、対象 MOD の GenStep）、`map.checks`（`mapThings` の結果）、`map.observationFile`（全セルの層とパレット）。
+- `map.fidelity`（`qualified` なら `map.qualificationEvidence` に根拠の文書）と `map.variation`。対応ビルドのマップ生成は、同じ種でも実行ごとに少し違うマップになります（公式の quick test も同じ）。対象込みのマップとベースラインはそれぞれ 1 回分の標本で、MOD と関係のない場所も違います。
 - マップ生成中に出た error/warning は通常の診断として扱い、同じ種で生成したベースラインとの差分で判定します（例：対象 MOD の GenStep が例外を出すと `newErrors`）。
 
 判定への追加：
 
-- incomplete：`mapNotQualified`（このビルドでマップ生成を公式の quick test と比較して一致を確かめていない。現在はすべての環境がこれ）、`mapNotGenerated`（設定の誤りなどで生成できなかった。例：存在しないバイオーム）、`baselineMapIncomplete`（ベースラインのマップが生成できず、生成中の診断を比べられない）。
+- incomplete：`mapNotQualified`（その環境でマップ生成を公式の quick test と比べていない。Linux x64＋WaylithClr＋1.7.4985 rev1269 は比較済み：[マップ生成の適格化](../research/map-qualification.md)）、`mapNotGenerated`（設定の誤りなどで生成できなかった。例：存在しないバイオーム）、`baselineMapIncomplete`（ベースラインのマップが生成できず、生成中の診断を比べられない）。
 - failed：`mapGenerationFailed`（ベースラインは生成できたのに、対象では例外で生成が止まった）、`mapExpectationMismatch`。
 
 ## ZIP 入力

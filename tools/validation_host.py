@@ -74,6 +74,10 @@ ADAPTERS = {
                     'System.Private.CoreLib.dll': 'd2075bc8fd8e2f0b4780ec248034b30e33d4cdd72513730886c5989d1f8008b7',
                 },
                 'evidence': 'docs/research/test-host-qualification.md#linux-x64-waylithclr',
+                # Map generation: compared with the official -quicktest as distributions over
+                # repeated runs, because generation is not reproducible on this build.
+                'features': ('map',),
+                'featureEvidence': {'map': 'docs/research/map-qualification.md'},
             },
         },
     },
@@ -1083,12 +1087,18 @@ def read_map_observation(run):
     return observation, None
 
 
-def evaluate_map(request, mods, target_run, baseline_run, out_dir, *, qualified=False):
+MAP_VARIATION_NOTE = ('map generation is not reproducible on this build, in the official game too: the same seed and '
+                      'tile give slightly different maps on every run, so this map and its baseline are each one sample '
+                      'and differ in places the target mods do not touch')
+
+
+def evaluate_map(request, mods, target_run, baseline_run, out_dir, *, qualified=False, evidence=None):
     """Judge the map stage; render images. Returns {'stage', 'incomplete', 'failed', 'section'}."""
     incomplete, failed = [], []
     targets = [m['packageId'] for m in mods if m['target']]
     target_worker = target_run.get('worker') or {}
     section = {'request': request['map'], 'fidelity': 'qualified' if qualified else 'experimental',
+               'qualificationEvidence': evidence if qualified else None, 'variation': MAP_VARIATION_NOTE,
                'skippedOfficialSteps': (target_worker.get('map') or {}).get('skippedOfficialSteps')}
     stage = {'status': 'incomplete'}
     observation, problem = read_map_observation(target_run)
@@ -1292,7 +1302,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
     map_evaluation = None
     if request['map']:
         map_qualified = fidelity == 'qualified' and 'map' in (qualification or {}).get('features', ())
-        map_evaluation = evaluate_map(request, mods, target_run, baseline_run, out_dir, qualified=map_qualified)
+        map_evaluation = evaluate_map(request, mods, target_run, baseline_run, out_dir, qualified=map_qualified,
+                                      evidence=(qualification or {}).get('featureEvidence', {}).get('map'))
     status, execution, reasons, stages, fresh = evaluate(
         request, mods, target_run['worker'], target_run['problem'], target_run['events'],
         baseline_worker, baseline_problem, baseline_run['events'], target_run['process'], fidelity,

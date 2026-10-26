@@ -81,6 +81,13 @@ namespace RWMT.MapProbe
             Log.Message($"[RWMT-PROBE] map world seed={Find.World.info.seedString} coverage={Find.World.info.planetCoverage.ToString("R", System.Globalization.CultureInfo.InvariantCulture)} tile={map.Tile.tileId} biome={map.Biome.defName} size={map.Size.x}x{map.Size.z} generator={map.generatorDef.defName}");
             Log.Message("[RWMT-PROBE] map terrain sha=" + Sha(map.AllCells.Select(c => map.terrainGrid.TerrainAt(c).defName)));
             Log.Message("[RWMT-PROBE] map roof sha=" + Sha(map.AllCells.Select(c => map.roofGrid.RoofAt(c)?.defName ?? "-")));
+            // Counts, unlike the hashes, can be compared between runs that are not
+            // bit-identical (map generation on this build is not reproducible run to run).
+            foreach (var group in map.AllCells.GroupBy(c => map.terrainGrid.TerrainAt(c).defName).OrderBy(g => g.Key, StringComparer.Ordinal))
+            {
+                Log.Message($"[RWMT-PROBE] map terrain-cells {group.Key}={group.Count()}");
+            }
+            Log.Message($"[RWMT-PROBE] map roofed-cells={map.AllCells.Count(c => map.roofGrid.Roofed(c))}");
             List<string> things = map.listerThings.AllThings
                 .Select(t => $"{t.def.defName}|{t.Position.x},{t.Position.z}|{t.Rotation.AsInt}|{t.Stuff?.defName}|{t.Faction?.def.defName}|{t.stackCount}")
                 .OrderBy(s => s, StringComparer.Ordinal).ToList();
@@ -88,6 +95,10 @@ namespace RWMT.MapProbe
             foreach (var group in map.listerThings.AllThings.GroupBy(t => t.def.category).OrderBy(g => g.Key.ToString()))
             {
                 Log.Message($"[RWMT-PROBE] map category {group.Key}={group.Count()}");
+            }
+            foreach (var group in map.listerThings.AllThings.GroupBy(t => t.def.defName).OrderBy(g => g.Key, StringComparer.Ordinal))
+            {
+                Log.Message($"[RWMT-PROBE] map thing-count {group.Key}={group.Count()}");
             }
             Log.Message("[RWMT-PROBE] map pawns " + string.Join(",", map.mapPawns.AllPawns
                 .Select(p => $"{p.kindDef.defName}@{p.Position.x},{p.Position.z}").OrderBy(s => s, StringComparer.Ordinal)));

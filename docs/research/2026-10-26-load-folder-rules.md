@@ -23,7 +23,7 @@
 - `Strings/*.txt`（`ModContentHolder<string>`）、拡張子なしの `AssetBundles/*`（OS 別の接尾辞はゲームが選ぶ）、`Shaders/` 配下（Waylith のシェーダーディレクトリとして登録）。
 - 音声の `.xm` `.it` `.mod` `.s3m`（ゲームの受理拡張子。`.aif` `.aiff` `.flac` は従来どおり取得するがゲームは読まない）。
 
-さらに、計画したロードフォルダを要求の `mods[].expectedLoadFolders` に書き、Controller が実ロード後の `runningMods[].loadFolders` と比較する。異なれば `loadFolderMismatch` で incomplete とし、規則の読み違いや R2 列挙とキャッシュの食い違いが残っても、取得していないフォルダに基づく合格を出さない。
+さらに、計画したロードフォルダを要求の `mods[].expectedLoadFolders` に書き、Controller が実ロード後の `runningMods[].loadFolders` と比較する。異なれば `loadFolderMismatch` で incomplete とし（実ゲームでの確認は[小麦粉 MOD の記録](2026-10-26-flour-mod-c-run.md)）、規則の読み違いや R2 列挙とキャッシュの食い違いが残っても、取得していないフォルダに基づく合格を出さない。
 
 版別定義の代替選択で、ゲームは定義名を**文字列**の降順で選ぶが、`mod_load_plan.py` は数値の降順で選ぶ。`1.10` のような 2 桁の minor が現行版以下に現れるまでは同じ結果になる。食い違った場合も上の比較で incomplete になる。
 

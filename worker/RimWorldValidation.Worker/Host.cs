@@ -333,6 +333,14 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         _map = new MapStage(mapRequest, bound);
         Queue(() =>
         {
+            _map.InstallPlayRoot();
+        }, async: false, handler: e => _mapException = e);
+        Queue(() =>
+        {
+            if (_mapException != null)
+            {
+                return;
+            }
             _map.Generate();
             Diagnostics.Stage = "map.whenFinished";
         }, async: true, handler: e => _mapException = e);

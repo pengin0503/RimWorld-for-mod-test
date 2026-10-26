@@ -64,6 +64,19 @@ public sealed class MapApi
     public required Type GenStepWithParams { get; init; }
     public required Type GenStepParams { get; init; }
     public required PropertyInfo ProgramState { get; init; }
+    public required Type RootPlay { get; init; }
+    public required FieldInfo CurrentRoot { get; init; }
+    public required FieldInfo CurrentCamera { get; init; }
+    public required ConstructorInfo GameObjectCtor { get; init; }
+    public required MethodInfo GetComponent { get; init; }
+    public required Type[] CameraComponents { get; init; }
+    public required FieldInfo CurrentRootPlay { get; init; }
+    public required FieldInfo RootSoundRoot { get; init; }
+    public required FieldInfo RootUiRoot { get; init; }
+    public required Type UIRootPlay { get; init; }
+    public required ConstructorInfo SoundRootCtor { get; init; }
+    public required FieldInfo RootPlayMusicManager { get; init; }
+    public required ConstructorInfo MusicManagerPlayCtor { get; init; }
     public required object ProgramStateEntry { get; init; }
     public required object ProgramStateMapInitializing { get; init; }
     public required PropertyInfo CurrentGame { get; init; }
@@ -75,7 +88,6 @@ public sealed class MapApi
     public required PropertyInfo World { get; init; }
     public required FieldInfo GameInfo { get; init; }
     public required FieldInfo TickManager { get; init; }
-    public required PropertyInfo CurrentMap { get; init; }
     public required FieldInfo ScenarioOfDef { get; init; }
     public required MethodInfo ScenarioPreConfigure { get; init; }
     public required MethodInfo ScenarioPostIdeoChosen { get; init; }
@@ -145,6 +157,12 @@ public sealed class MapApi
         Type game = Reflect.Type($"Verse.Game, {Game}");
         Type initData = Reflect.Type($"Verse.GameInitData, {Game}");
         Type programState = Reflect.Type($"Verse.ProgramState, {Game}");
+        Type root = Reflect.Type($"Verse.Root, {Game}");
+        Type gameObject = Reflect.Type("UnityEngine.GameObject, UnityStubs");
+        Type camera = Reflect.Type("UnityEngine.Camera, UnityStubs");
+        Type rootPlay = Reflect.Type($"Verse.Root_Play, {Game}");
+        Type soundRoot = Reflect.Type($"Verse.Sound.SoundRoot, {Game}");
+        Type musicManagerPlay = Reflect.Type($"RimWorld.MusicManagerPlay, {Game}");
         Type scenarioDef = Reflect.Type($"RimWorld.ScenarioDef, {Game}");
         Type scenario = Reflect.Type($"RimWorld.Scenario, {Game}");
         Type storyteller = Reflect.Type($"RimWorld.Storyteller, {Game}");
@@ -195,6 +213,20 @@ public sealed class MapApi
             GenStepWithParams = genStepWithParams,
             GenStepParams = genStepParams,
             ProgramState = Reflect.StaticProperty(current, "ProgramState"),
+            RootPlay = rootPlay,
+            CurrentRoot = Reflect.StaticField(current, "rootInt"),
+            CurrentCamera = Reflect.StaticField(current, "cameraInt"),
+            GameObjectCtor = gameObject.GetConstructor([typeof(string), typeof(Type[])])
+                ?? throw new AdapterMismatchException("UnityEngine.GameObject(string, Type[])"),
+            GetComponent = Reflect.InstanceMethod(gameObject, "GetComponent", typeof(Type)),
+            CameraComponents = [camera, Reflect.Type("UnityEngine.AudioListener, UnityStubs")],
+            CurrentRootPlay = Reflect.StaticField(current, "rootPlayInt"),
+            RootSoundRoot = Reflect.InstanceField(root, "soundRoot"),
+            RootUiRoot = Reflect.InstanceField(root, "uiRoot"),
+            UIRootPlay = Reflect.Type($"RimWorld.UIRoot_Play, {Game}"),
+            SoundRootCtor = soundRoot.GetConstructor(Type.EmptyTypes) ?? throw new AdapterMismatchException("Verse.Sound.SoundRoot()"),
+            RootPlayMusicManager = Reflect.InstanceField(rootPlay, "musicManagerPlay"),
+            MusicManagerPlayCtor = musicManagerPlay.GetConstructor(Type.EmptyTypes) ?? throw new AdapterMismatchException("RimWorld.MusicManagerPlay()"),
             ProgramStateEntry = EnumValue(programState, "Entry"),
             ProgramStateMapInitializing = EnumValue(programState, "MapInitializing"),
             CurrentGame = Reflect.StaticProperty(current, "Game"),
@@ -207,7 +239,6 @@ public sealed class MapApi
             World = Reflect.InstanceProperty(game, "World"),
             GameInfo = Reflect.InstanceField(game, "info"),
             TickManager = Reflect.InstanceField(game, "tickManager"),
-            CurrentMap = Reflect.InstanceProperty(game, "CurrentMap"),
             ScenarioOfDef = Reflect.InstanceField(scenarioDef, "scenario"),
             ScenarioPreConfigure = Reflect.InstanceMethod(scenario, "PreConfigure"),
             ScenarioPostIdeoChosen = Reflect.InstanceMethod(scenario, "PostIdeoChosen"),
@@ -295,7 +326,7 @@ public sealed class MapStage(MapRequest request, MapApi api)
 {
     public static readonly string[] SkippedOfficialSteps =
     [
-        "Root_Play scene, camera, music manager and UI: not created; the map is generated from a worker long event",
+        "Root_Play scene, camera and UI: not created; the map is generated from a worker long event. Instead the worker creates a bare Camera object (Camera + AudioListener) and a Root_Play object whose Start is never called, holding a SoundRoot, a MusicManagerPlay and a UIRoot_Play that is constructed but never initialised or drawn: the parts of the Play scene that world and map generation touch",
         "Game.InitNewGame after MapGenerator.GenerateMap: not executed (starting thoughts, Game.FinalizeInit, camera jump, Scenario.PostGameStart, starting research, GameComponent.StartedNewGame); ProgramState never becomes Playing",
         "ticks: none run, so nothing that happens after the first tick is observed",
     ];
@@ -304,6 +335,29 @@ public sealed class MapStage(MapRequest request, MapApi api)
     public object? Map { get; private set; }
     private object? _game;
     private readonly List<(string Name, double Seconds)> _steps = [];
+
+    /// <summary>
+    /// World.FinalizeInit and the map's when-finished actions reach the sound and
+    /// music managers through Current.Root, which the official Play scene sets up.
+    /// The worker has no scene, so it installs a Root_Play object whose Start is
+    /// never called, with just those two parts, built on the main thread like
+    /// Root.Start does. Runs as a synchronous long event before Generate.
+    /// </summary>
+    public void InstallPlayRoot()
+    {
+        Diagnostics.Stage = "map.installPlayRoot";
+        // The "Camera" object of the Play scene, without CameraDriver: the sound
+        // pool parents its camera sources to it.
+        object cameraObject = api.GameObjectCtor.Invoke(["Camera", api.CameraComponents]);
+        api.CurrentCamera.SetValue(null, api.GetComponent.Invoke(cameraObject, [api.CameraComponents[0]]));
+        object root = Activator.CreateInstance(api.RootPlay)!;
+        api.RootSoundRoot.SetValue(root, api.SoundRootCtor.Invoke(null));
+        api.RootPlayMusicManager.SetValue(root, api.MusicManagerPlayCtor.Invoke(null));
+        // Constructed but not Init()ed (Init clears messages and opens the dev palette).
+        api.RootUiRoot.SetValue(root, Activator.CreateInstance(api.UIRootPlay));
+        api.CurrentRoot.SetValue(null, root);
+        api.CurrentRootPlay.SetValue(null, root);
+    }
 
     public void Generate()
     {
@@ -458,7 +512,6 @@ public sealed class MapStage(MapRequest request, MapApi api)
         Evidence["mapGenerator"] = DefName(generator);
         Map = api.GenerateMap.Invoke(null, [mapSize, settlement, generator, extra, null, false, false]);
         api.InitialMapSize.SetValue(api.WorldInfo.GetValue(world), mapSize);
-        api.CurrentMap.SetValue(game, Map);
         api.ProgramState.SetValue(null, api.ProgramStateEntry);
     }
 

@@ -65,4 +65,4 @@ AI の通常の検証先は Linux、Windows は利用者自身の検証先とし
 
 [Codex Cloud の接続・実行手順](docs/codex-cloud.md) と [Codex 向け作業規約](AGENTS.md) を追加しました。ユーザーの非公開 MOD 索引（ZIP）は公開リポジトリに置かず、Codex の私有領域で Workshop ID の解決に利用します。`tools/codex_workflow.py` は索引検索、指定 MOD の R2 取得、Linux ゲームスナップショットの準備、既存検証ホストの実行を補助します。
 
-2026-10-26 にコミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified`。更新版 `59dde4d` の索引を使う限定取得経路は、指定された非公開索引 ZIP の HEAD が 404 のため `blocked` で、実ゲーム処理には進んでいません。[Codex Cloud の実測記録](docs/research/2026-10-26-codex-cloud-a-validation.md) に成功範囲と残作業を分けて記録しています。
+2026-10-26 にコミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified`。その後、R2 直下の `rimworld-mod-index.zip` を取得し、索引照合・1.7 向け限定取得を経た Harmony の A 検証も `passed / completed / qualified`（6ファイル・約2.55 MB、ゲーム再取得なし）。既定の索引キーも実配置へ修正しました。[Codex Cloud の実測記録](docs/research/2026-10-26-codex-cloud-a-validation.md) に成功範囲と残作業を分けて記録しています。

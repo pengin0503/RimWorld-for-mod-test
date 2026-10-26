@@ -23,6 +23,28 @@ def sample_index(path, schema_version=1):
 
 
 class CodexWorkflowTests(unittest.TestCase):
+    def test_default_index_download_uses_actual_R2_object(self):
+        from subprocess import CompletedProcess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "synthetic-index.zip"
+            sample_index(source)
+            payload = source.read_bytes()
+
+            def s3_get(cmd, **kwargs):
+                self.assertIn("get-object", cmd)
+                self.assertEqual(cmd[cmd.index("--key") + 1], "rimworld-mod-index.zip")
+                Path(cmd[cmd.index("--key") + 2]).write_bytes(payload)
+                return CompletedProcess(cmd, 0, json.dumps({"ContentLength": len(payload)}), "")
+
+            args = SimpleNamespace(index_zip=None, aws="aws", refresh=False)
+            with patch.dict("os.environ", {"R2_ENDPOINT": "https://example.r2.cloudflarestorage.com",
+                                           "R2_BUCKET": "rimworld-17"}), \
+                 patch("tools.r2_assets.subprocess.run", side_effect=s3_get):
+                archive = cw.private_index(args, root / "private")
+                index = cw.load_index(archive)
+                self.assertEqual(cw.resolve(index, "Harmony")["workshopId"], "2009463077")
+
     def test_string_schema_supports_lookup_and_exact_resolution(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "index.zip"

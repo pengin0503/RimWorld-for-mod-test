@@ -34,6 +34,28 @@
 
 これは入力前提による `blocked` で、MOD の `failed` や Worker 実行後の `incomplete` ではない。対象索引を使った限定取得と実ゲーム処理の結合成功は未確認。上記の旧コミットでの A 成功とは区別する。
 
-## 再開条件
+## 配置違いの解消と限定取得による A 検証
 
-正規の非公開索引 ZIP を既定の R2 キーへ配置するか、私有領域の ZIP を `--index-zip` に渡す。`AGENTS.md` に従い、索引を取得せず対象 ID を推測・代用しない。索引が利用可能になった後に既定の限定 scope で再実行し、必要な取得量と検証結果を記録する。
+後続調査で `rimworld-mod-index` prefix の列挙により、R2 直下の `rimworld-mod-index.zip`（186,980 bytes）を発見し、その1オブジェクトを取得した。`PrivateIndex/` は空。バケット直下の delimiter 付き列挙は1ページのみで打ち切り、バケット全体や `Workshop/` 全体の再帰走査は行っていない。
+
+索引279件から Harmony の名前・Workshop ID・PackageId を照合後、`59dde4d` の `fetch-mods` に取得済み ZIP を `--index-zip` で渡した。About を先に照合し、既定の `validation` scope で6ファイル・2,550,006 bytesを取得、10ファイルを除外。旧取得の8,306,239 bytesから約69%削減した。この比率は今回の Harmony のみの実測。
+
+既存スナップショットを全 SHA-256 照合して再利用し、ゲームの GET は0件。`prepare` は `snapshotReused`。`validate` で Core / English / A の baseline と対象を新規実行し、以下を確認した。
+
+| 項目 | 実測 |
+|---|---|
+| 判定 | `passed / completed / qualified` |
+| 時間 | baseline 5.650秒、target 5.842秒、全体11.626秒 |
+| ロード順 | Core → Harmony、要求と実際が一致 |
+| 新規診断 | error/warning 0件、翻訳エラー0件 |
+| スコープ | A の実ローダー・公式 Def 検査・差分診断。明示的な期待値0件。B/C/D・マップは未要求 |
+
+ゲーム・OS・CLR は先の実行と同じ。索引を確認したと偽ったり、404 を無視して対象 ID を代用したりせず、実際の R2 索引で照合してから取得した。
+
+## 既定キーの修正と検証
+
+`r2_assets.PRIVATE_INDEX_KEY` を `rimworld-mod-index.zip` に変更し、`codex_workflow` は同じ定数を使用する。旧キーは明示指定の場合だけ引き続き許可し、任意のルート ZIP や prefix を許可しない。
+
+合成 ZIP と AWS CLI 境界の偽応答を使った回帰テストを追加し、旧キーを送ることで失敗することを先に確認。修正後は取得・読み込み・Harmony 解決まで通過した。修正済みの既定キーによる索引 GET と279件の読み込みも実R2で確認した。限定取得と A 検証はこの既定キー変更前に `--index-zip` を明示して実施しており、確認経路を区別する。
+
+修正後の Python 全テストは145件中144件成功、Windows専用1件スキップ。`compileall` 成功。R2 の書き込み・削除、ゲーム起動、第三者 MOD の公開、PR のマージは行っていない。

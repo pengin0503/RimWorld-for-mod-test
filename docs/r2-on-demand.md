@@ -96,4 +96,4 @@ R2の利用量とトークン消費を抑えるため、ゲーム本体・Worksh
 
 [Codex用の設定・検証コマンド](codex-cloud.md) を参照。新しい `tools/codex_workflow.py` は非公開索引の検索、対象MODの取得、対応Linuxゲーム資材の準備、既存検証ホストの実行を補助する。`AGENTS.md` はCodex向け共通指示。
 
-プライベート索引ZIPに限り、`PrivateIndex/rimworld-mod-index-2026-10-26.zip` の**正確なオブジェクトキー1件**を読み取れるようにした。公開GitHubには索引の中身を置かない。Codexで継承された存在しない`AWS_PROFILE`はAWS CLIの子プロセスに限って除去する。
+索引の既定取得元は、2026-10-26 に実取得した R2 直下の **`rimworld-mod-index.zip`**。後方互換として旧キー `PrivateIndex/rimworld-mod-index-2026-10-26.zip` の明示取得も許可するが、自動探索・自動フォールバックはしない。これら以外のルートファイルや索引 prefix 全体は許可しない。公開GitHubには索引の中身を置かない。Codexで継承された存在しない`AWS_PROFILE`はAWS CLIの子プロセスに限って除去する。

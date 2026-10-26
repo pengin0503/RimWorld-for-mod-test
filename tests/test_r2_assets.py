@@ -90,9 +90,11 @@ class AssetTests(unittest.TestCase):
             self.assertNotIn('AWS_DEFAULT_PROFILE', child)
             self.assertEqual(child['AWS_ACCESS_KEY_ID'], 'test-id')
 
-    def test_private_index_allows_only_one_exact_object(self):
-        self.assertEqual(ra.validate_key(ra.PRIVATE_INDEX_KEY), ra.PRIVATE_INDEX_KEY)
-        for key in ('PrivateIndex/other.zip', 'PrivateIndex/../outside',
+    def test_private_index_allows_only_known_exact_objects(self):
+        self.assertEqual(ra.validate_key("rimworld-mod-index.zip"), "rimworld-mod-index.zip")
+        self.assertEqual(ra.validate_key(ra.LEGACY_PRIVATE_INDEX_KEY), ra.LEGACY_PRIVATE_INDEX_KEY)
+        for key in ('rimworld-mod-index-other.zip', 'rimworld-mod-index.zip/extra',
+                    'PrivateIndex/other.zip', 'PrivateIndex/../outside',
                     'PrivateIndex/rimworld-mod-index-2026-10-26.zip/another'):
             with self.subTest(key=key), self.assertRaises(ra.AssetError):
                 ra.validate_key(key)

@@ -22,7 +22,7 @@ except ImportError:
     import validation_host
 
 PRIVATE_INDEX_NAME = "mods.json"
-PRIVATE_MOD_INDEX_OBJECT = "PrivateIndex/rimworld-mod-index-2026-10-26.zip"
+PRIVATE_MOD_INDEX_OBJECT = r2_assets.PRIVATE_INDEX_KEY
 WORKSHOP_ID = re.compile(r"[0-9]{1,20}\Z")
 
 
@@ -227,7 +227,7 @@ def prepare(args) -> dict:
 def private_index(args, root: Path) -> Path:
     if args.index_zip:
         return Path(args.index_zip).expanduser().absolute()
-    archive = root / "private-index" / "rimworld-mod-index-2026-10-26.zip"
+    archive = root / "private-index" / Path(PRIVATE_MOD_INDEX_OBJECT).name
     r2_client(args.aws).get(PRIVATE_MOD_INDEX_OBJECT, archive, expected_size=None, refresh=args.refresh)
     return archive
 

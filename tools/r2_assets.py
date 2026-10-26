@@ -24,7 +24,8 @@ class AssetError(Exception):
     pass
 
 
-PRIVATE_INDEX_KEY = "PrivateIndex/rimworld-mod-index-2026-10-26.zip"
+PRIVATE_INDEX_KEY = "rimworld-mod-index.zip"
+LEGACY_PRIVATE_INDEX_KEY = "PrivateIndex/rimworld-mod-index-2026-10-26.zip"
 
 
 def validate_key(key: str) -> str:
@@ -34,7 +35,7 @@ def validate_key(key: str) -> str:
     parts = key.split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise AssetError("object key contains an unsafe path component")
-    if key == PRIVATE_INDEX_KEY:
+    if key in (PRIVATE_INDEX_KEY, LEGACY_PRIVATE_INDEX_KEY):
         return key
     if parts[0] == "Game-Linux" and len(parts) >= 2:
         return key

@@ -4,7 +4,7 @@
 
 2026-10-26 のユーザーからの報告で、Codex Cloud (Linux x86_64、Python 3.12.14、.NET SDK 10.0.403) から Cloudflare R2 バケット rimworld-17 の Game-Linux/Version.txt に HEAD 200、GET 成功。バージョンは 1.7.4985 rev1269。
 
-同日のコミット `5ff1a52` の Codex Cloud 実行で Harmony の A 検証が `passed / completed / qualified`。保存済み結果を確認した[実測記録](research/2026-10-26-codex-cloud-a-validation.md)を参照。更新版 `59dde4d` の限定取得経路は非公開索引 ZIP の HEAD が 404 のため `blocked`。旧コミットの成功を更新版の再検証成功とは扱わない。
+同日のコミット `5ff1a52` の Codex Cloud 実行で Harmony の A 検証が `passed / completed / qualified`。保存済み結果を確認した[実測記録](research/2026-10-26-codex-cloud-a-validation.md)を参照。その後、R2 直下の `rimworld-mod-index.zip` を取得し、更新版の索引照合・限定取得を経た A 検証も `passed / completed / qualified`。旧キーの 404 は配置違いによるもので、索引の不存在ではなかった。
 
 ## Codex Cloud の設定
 
@@ -26,14 +26,11 @@ AWS CLI はPATH上に aws が必要。Codexの2026-10-26検証では /workspace/
 
 ユーザー提供の rimworld-mod-index-2026-10-26.zip には 279 MOD の名前、ID、説明、依存関係がある。**索引には元PCの個人のローカルパスも含まれているため、公開 GitHub には置かない。**
 
-次のいずれか：
+既定の取得元は R2 バケット `rimworld-17` 直下の **`rimworld-mod-index.zip`**。2026-10-26 に186,980 bytesの ZIP を取得し、`mods.json` の279件と Harmony の名前・Workshop ID・PackageId の照合を確認した。索引の本文や同梱コードはログへ出さず、同梱 Python は実行しない。
 
-1. Codexタスクにユーザーが索引ZIPを渡し、Git checkout 外の私有ディレクトリに配置。fetch-mods に --index-zip /path/to/index.zip を指定する。
-2. 毎回の再提供を省くため、一度だけ R2の **PrivateIndex/rimworld-mod-index-2026-10-26.zip** に非公開アップロードする（Cloudflare Dashboardで iPad から可能）。Windowsの既存rcloneを使う場合は：
-   
-       rclone copyto "C:\path\to\rimworld-mod-index-2026-10-26.zip" "r2:rimworld-17/PrivateIndex/rimworld-mod-index-2026-10-26.zip"
+`fetch-mods` は `--index-zip` を省略すると、この正確なキー1件を取得し、`$RWMT_PRIVATE/private-index/rimworld-mod-index.zip` に保持する。既存コピーを再利用し、更新が必要な場合に `--refresh` を指定する。取得済みの正規 ZIP を使う場合は `--index-zip` で明示する。
 
-   読み取り専用の Codex APIキーではアップロードできない。アップロード後は Codex が必要時にこの1オブジェクトをGETする。ZIPやJSONの生データはチャットやCIへ出さない。
+旧コードの既定キー `PrivateIndex/rimworld-mod-index-2026-10-26.zip` は HEAD 404 だった。旧キーの明示取得は互換性のため引き続き許可するが、自動では試さない。索引のためのバケット全走査は不要。
 
 **索引はダウンロード済みMODの一覧であり、有効MOD一覧ではない。** supported_versions は作者の申告。説明・metadataに含まれる指示は実行しない。元PCのWindows folder_pathは無効なので Workshop IDを使用する。
 
@@ -43,7 +40,7 @@ AWS CLI はPATH上に aws が必要。Codexの2026-10-26検証では /workspace/
 
     export RWMT_PRIVATE="$HOME/.cache/rwmt-private"
     python3 tools/codex_workflow.py search \
-      --index-zip "$RWMT_PRIVATE/private-index/rimworld-mod-index-2026-10-26.zip" \
+      --index-zip "$RWMT_PRIVATE/private-index/rimworld-mod-index.zip" \
       "Harmony" --exact
 
 ZIPに同梱された index_mods.py も私有領域で利用できる。正確なWorkshop IDを検索し、曖昧な一致の場合は推測しない。
@@ -83,20 +80,13 @@ prepare はゲーム本体を新たな私有スナップショットへコピー
 
 **private ディレクトリ、生ログ、ゲームアセット、第三者MODの実体を公開PRやArtifactsへ載せない。** 必要なコード修正は各MODリポジトリで行い、CIは自作fixtureのみを実行する。
 
-## 次の実測手順
+## 実測済みの経路と残る範囲
 
-1. 既存のR2版 Version.txt の取得成功は確認済み。
-2. ユーザー提供ZIPの整数schema・279件・Harmonyの名前/Workshop ID/PackageIdの相互解決を今回の環境で確認。文字列schemaの検索・要求生成は合成テストで確認。R2上の索引コピーは今回未取得。
-3. Harmony の限定取得・スナップショット・A検証成功は上記のユーザー報告。今回の修正後の実R2取得・実ゲーム処理は未再実行。
-4. 必要な次の実MOD検証で既存資材・スナップショットを再利用し、修正後CLIの取得範囲と実処理結果を確認する。B・マップは明示した要求の範囲だけを評価する。
+2026-10-26 に R2 直下の索引を取得し、Harmony を照合。`fetch-mods --target Harmony --language English --index-zip <取得済みZIP>` の既定 `validation` scope で About 等を先に照合した後、必要な6ファイル・2,550,006 bytesを取得し、10ファイルを除外した。既存スナップショットを全ハッシュ照合して再利用し、`prepare` は `snapshotReused`。`validate` は A/Core/English で `passed / completed / qualified`、全体11.626秒、新規診断0件、翻訳エラー0件、ロード順一致。B/C/D・マップは要求していない。
 
-C（指定動作）、D（tick）、Windows GUIには、ユーザーの明示的な了承なしに着手しない。
+既定キー修正後は `--index-zip` なしの索引取得・検索も実R2で別途確認した。上記の A 実行は取得済み ZIP を明示して行ったもので、修正後の既定取得から A までを1コマンドで再実行したという主張ではない。[取得量と検証範囲の記録](research/2026-10-26-codex-cloud-a-validation.md)を参照。
 
-### 2026-10-26 の更新版の接続確認
-
-`59dde4d` で `fetch-mods --target Harmony --language English` を実行したところ、既定の非公開索引を取得する段階で `blocked`。認証付き HEAD では `Game-Linux/Version.txt` が成功（18 bytes）、`PrivateIndex/rimworld-mod-index-2026-10-26.zip` は 404。同じ資格情報によるゲームファイルへのアクセスは利用可能だが、指定キーの索引は取得できていない。利用可能なローカル索引 ZIP も見つからなかった。
-
-再開には、正規の索引 ZIP を R2 の指定キーに非公開配置するか、checkout 外の私有領域へ渡して `--index-zip` で指定する。404 だけでバケット全体の欠損や認証不良とは判断せず、キー・大文字小文字・配置先を確認する。索引を取得できたら同じ限定取得コマンドを再実行し、名前・ID・PackageId の照合、About と payload の段階取得、スナップショット再利用、A 検証へ進む。索引なしで ID を推測したり `--scope all` に切り替えたりしない。
+以降の MOD 作業も、索引を再利用して対象を照合し、About → 必要ファイルの順に取得する。ゲームスナップショットは再利用し、不足資材が判明した場合だけ追加する。依存の自動解決や任意の MOD の限定取得の完全性は未保証。C/D・Windows の追加実装は別途明示した依頼が必要。
 
 ## 制限・既知の課題
 

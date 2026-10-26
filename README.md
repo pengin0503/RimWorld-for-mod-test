@@ -60,3 +60,9 @@ AI の通常の検証先は Linux、Windows は利用者自身の検証先とし
 ## Cloudflare R2 からのオンデマンド資材取得
 
 [Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。R2 の Secrets 設定と実接続テストは未実施です。
+
+## Codex Cloud での R2 参照・MOD 検証
+
+[Codex Cloud の接続・実行手順](docs/codex-cloud.md) と [Codex 向け作業規約](AGENTS.md) を追加しました。ユーザーの非公開 MOD 索引（ZIP）は公開リポジトリに置かず、Codex の私有領域で Workshop ID の解決に利用します。`tools/codex_workflow.py` は索引検索、指定 MOD の R2 取得、Linux ゲームスナップショットの準備、既存検証ホストの実行を補助します。
+
+Codex Cloud からの `Game-Linux/Version.txt` 取得は 2026-10-26 にユーザー報告で確認されていますが、新しい統合CLIによる実MODの A/B 検証は**未実測**です。既存の適格化済み検証範囲と判定ロジックは変更していません。

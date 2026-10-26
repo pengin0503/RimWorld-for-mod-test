@@ -59,7 +59,7 @@ Final review: 独立した読取専用レビューを 1 回実施。未知の XM
 
 Ruling: LZMA の例外を追加で捕捉するだけでは、宣言サイズによる切捨てを独立に検出する保証がない。Stored/Deflate を独立に検査し、それ以外は `incomplete` とする。代償は LZMA/Bzip2 等の受領検査が未対応になること。今回の実入力の外側 ZIP は検査できる。
 
-Final: minor (deferred): 「正常な別名の実体がある一方、別名先の物理ファイル自体は改変されている」組合せ専用の追加テスト。コードは物理ファイルが存在して hash が異なる場合に `hashMismatch` とする。既存の改変・別名テストとは別の組合せ拡充として保留。
+Final: minor（当時は deferred、2026-10-26 に実施済み）: 「正常な別名の実体がある一方、別名先の物理ファイル自体は改変されている」組合せを `test_present_corrupted_file_is_not_covered_by_valid_alias` で追加。`hashMismatch`、物理一致1件・内容カバー1件・別名カバー0件、入力不変、`gameVerification=notRun` を確認。別名カバーの誤った実装をメモリ上だけで再現すると、このテストが失敗することも確認。製品コードの変更なし。
 
 Final: Ruling: Windows と remote CI はローカルレビューでは未実行なので、Actions の実行結果を別に確認する。ゲーム・実素材デコードは初版の検査対象外で `notRun` を維持する。未観測の環境結果を成功と記載しない。
 

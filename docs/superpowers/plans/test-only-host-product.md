@@ -35,13 +35,16 @@
 
 ## 残りのタスク
 
+2026-10-26 の[棚卸し](../../research/2026-10-26-planned-work-audit.md)で、既存の実装・記録と未実施項目を照合。過去の成立性調査計画の未チェック欄だけを未実施の根拠にしない。
+
 - [x] 実際の MOD での検証：Harmony 3.0.1 と Vanilla Expanded Framework で実施（[実 MOD 検証](../../research/real-mod-validation.md)）。2026-10-26 に Vanilla Psycasts Expanded と TD Enhancement Pack を追加。
 - [x] 既知の警告の許可：要求の `allow` で、理由付きの規則を明示した場合だけ。組み込みは MOD と関係のないエンジンのメッセージ（`KNOWN_NOISE`）だけ。
 - [x] マップ生成段：実ゲームで実行し、公式 quick test との分布比較で適格化（[マップ生成の適格化](../../research/map-qualification.md)）。
 - [ ] Windows の Worker 実行（apphost .exe、パス、Job Object によるメモリ上限）と、Windows での公式比較による適格化。現在は `blocked`。
 - [ ] Windows 画面からの `run`。既存の画面は静的検査のみ。
 - [ ] C：指定動作テストの interface（テスト ID、上限、実メソッド呼び出し）。D は別計画。
-- [ ] cgroup によるハードなメモリ上限（利用可能な環境のみ。現在はポーリングで `memoryHard=false`）。
+- [x] cgroup の実行環境調査（2026-10-26）：cgroup v2 と memory controller は存在するが、Cloud の `/sys/fs/cgroup` は read-only。委譲された書込可能な子 cgroup を使用できない。
+- [ ] cgroup によるハードなメモリ上限の実装・実動作検証（書込可能な委譲 cgroup が必要。この環境では未実施。ポーリングの `memoryHard=false` を維持）。
 - [x] 入力 ZIP：`mods[].path` に ZIP を直接指定できる（安全な展開、ZIP の sha256 を記録）。
 
 ## 撤去した機能

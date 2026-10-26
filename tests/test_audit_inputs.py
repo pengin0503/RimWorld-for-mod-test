@@ -115,6 +115,25 @@ class ZipAuditTests(unittest.TestCase):
         self.assertEqual(report['manifestComparison']['aliasCoveredPaths'], 1)
         self.assertEqual(report['gameVerification'], 'notRun')
 
+    def test_present_corrupted_file_is_not_covered_by_valid_alias(self):
+        good = b'font'
+        h = hashlib.sha256(good).hexdigest()
+        manifest = self.root / 'bake.manifest'
+        manifest.write_text(f'Resources/Fonts/a.ttf {h}\nResources/Fonts/b.ttf {h}\n')
+        archive = self.archive([('Resources/Fonts/a.ttf', good),
+                                ('Resources/Fonts/b.ttf', b'modified-font')])
+        before = archive.read_bytes()
+        report = audit_zip(archive, manifest=manifest)
+        self.assertEqual(report['auditStatus'], 'failed')
+        self.assertTrue(any(d['code'] == 'hashMismatch' and d.get('path') == 'Resources/Fonts/b.ttf'
+                            for d in report['diagnostics']))
+        comparison = report['manifestComparison']
+        self.assertEqual(comparison['physicalPathsMatched'], 1)
+        self.assertEqual(comparison['contentCoveredPaths'], 1)
+        self.assertEqual(comparison['aliasCoveredPaths'], 0)
+        self.assertEqual(report['gameVerification'], 'notRun')
+        self.assertEqual(archive.read_bytes(), before)
+
     def test_manifest_mismatch_and_missing_contents_are_reported(self):
         manifest = self.root / 'bake.manifest'
         manifest.write_text('a ' + '0' * 64 + '\nb ' + '1' * 64 + '\n')

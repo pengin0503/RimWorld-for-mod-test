@@ -16,10 +16,11 @@ import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
 
 try:
-    from tools import r2_assets, validation_host
+    from tools import r2_assets, validation_host, mod_load_plan
 except ImportError:
     import r2_assets
     import validation_host
+    import mod_load_plan
 
 PRIVATE_INDEX_NAME = "mods.json"
 PRIVATE_MOD_INDEX_OBJECT = r2_assets.PRIVATE_INDEX_KEY
@@ -27,7 +28,9 @@ WORKSHOP_ID = re.compile(r"[0-9]{1,20}\Z")
 
 
 class WorkflowError(Exception):
-    pass
+    def __init__(self, detail, code="workflowError"):
+        self.code = code
+        super().__init__(detail)
 
 
 def _safe_private(root: Path) -> Path:
@@ -150,6 +153,22 @@ def _download(r2: r2_assets.R2, prefix: str, dest: Path, items: list[dict], *, r
     return counts
 
 
+def _check_cached_inputs(destination: Path, items: list[dict], prefix: str, folders: list[str]):
+    """Do not let stale files or even empty version directories change game selection."""
+    files = {item["key"][len(prefix):] for item in items}
+    dirs = {""}
+    for relative in files | set(folders):
+        path = Path(relative)
+        dirs.update(p.as_posix() for p in path.parents if p.as_posix() != ".")
+    dirs.update(folders)
+    if not destination.exists():
+        return
+    for path in destination.rglob("*"):
+        relative = path.relative_to(destination).as_posix()
+        if path.is_symlink() or (path.is_file() and relative not in files) or (path.is_dir() and relative not in dirs):
+            raise WorkflowError("Cached MOD has inputs outside the resolved plan; use a fresh private root", "unexpectedCachedModInputs")
+
+
 def game_runtime_asset(key: str) -> bool:
     """Keep all runtime/native/asset files, omit *.debug and other languages' tarballs."""
     r2_assets.validate_key(key)
@@ -168,38 +187,13 @@ def game_runtime_asset(key: str) -> bool:
 
 
 
-def mod_validation_asset(key: str, *, version: str = "1.7", language: str = "English") -> bool:
-    """First-pass A/B loader inputs; custom LoadFolders/resources may need more."""
+def mod_validation_asset(key: str, *, folders: list[str], language: str = "English") -> bool:
+    """Filter only within the already resolved effective game load folders."""
     r2_assets.validate_key(key)
     if not key.startswith("Workshop/"):
         raise WorkflowError("MOD selection requires Workshop/<ID>/")
-    parts = key.split("/")[2:]
-    if not parts:
-        return False
-    if re.fullmatch(r"(?:v)?1\.[0-9]+", parts[0], re.IGNORECASE):
-        if parts[0].lower().lstrip("v") != version:
-            return False
-        parts = parts[1:]
-    elif parts[0].casefold() == "common":
-        parts = parts[1:]
-    if not parts:
-        return False
-    name = parts[-1].casefold()
-    top = parts[0].casefold()
-    if len(parts) == 1:
-        return name in {"loadfolders.xml", "about.xml", "loadfolders.txt"}
-    if top == "about":
-        return name.endswith((".xml", ".txt"))
-    if top in {"defs", "patches"}:
-        return name.endswith(".xml")
-    if top == "assemblies":
-        return name.endswith(".dll")
-    if top == "languages":
-        return (len(parts) >= 3 and
-                any(parts[1].casefold() == lang or parts[1].casefold().startswith(lang + " (")
-                    for lang in {"english", language.casefold()}) and
-                name.endswith((".xml", ".txt")))
-    return False
+    relative = key.split("/", 2)[2]
+    return relative.casefold() in {"about/about.xml", "loadfolders.xml"} or mod_load_plan.select_asset(relative, folders, language)
 
 
 def prepare(args) -> dict:
@@ -243,51 +237,68 @@ def fetch_mods(args) -> dict:
         raise WorkflowError("same Workshop MOD appears as target and dependency")
     if (root / "request.json").exists():
         raise WorkflowError("request.json exists; preserve edits and use a new private root")
+    official = getattr(args, "official", None) or ["Core"]
+    allowed = {"Core", "Royalty", "Ideology", "Biotech", "Odyssey"}
+    if not official or official[0] != "Core" or len(set(official)) != len(official) or set(official)-allowed:
+        raise WorkflowError("official must begin with Core and contain supported unique DLCs", "invalidOfficialContent")
+    active = {m["packageId"].casefold() for m in selected}
+    active.update("ludeon.rimworld" if n == "Core" else "ludeon.rimworld."+n.casefold() for n in official)
     fetched = []
     r2 = r2_client(args.aws)
+    prepared = []
+    # Every MOD is identified and dependency-checked before any MOD payload is fetched.
     for mod in selected:
         destination = root / "mods" / mod["workshopId"]
         prefix = f"Workshop/{mod['workshopId']}/"
         listed = r2.list_prefix(prefix)
-        items = [item for item in listed if args.scope == "all" or
-                 mod_validation_asset(item["key"], language=args.language)]
-        summary = _selection_counts(listed, items)
-        metadata = [item for item in items if item["key"].startswith(prefix + "About/") and
-                    item["key"].casefold().endswith((".xml", ".txt"))]
-        if not any(item["key"] == prefix + "About/About.xml" for item in metadata):
-            raise WorkflowError("selected MOD is missing About/About.xml")
-        summary.update(_download(r2, prefix, destination, metadata, refresh=args.refresh))
-        about = destination / "About" / "About.xml"
-        if not about.is_file():
-            raise WorkflowError("selected MOD is missing About/About.xml")
-        if about.stat().st_size > 4 * 1024 * 1024:
-            raise WorkflowError("MOD About.xml is unexpectedly large")
+        metadata = [item for item in listed if item["key"][len(prefix):].casefold() in {"about/about.xml", "loadfolders.xml"}]
+        abouts = [item for item in metadata if item["key"][len(prefix):].casefold() == "about/about.xml"]
+        configs = [item for item in metadata if item["key"][len(prefix):].casefold() == "loadfolders.xml"]
+        if len(abouts) != 1 or len(configs)>1:
+            raise WorkflowError("Missing or ambiguous MOD metadata", "invalidModMetadata")
+        if any(item["size"] > 4*1024*1024 for item in metadata):
+            raise WorkflowError("MOD metadata exceeds 4 MiB", "metadataTooLarge")
+        metadata_counts = _download(r2, prefix, destination, metadata, refresh=args.refresh)
         try:
-            meta = ET.parse(about).getroot()
-        except ET.ParseError as exc:
-            raise WorkflowError("MOD About.xml cannot be parsed") from exc
-        package_id = (meta.findtext("packageId") or "").strip()
-        if package_id.casefold() != mod["packageId"].casefold():
-            raise WorkflowError("private index and downloaded MOD disagree on packageId")
-        metadata_keys = {item["key"] for item in metadata}
-        payload = [item for item in items if item["key"] not in metadata_keys]
+            meta = mod_load_plan.parse_xml((destination / abouts[0]["key"][len(prefix):]).read_bytes())
+            package_id = (meta.findtext("packageId") or "").strip()
+            if package_id.casefold() != mod["packageId"].casefold():
+                raise WorkflowError("private index and downloaded MOD disagree on packageId", "packageIdMismatch")
+            missing = mod_load_plan.missing_dependencies(meta, active)
+            if missing:
+                raise WorkflowError("Missing required dependencies: "+", ".join(missing), "missingDependencies")
+            config = (destination / configs[0]["key"][len(prefix):]).read_bytes() if configs else None
+            folders = mod_load_plan.load_folders([i["key"][len(prefix):] for i in listed], config, active)
+        except mod_load_plan.LoadPlanError as exc:
+            raise WorkflowError(str(exc), exc.code) from exc
+        prepared.append((mod, destination, prefix, listed, metadata, metadata_counts, folders))
+    for mod, destination, prefix, listed, metadata, counts, folders in prepared:
+        metadata_keys = {i["key"] for i in metadata}
+        items = [i for i in listed if args.scope == "all" or i["key"] in metadata_keys or
+                 mod_validation_asset(i["key"], folders=folders, language=args.language)]
+        summary = _selection_counts(listed, items)
+        _check_cached_inputs(destination, items, prefix, folders)
+        summary.update(counts)
+        # Retain chosen directories even if no loader file survives filtering.
+        for folder in folders:
+            r2_assets.ensure_safe_destination(destination, folder).mkdir(parents=True, exist_ok=True)
+        payload = [i for i in items if i["key"] not in metadata_keys]
         for outcome, count in _download(r2, prefix, destination, payload, refresh=args.refresh).items():
             summary[outcome] += count
         fetched.append({"workshopId": mod["workshopId"], "name": mod["name"],
-                        "r2": summary, "scope": args.scope})
+                        "r2": summary, "scope": args.scope, "loadFolders": folders})
     mods = [{"path": str((root / "mods" / m["workshopId"]).absolute()),
              "packageId": m["packageId"], "target": m is selected[-1]} for m in selected]
     request = {"recordType": "modValidationRequest", "schemaVersion": 1,
-               "levels": ["A"], "official": ["Core"], "language": args.language,
+               "levels": ["A"], "official": official, "language": args.language,
                "mods": mods, "expectations": {}}
     req_path = root / "request.json"
     req_path.write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.chmod(req_path, 0o600)
     return {"status": "modsReady", "fetched": fetched, "request": str(req_path),
             "validationLevel": "A",
-            "note": "Limited scope may omit custom LoadFolders/resources. Check effective "
-                    "load folders, dependency order, DLCs and B expectations; "
-                    "use --scope all only when additional assets are proven necessary"}
+            "note": "Load folders and required dependencies checked against the complete request; "
+                    "resources outside loader inputs still require explicit retrieval"}
 
 
 @contextmanager
@@ -352,6 +363,7 @@ def main(argv=None) -> int:
             sub.add_argument("--dependency", action="append", default=[])
             sub.add_argument("--language", default="English")
             sub.add_argument("--scope", choices=("validation", "all"), default="validation")
+            sub.add_argument("--official", nargs="+", default=["Core"], help="Core followed by requested official DLCs")
         if name == "validate":
             sub.add_argument("--request")
             sub.add_argument("--worker", default="worker/bin")
@@ -372,7 +384,7 @@ def main(argv=None) -> int:
         print(json.dumps({"status": "blocked", "error": exc.code}), file=sys.stderr)
         return 2
     except (WorkflowError, r2_assets.AssetError, OSError, ValueError) as exc:
-        print(json.dumps({"status": "blocked", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps({"status": "blocked", "code": getattr(exc, "code", "workflowError"), "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2
 
 

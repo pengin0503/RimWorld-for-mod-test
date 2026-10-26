@@ -281,6 +281,8 @@ class CodexWorkflowTests(unittest.TestCase):
             "Workshop/123/About/About.xml",
             "Workshop/123/LoadFolders.xml",
             "Workshop/123/Defs/ThingDefs.xml",
+            "Workshop/123/Textures/Test.png",
+            "Workshop/123/Sounds/A.wav",
             "Workshop/123/Common/Patches/Shared.xml",
             "Workshop/123/1.7/Defs/Test.xml",
             "Workshop/123/1.7/Assemblies/Mod.dll",
@@ -290,30 +292,30 @@ class CodexWorkflowTests(unittest.TestCase):
         omit = [
             "Workshop/123/1.6/Assemblies/Old.dll",
             "Workshop/123/1.4/Defs/Old.xml",
-            "Workshop/123/Textures/Test.png",
-            "Workshop/123/Sounds/A.wav",
+
+
             "Workshop/123/1.7/Source/Code.cs",
             "Workshop/123/Languages/German/Keyed/a.xml",
             "Workshop/123/1.7/Assemblies/Mod.pdb",
         ]
         for key in keep:
             with self.subTest(key=key):
-                self.assertTrue(cw.mod_validation_asset(key))
+                self.assertTrue(cw.mod_validation_asset(key, folders=["1.7", "Common", ""]))
         for key in omit:
             with self.subTest(key=key):
-                self.assertFalse(cw.mod_validation_asset(key))
+                self.assertFalse(cw.mod_validation_asset(key, folders=["1.7", "Common", ""]))
         self.assertTrue(cw.mod_validation_asset(
-            "Workshop/123/Languages/Japanese (日本語)/Keyed/a.xml", language="Japanese"))
+            "Workshop/123/Languages/Japanese (日本語)/Keyed/a.xml", folders=["1.7", "Common", ""], language="Japanese"))
 
     def test_non_english_scope_keeps_english_fallback(self):
         for folder in ("English", "Japanese (日本語)"):
             with self.subTest(folder=folder):
                 self.assertTrue(cw.mod_validation_asset(
-                    f"Workshop/123/1.7/Languages/{folder}/Keyed/a.xml", language="Japanese"))
+                    f"Workshop/123/1.7/Languages/{folder}/Keyed/a.xml", folders=["1.7", "Common", ""], language="Japanese"))
         self.assertFalse(cw.mod_validation_asset(
-            "Workshop/123/Languages/German/Keyed/a.xml", language="Japanese"))
+            "Workshop/123/Languages/German/Keyed/a.xml", folders=["1.7", "Common", ""], language="Japanese"))
 
-    def test_scoped_mod_fetch_does_not_download_textures_or_old_versions(self):
+    def test_scoped_mod_fetch_keeps_textures_but_omits_old_versions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             archive = root / "private-index.zip"
@@ -344,12 +346,13 @@ class CodexWorkflowTests(unittest.TestCase):
                                    language="English", scope="validation", refresh=False)
             with patch.object(cw, "r2_client", return_value=FakeR2()):
                 result = cw.fetch_mods(args)
-            self.assertEqual(result["fetched"][0]["r2"]["selected"], 2)
-            self.assertEqual(result["fetched"][0]["r2"]["skipped"], 2)
-            self.assertEqual(result["fetched"][0]["r2"]["downloaded"], 2)
-            self.assertEqual(pulled, ["Workshop/1234567890/About/About.xml",
-                                      "Workshop/1234567890/1.7/Assemblies/New.dll"])
-            self.assertFalse(any("/Textures/" in k or "/1.5/" in k for k in pulled))
+            self.assertEqual(result["fetched"][0]["r2"]["selected"], 3)
+            self.assertEqual(result["fetched"][0]["r2"]["skipped"], 1)
+            self.assertEqual(result["fetched"][0]["r2"]["downloaded"], 3)
+            self.assertEqual(pulled[0], "Workshop/1234567890/About/About.xml")
+            self.assertEqual(set(pulled[1:]), {"Workshop/1234567890/Textures/Thing.png",
+                                             "Workshop/1234567890/1.7/Assemblies/New.dll"})
+            self.assertFalse(any("/1.5/" in k for k in pulled))
 
 
 if __name__ == "__main__":

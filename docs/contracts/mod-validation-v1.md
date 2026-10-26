@@ -67,6 +67,8 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 - `workerStages`（engineInit → globalInit → staticConstructorsEarly → loadPlayData → lateLoadActions、各秒数と証拠）、`skippedOfficialSteps`、`deviations`、`scope`（確認した範囲と確認していない範囲）。
 - `process`（終了コード、停止理由、最大 RSS、ログ量、上限の実施方式。メモリは監視ポーリングで `memoryHard=false`）、`timings`。
 
+`runningMods[]` は比較用の追加観測として `defCount`（`ModContentPack.AllDefs` の件数）と `loadFolders`（実際の優先順、MOD root からの相対パス、root 自身は空文字）も記録する。これらは Def の内容を書き換えず、単独で合否を決めるものではない。
+
 ## 判定順序
 
 1. **blocked**（`executionStatus=notStarted`）：要求不正、出力先が空でない（このときは出力先に何も書かず、何も消さない）、Linux x64 以外、未実装の C、Worker なし、スナップショット改変、公式コンテンツ・言語・MOD の不足、対応 Adapter のないビルド（`--allow-unknown-build` なし）、B で Harmony を同梱した MOD がない。

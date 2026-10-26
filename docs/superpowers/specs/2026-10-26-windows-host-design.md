@@ -26,15 +26,15 @@ Windows 版は独立した 3 つの段階に分ける。各段階に、それぞ
 
 ## 確認済みの事実
 
-- R2 の直下にある Windows 版（1.7.4985 rev1269）は、`RimWorld.runtimeconfig.json` が Linux 版と同一だった（WaylithClr 10.0.13-waylithclr.dev、設定値も同じ）。`RimWorld.deps.json` の runtimeTarget は `win-x64`。
+- （訂正 2026-10-26）設計時に R2 バケット直下の Windows 版から `RimWorld.runtimeconfig.json`・`RimWorld.deps.json`・`Version.txt` を読み、runtimeconfig が Linux 版と同一、deps.json の runtimeTarget が `win-x64` であると見た。これは `AGENTS.md` の「バケット直下の Windows 版を使用しない」に反していたため、取得した写しは削除し、**この観測は根拠に使わない**。同じ点はユーザーの PC の正規 Windows 版で確かめ直す（Task 5）。
 - Worker は Linux 上で `-r win-x64` を指定してビルドでき、`RimWorldValidationWorker.exe`（apphost）が生成された。
-- managed のゲーム DLL は、以前の照合で Windows 版と Linux 版がバイト単位で一致している。
+- managed のゲーム DLL（Assembly-CSharp・RimWorld・Waylith*・UnityStubs）は、2026-10-25 の照合で、それ以前に用意された Windows 版の一式と Linux 版がバイト単位で一致した。実行環境のファイルは異なる。
 
 ## W1 の設計
 
 ### 入力
 
-ユーザーの PC にある正規の Windows 版を、既存の `prepare-game` で読み取り専用のスナップショットに複製する。Steam のフォルダを直接は使わない。R2 直下の Windows 版は、Adapter の照合値（ファイルのハッシュ）を作るためだけに使う。
+ユーザーの PC にある正規の Windows 版を、既存の `prepare-game` で読み取り専用のスナップショットに複製する。Steam のフォルダを直接は使わない。Adapter の照合値（ファイルのハッシュ）も、このユーザーの PC の正規版から作る。R2 バケット直下の Windows 版は、`AGENTS.md` のとおり一切使わない（ハッシュを取るためだけでも使わない）。
 
 ### 変更点
 

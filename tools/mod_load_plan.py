@@ -78,8 +78,7 @@ def load_folders(paths, xml, active):
                 if name in ('/','\\','.'): name = ''
                 elif name != name.strip() or '\\' in name or name.startswith('/') or any(p in ('','.', '..') for p in name.split('/')) or ':' in name:
                     raise LoadPlanError('unsafeLoadFolderPath', 'Unsafe load-folder path')
-                if name not in directories:
-                    raise LoadPlanError('missingLoadFolder', 'Selected load folder is absent from R2 listing')
+                # Kept even without files: the game adds listed folders without checking that they exist.
                 roots.append(name)
             if not roots:
                 raise LoadPlanError('emptyLoadFolders', 'No active load folders')

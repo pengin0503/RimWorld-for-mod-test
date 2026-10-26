@@ -23,7 +23,7 @@
 
 - ゲームの UI 素材は `Assets.zip` の中にある（Linux 版・ユーザーの Windows 版の両方に存在）。中身は zstd 圧縮（ZIP の方式 93）で、Python 3.12/3.13 の標準ライブラリでは展開できない（3.14 からは標準で可能）。
 - UI のテクスチャは DDS。調べた `Textures/UI` の 536 枚は、BC7 が 523 枚、RGBA8 が 8 枚、BC4 が 5 枚。
-- ゲームに同梱の `AssetRipper.TextureDecoder.dll` に `DecompressBc7` などがあり、ゲームが持っている部品で BC7 を展開できる見込み（実際の呼び出しは実装の最初の作業で確かめる）。zstd の展開も同梱の `ZstdSharp.dll` で行える見込み。
+- ゲームに同梱の部品だけで展開できることを、Linux 版で確かめた。`ZstdSharp.Decompressor.Unwrap` で zstd を展開し、`AssetRipper.TextureDecoder.Bc.Bc7.Decompress(data, width, height, out byte[])` で BC7 を展開すると、`ButtonBG`（64×64）の画素が Pillow の展開結果と一致した（出力は BGRA の順）。.NET の `ZipArchive` は方式 93 を展開できないので、ZIP の中の位置は自分で読む。
 - フォントも `Assets.zip` にある（`Arial_medium.ttf`、`Calibri_tiny.TTF`、`Pretendard-Regular.otf`）。
 - 本家の窓の配色はコードの定数で決まっている。窓の背景 (21, 25, 29)、窓の枠 (97, 108, 122)、区画の背景 (42, 43, 44)、区画の枠 (135, 135, 135)、選択肢の文字 (0.8, 0.85, 1.0)。ボタンやタブは、テクスチャを 9 分割して伸ばす方式（`ButtonBG`・`TabAtlas` など）。
 - ユーザーの PC のゲームフォルダには `Mods` と `RimPy_Windows` があり、Workshop の MOD は Steam ライブラリの `steamapps/workshop/content/294100` にあると見込まれる。

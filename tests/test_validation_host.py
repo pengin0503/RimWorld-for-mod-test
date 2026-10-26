@@ -9,6 +9,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -70,8 +71,13 @@ FAKE_WORKER = textwrap.dedent('''\
                    'harmony': {'assemblies': [], 'available': True, 'expected': patches, 'unexpected': []}},
         'diagnosticsSummary': {'written': 2, 'dropped': 1 if mods == ['droppy'] else 0, 'truncated': 0, 'byLevel': {}},
     }
+    if 'loadfail' in mods:
+        result['playDataLoaded'] = False
+        result['loadException'] = 'System.Exception: load failed on purpose'
     if request.get('map'):
-        if 'maperror' in mods:
+        if 'loadfail' in mods:
+            result['map'] = {'status': 'notStarted', 'skippedOfficialSteps': []}
+        elif 'maperror' in mods:
             result['map'] = {'status': 'failed', 'exception': 'System.NullReferenceException: in GenStep', 'skippedOfficialSteps': []}
         elif 'nobiome' in mods:
             result['map'] = {'status': 'failed', 'setupError': 'biome def X is not loaded', 'skippedOfficialSteps': []}
@@ -813,13 +819,41 @@ class MapTests(TempCase):
         self.assertEqual(result['status'], 'incomplete')
         self.assertIn('mapNotGenerated', [r['code'] for r in result['reasons']])
 
+    def test_failed_load_is_the_verdict_not_the_missing_map(self):
+        self.fx.mod('loadfail')
+        result, _ = self.fx.run(['*loadfail'], map={})
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['stages']['map']['status'], 'notStarted')
+        self.assertEqual([r['code'] for r in result['reasons']], ['loadException', 'playDataNotLoaded'])
+
     def test_baseline_cache_key_includes_the_map(self):
         cache = self.root / 'cache'
+
+        def entries():
+            return [p for p in cache.iterdir() if not p.name.endswith(vh.MAP_OBSERVATION)]
         self.fx.run(['*ruins'], map={'seed': 'a'}, baseline_cache=cache)
         self.fx.run(['*ruins'], map={'seed': 'a', 'imageScale': 4}, baseline_cache=cache)
-        self.assertEqual(len(list(cache.iterdir())), 1)
+        self.assertEqual(len(entries()), 1)
         self.fx.run(['*ruins'], map={'seed': 'b'}, baseline_cache=cache)
-        self.assertEqual(len(list(cache.iterdir())), 2)
+        self.assertEqual(len(entries()), 2)
+
+    def test_cached_baseline_keeps_its_map_observation(self):
+        for adapter in self.fx.adapters.values():
+            adapter['qualified'][('linux-x64', 'waylith')]['features'] = ('map',)
+        cache = self.root / 'cache'
+        first, out = self.fx.run(['*ruins'], map={}, baseline_cache=cache)
+        self.assertEqual(first['status'], 'passed')
+        shutil.rmtree(out)  # the cached baseline's runDir is gone
+        result, _ = self.fx.run(['*ruins'], map={}, baseline_cache=cache)
+        self.assertTrue(result['diagnostics']['baselineCached'])
+        self.assertEqual(result['status'], 'passed')
+        self.assertIn('baselineImage', result['map'])
+        # Without its observation copy the cache entry is not used.
+        for copy in cache.glob(f'*.{vh.MAP_OBSERVATION}'):
+            copy.unlink()
+        result, _ = self.fx.run(['*ruins'], map={}, baseline_cache=cache)
+        self.assertFalse(result['diagnostics']['baselineCached'])
+        self.assertEqual(result['status'], 'passed')
 
 
 class MapRenderTests(unittest.TestCase):

@@ -28,6 +28,23 @@ class MapMetricTests(unittest.TestCase):
         added = [dict(run, mod=3) for run in same]
         self.assertEqual(co.compare_distributions(added, official)[1], ['mod'])
 
+    def test_equivalence_needs_a_generated_map_in_every_run(self):
+        mods = '[RWMT-PROBE] mods core'
+        world = '[RWMT-PROBE] map world seed=rwmt tile=1'
+        generated = {'errors': [], 'probes': [mods, world, '[RWMT-PROBE] map things count=10 sha=ab']}
+        stopped = {'errors': ['load failed'], 'probes': [mods]}
+
+        def summary(product, official):
+            return co.summarize_map_runs('case', {'product': product, 'official': official}, ['passed'] * len(product))
+
+        self.assertTrue(summary([generated] * 2, [generated] * 2)['equivalent'])
+        # Both sides stopping before the map agree on setup, errors and (no) counts.
+        row = summary([stopped] * 2, [stopped] * 2)
+        self.assertEqual(row['mapGeneratedInAllRuns'], {'product': False, 'official': False})
+        self.assertFalse(row['equivalent'])
+        self.assertFalse(summary([generated, dict(generated, probes=[mods, world])], [generated] * 2)['equivalent'])
+        self.assertFalse(summary([], [])['equivalent'])
+
 
 if __name__ == '__main__':
     unittest.main()

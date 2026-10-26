@@ -277,8 +277,17 @@ def load_map_runs(case_dir):
     return runs, statuses
 
 
+def map_generated(probes):
+    """Whether the probe logged a generated map (its world line and its thing count) in this run."""
+    return any(p.startswith('[RWMT-PROBE] map world ') for p in probes) and 'things count' in map_metrics(probes)
+
+
 def analyze_map_case(name, case_dir):
     runs, statuses = load_map_runs(case_dir)
+    return summarize_map_runs(name, runs, statuses)
+
+
+def summarize_map_runs(name, runs, statuses):
     identity = {side: sorted({tuple(sorted(p for p in r['probes'] if MAP_IDENTITY.match(p))) for r in rs})
                 for side, rs in runs.items()}
     errors = {side: sorted({tuple(r['errors']) for r in rs}) for side, rs in runs.items()}
@@ -288,6 +297,8 @@ def analyze_map_case(name, case_dir):
     repeat = len(statuses)
     row = {
         'case': name, 'repeat': repeat, 'productStatuses': statuses,
+        # Two sides that both stopped before the map would otherwise agree on everything.
+        'mapGeneratedInAllRuns': {side: bool(rs) and all(map_generated(r['probes']) for r in rs) for side, rs in runs.items()},
         'identityMatch': len(identity['product']) == 1 and identity['product'] == identity['official'],
         'identity': [list(x) for x in identity['product']],
         'errorsMatch': len(errors['product']) == 1 and errors['product'] == errors['official'],
@@ -295,8 +306,9 @@ def analyze_map_case(name, case_dir):
         'distinctFingerprints': fingerprints,
         'metricsOutsideTolerance': outside, 'metrics': metrics,
     }
-    row['equivalent'] = row['identityMatch'] and row['errorsMatch'] and not outside
-    print(f'{name:24} equivalent={row["equivalent"]} identity={row["identityMatch"]} errors={row["errorsMatch"]} '
+    row['equivalent'] = all(row['mapGeneratedInAllRuns'].values()) and row['identityMatch'] and row['errorsMatch'] \
+        and not outside
+    print(f'{name:24} equivalent={row["equivalent"]} generated={row["mapGeneratedInAllRuns"]} identity={row["identityMatch"]} errors={row["errorsMatch"]} '
           f'outside={outside} distinct fingerprints product/official={fingerprints["product"]}/{fingerprints["official"]} '
           f'of {repeat}', flush=True)
     return row

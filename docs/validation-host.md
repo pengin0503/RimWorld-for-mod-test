@@ -75,7 +75,7 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 
 | オプション | 用途 |
 |---|---|
-| `--baseline-cache DIR` | 同じ構成のベースラインを再利用して約半分の時間にする |
+| `--baseline-cache DIR` | 同じ構成のベースラインを再利用して約半分の時間にする。マップを付けた実行では、ベースラインの `map-observation.json` の写しもここに置く（写しがなければキャッシュを使わない） |
 | `--runtime standard` | 通常の .NET 10 で実行（実験。常に `incomplete`） |
 | `--verify-full` | 実行前にスナップショット全体を再ハッシュ |
 | `--keep-run-dirs` | 調査用に run ディレクトリを残す |

@@ -1078,7 +1078,8 @@ def read_map_observation(run):
     if section.get('status') != 'completed':
         return None, section.get('setupError') or (section.get('exception') or '').split('\n', 1)[0] or \
             f'map stage {section.get("status")}'
-    path = Path(run['runDir']) / MAP_OBSERVATION
+    # A cached baseline keeps its own copy: its runDir belongs to an earlier output folder.
+    path = Path(run['mapObservationPath']) if run.get('mapObservationPath') else Path(run['runDir']) / MAP_OBSERVATION
     try:
         observation = json.loads(path.read_text(encoding='utf-8'))
         map_render.decode(observation)
@@ -1104,7 +1105,13 @@ def evaluate_map(request, mods, target_run, baseline_run, out_dir, *, qualified=
     observation, problem = read_map_observation(target_run)
     baseline_observation, baseline_problem = read_map_observation(baseline_run)
     worker_map = target_worker.get('map') or {}
-    if target_worker.get('executionStatus') == 'completed' and 'map' not in target_worker:
+    # The Worker queues the map only after the load; when the load fails it reports the
+    # map as notStarted (or, if older, not at all). The load failure is the verdict then.
+    load_failed = not target_worker.get('playDataLoaded') or bool(target_worker.get('loadException'))
+    map_not_started = 'map' not in target_worker or (
+        worker_map.get('status') == 'notStarted' and load_failed
+        and not worker_map.get('exception') and not worker_map.get('setupError'))
+    if target_worker.get('executionStatus') == 'completed' and map_not_started:
         stage = {'status': 'notStarted', 'detail': 'the load did not complete, so no map was generated'}
     elif observation is None:
         detail = f'target map: {problem}'
@@ -1277,9 +1284,13 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
     }, sort_keys=True).encode()).hexdigest()
     baseline_run = None
     cache_file = Path(baseline_cache) / f'{baseline_key}.json' if baseline_cache else None
+    map_cache_file = cache_file.with_name(f'{baseline_key}.{MAP_OBSERVATION}') if cache_file else None
     if cache_file and cache_file.is_file():
         baseline_run = json.loads(cache_file.read_text(encoding='utf-8'))
         baseline_run['cached'] = True
+        map_completed = ((baseline_run.get('worker') or {}).get('map') or {}).get('status') == 'completed'
+        if request['map'] and map_completed and not Path(baseline_run.get('mapObservationPath') or map_cache_file).is_file():
+            baseline_run = None  # the cached map observation is gone: run the baseline again
     mark = time.monotonic()
     if baseline_run is None:
         baseline_run = one_run('baseline', baseline_mods, {k: [] for k in expectations})
@@ -1287,7 +1298,13 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         if cache_file and baseline_run['worker'] and baseline_run['worker'].get('executionStatus') == 'completed' \
                 and not baseline_run['process'].get('killedFor') and not baseline_issues(baseline_run['worker']):
             cache_file.parent.mkdir(parents=True, exist_ok=True)
-            _write_json(cache_file, baseline_run)
+            cached = dict(baseline_run)
+            observation = Path(baseline_run['runDir']) / MAP_OBSERVATION
+            if request['map'] and (baseline_run['worker'].get('map') or {}).get('status') == 'completed' \
+                    and observation.is_file():
+                shutil.copyfile(observation, map_cache_file)
+                cached['mapObservationPath'] = str(map_cache_file)
+            _write_json(cache_file, cached)
     timings['baselineSeconds'] = round(time.monotonic() - mark, 3)
     mark = time.monotonic()
     target_run = one_run('target', mods, expectations)

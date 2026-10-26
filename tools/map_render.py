@@ -23,6 +23,7 @@ LEGEND = (
     ('naturalRock', 'natural rock', (72, 70, 68)),
     ('resourceRock', 'mineable resource', (215, 170, 60)),
     ('item', 'item', (245, 215, 80)),
+    ('chunk', 'stone chunk or slag', (165, 158, 148)),
     ('colonist', 'pawn of the player faction', (60, 205, 235)),
     ('humanlike', 'other humanlike pawn', (235, 55, 55)),
     ('animal', 'animal or other pawn', (170, 110, 55)),
@@ -99,7 +100,7 @@ def thing_class(entry, listed_player):
             return 'resourceRock'
         return 'naturalRock' if entry['naturalRock'] else 'building'
     if category == 'Item':
-        return 'item'
+        return 'chunk' if entry.get('chunk') else 'item'
     if category == 'Plant':
         return 'tree' if entry['tree'] else 'plant'
     return None

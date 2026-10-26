@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Reflection;
 using System.Text.Json;
 
 namespace RimWorldValidation.Worker;
@@ -249,6 +250,10 @@ public sealed class MapObservation(MapApi api, MapStage stage, int maxListed)
         json.WriteEndObject();
     }
 
+    private static readonly FieldInfo ChunksCategory = Reflect.StaticField(Reflect.Type("RimWorld.ThingCategoryDefOf, Assembly-CSharp"), "Chunks");
+    private static readonly MethodInfo IsWithinCategory = Reflect.InstanceMethod(Reflect.Type("Verse.ThingDef, Assembly-CSharp"), "IsWithinCategory",
+        Reflect.Type("Verse.ThingCategoryDef, Assembly-CSharp"));
+
     private static void WriteThing(Utf8JsonWriter json, ThingInfo info)
     {
         object def = info.Def;
@@ -262,6 +267,7 @@ public sealed class MapObservation(MapApi api, MapStage stage, int maxListed)
         json.WriteBoolean("resourceRock", building != null && (bool)Reflect.Member(building, "isResourceRock")!);
         object? plant = Reflect.Member(def, "plant");
         json.WriteBoolean("tree", plant != null && (bool)Reflect.Member(plant, "IsTree")!);
+        json.WriteBoolean("chunk", (bool)IsWithinCategory.Invoke(def, [ChunksCategory.GetValue(null)])!);
         object? race = Reflect.Member(def, "race");
         json.WriteBoolean("humanlike", race != null && (bool)Reflect.Member(race, "Humanlike")!);
         json.WriteBoolean("animal", race != null && (bool)Reflect.Member(race, "Animal")!);

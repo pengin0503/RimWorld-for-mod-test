@@ -409,6 +409,21 @@ class EvaluationTests(unittest.TestCase):
         wrong_level = dict(request, allow={'diagnostics': [{'level': 'error', 'match': '^Known', 'reason': 'r'}]})
         self.assertEqual(self.evaluate(events=[warning], request=wrong_level)[0], 'failed')
 
+    def test_known_engine_noise_is_kept_but_does_not_fail(self):
+        def leak(address, stage='checks', category='NativeAllocationRuntime', level='warning'):
+            return {'level': level, 'category': category, 'stage': stage,
+                    'message': f'Persistent allocation 0x{address} (479616 bytes, align 8) was not freed before shutdown.'}
+
+        status, _, reasons, _, fresh = self.evaluate(events=[leak('7FC2380102E0'), leak('7FC2380862D0')])
+        self.assertEqual((status, reasons), ('passed', []))
+        self.assertEqual(fresh[0]['knownNoise']['id'], 'shutdownNativeAllocations')
+        # The same text anywhere else (another stage, category or level) is still judged.
+        for event in (leak('1', stage='map.generateMap'), leak('1', category='Verse'), leak('1', level='error')):
+            self.assertNotEqual(self.evaluate(events=[event])[0], 'passed', event)
+        extra = leak('1')
+        extra['message'] += ' and something else'
+        self.assertEqual(self.evaluate(events=[extra])[0], 'failed')
+
     def test_translation_errors_are_judged_one_by_one(self):
         summary = {'level': 'warning', 'category': 'Verse',
                    'message': 'Translation data for language Japanese has 3 errors. Generate translation report for more info.'}
@@ -828,6 +843,12 @@ class MapRenderTests(unittest.TestCase):
         self.assertEqual(vh.map_render.terrain_class(dict(base, constructed=True)), 'constructedFloor')
         self.assertEqual(vh.map_render.terrain_class(dict(base, fertility=1.4)), 'richSoil')
         self.assertEqual(vh.map_render.terrain_class(dict(base, fertility=0.0)), 'sand')
+
+    def test_thing_classes(self):
+        item = {'category': 'Item', 'humanlike': False, 'resourceRock': False, 'naturalRock': False, 'tree': False}
+        self.assertEqual(vh.map_render.thing_class(item, False), 'item')
+        self.assertEqual(vh.map_render.thing_class(dict(item, chunk=True), False), 'chunk')
+        self.assertEqual(vh.map_render.thing_class(dict(item, category='Filth'), False), None)
 
 
 class ProductBoundaryTests(unittest.TestCase):

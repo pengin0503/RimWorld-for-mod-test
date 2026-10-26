@@ -253,6 +253,17 @@ ALLOW_KEYS = {
 MAX_ALLOW_ENTRIES = 200
 MAX_MATCH_LENGTH = 500
 # The game's count-only summary of translation load errors (LoadedLanguage.InjectIntoData_AfterImpliedDefs).
+# Diagnostics of the engine itself that say nothing about the mods, judged once
+# from evidence and applied to every run. They stay in the result (knownNoise)
+# but never fail it. Each needs the level, category, the Worker stage it is
+# logged in, and a full-line pattern, so a similar message elsewhere still counts.
+KNOWN_NOISE = (
+    {'id': 'shutdownNativeAllocations', 'level': 'warning', 'category': 'NativeAllocationRuntime', 'stage': 'checks',
+     'match': re.compile(r'^Persistent allocation 0x[0-9A-F]+ \(\d+ bytes, align \d+\) was not freed before shutdown\.$'),
+     'reason': "the engine's leak report when the process quits after the result is written; a generated map's native "
+               'buffers are never released because the worker exits instead of leaving the game. Addresses and counts '
+               'differ from run to run, so they cannot be matched against the baseline'},
+)
 TRANSLATION_SUMMARY = re.compile(r'^Translation data for language .+ has \d+ errors\. Generate translation report for more info\.$')
 MOD_KEYS = {'path', 'packageId', 'target'}
 EXPECTATION_KEYS = {
@@ -878,9 +889,16 @@ def _first_line(event):
     return (event.get('message') or '').split('\n', 1)[0]
 
 
+def known_noise(event):
+    """The KNOWN_NOISE entry a Worker event matches, or None."""
+    return next((n for n in KNOWN_NOISE if n['level'] == event.get('level') and n['category'] == event.get('category')
+                 and n['stage'] == event.get('stage') and n['match'].match(event.get('message') or '')), None)
+
+
 def mark_allowed(fresh, allow, translation):
     """Annotate new diagnostics; annotated ones stay in the result but do not fail the run.
 
+    "knownNoise": a built-in KNOWN_NOISE entry (engine messages unrelated to mods).
     "allowedBy": the level matches and the first line matches the regular expression
     of an allow.diagnostics entry. "supersededBy": the game's count-only translation
     warning, when the individual errors behind it are fully known; those errors are
@@ -890,6 +908,10 @@ def mark_allowed(fresh, allow, translation):
     rules = [(re.compile(r['match']), r) for r in allow.get('diagnostics', [])]
     for event in fresh:
         line = _first_line(event)
+        noise = known_noise(event)
+        if noise:
+            event['knownNoise'] = {'id': noise['id'], 'reason': noise['reason']}
+            continue
         rule = next((r for pattern, r in rules if r['level'] == event.get('level') and pattern.search(line)), None)
         if rule:
             event['allowedBy'] = {'match': rule['match'], 'reason': rule['reason']}
@@ -913,7 +935,7 @@ def judge_translation_errors(translation, allow):
 
 
 def _excused(event):
-    return 'allowedBy' in event or 'supersededBy' in event
+    return 'allowedBy' in event or 'supersededBy' in event or 'knownNoise' in event
 
 
 def _mentions(event, mods):
@@ -1285,6 +1307,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'diagnostics': {
             'newInTarget': fresh,
             'allowedInTarget': sum(1 for e in fresh if 'allowedBy' in e),
+            'knownNoiseInTarget': sum(1 for e in fresh if 'knownNoise' in e),
             'translationErrors': judge_translation_errors(new_translation_errors(worker, baseline_worker), request['allow']),
             'target': worker.get('diagnosticsSummary'),
             'baseline': (baseline_worker or {}).get('diagnosticsSummary'),
@@ -1360,6 +1383,9 @@ def _summary(result):
     allowed = (result.get('diagnostics') or {}).get('allowedInTarget')
     if allowed:
         lines.append(f'  allowed by the request: {allowed} new diagnostics (see diagnostics.newInTarget[].allowedBy)')
+    noise = (result.get('diagnostics') or {}).get('knownNoiseInTarget')
+    if noise:
+        lines.append(f'  known engine noise: {noise} new diagnostics (see diagnostics.newInTarget[].knownNoise)')
     lines.append(f'  total {result["timings"]["totalSeconds"]} s')
     return '\n'.join(lines)
 

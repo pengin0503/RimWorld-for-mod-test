@@ -6,11 +6,13 @@ The Controller/Worker remain the authority for validation semantics.
 from __future__ import annotations
 import argparse
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 from pathlib import Path
 import re
 import sys
+import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
 
 try:
@@ -113,11 +115,16 @@ def _fetch(r2: r2_assets.R2, prefix: str, dest: Path, *, runtime=False, refresh=
     if len(items) > r2_assets.MAX_OBJECTS or size > r2_assets.MAX_BYTES:
         raise WorkflowError("R2 selection exceeds safety caps; narrow the request")
     counts = {"selected": len(items), "listedBytes": size, "downloaded": 0, "cached": 0}
-    for item in items:
-        relative = item["key"][len(prefix):]
-        dest_file = r2_assets.ensure_safe_destination(dest, relative)
-        outcome = r2.get(item["key"], dest_file, item["size"], refresh=refresh)
-        counts[outcome] += 1
+    # AWS CLI get-object is one subprocess per object; bounded parallelism avoids
+    # a multi-hour sequential download while keeping R2 requests scoped.
+    with ThreadPoolExecutor(max_workers=min(4, len(items))) as pool:
+        jobs = []
+        for item in items:
+            relative = item["key"][len(prefix):]
+            dest_file = r2_assets.ensure_safe_destination(dest, relative)
+            jobs.append(pool.submit(r2.get, item["key"], dest_file, item["size"], refresh=refresh))
+        for job in as_completed(jobs):
+            counts[job.result()] += 1
     return counts
 
 
@@ -184,8 +191,18 @@ def fetch_mods(args) -> dict:
     for mod in selected:
         destination = root / "mods" / mod["workshopId"]
         summary = _fetch(r2, f"Workshop/{mod['workshopId']}/", destination, refresh=args.refresh)
-        if not (destination / "About" / "About.xml").is_file():
+        about = destination / "About" / "About.xml"
+        if not about.is_file():
             raise WorkflowError("selected MOD is missing About/About.xml")
+        if about.stat().st_size > 4 * 1024 * 1024:
+            raise WorkflowError("MOD About.xml is unexpectedly large")
+        try:
+            meta = ET.parse(about).getroot()
+        except ET.ParseError as exc:
+            raise WorkflowError("MOD About.xml cannot be parsed") from exc
+        package_id = (meta.findtext("packageId") or "").strip()
+        if package_id.casefold() != mod["packageId"].casefold():
+            raise WorkflowError("private index and downloaded MOD disagree on packageId")
         fetched.append({"workshopId": mod["workshopId"], "name": mod["name"], "r2": summary})
     mods = [{"path": str((root / "mods" / m["workshopId"]).absolute()),
              "packageId": m["packageId"], "target": m is selected[-1]} for m in selected]

@@ -82,7 +82,9 @@
 - [ ] Step 1: Windows CI で `RunTests`・`MapTests` が通る（偽 Worker）。Linux の結果は変わらない。
 - [ ] Step 2: commit → push → CI 6 ジョブ成功を確認。
 
-### Task 5: ユーザーの PC での実ゲーム確認（Remote Control、ユーザーの承認 1 回）
+### Task 5: ユーザーの PC での実ゲーム確認（ユーザーが手順書どおりに実行。2026-10-26 の指示で Remote Control は使わない）
+
+結果（2026-10-26）：fixture 22/22・C 6/6 が期待どおりで、判定は Linux と同じ。`docs/research/2026-10-26-windows-w1-real-game.md`。公式との比較による適格化は未実施。
 
 - [ ] PC の Python・.NET SDK・Windows 版 RimWorld の場所を確認（なければ導入の可否をユーザーに聞く）。
 - [ ] Windows 版の実際のファイル構成（`BUILD_FILES['windows-x64']` の `RimWorld.exe`・`hostfxr.dll`・`coreclr.dll`、deps.json の runtimeTarget、runtimeconfig）を、ユーザーの正規版で確かめる。

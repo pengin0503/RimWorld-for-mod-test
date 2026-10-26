@@ -4,7 +4,7 @@
 
 A/B とマップ生成の現在の対応：Linux x86_64、ゲーム同梱の WaylithClr、RimWorld 1.7.4985 rev1269。この組だけが `qualified` です。
 
-Windows x64 でも `run` は動きます（W1。描画なし）。ただし Windows の実ゲームでの確認と公式との比較はまだなので、結果は常に `experimental`（全体は `incomplete`）です。Linux での合格を Windows の合格とは読み替えません。Windows では次の点が Linux と違います（[設計](superpowers/specs/2026-10-26-windows-host-design.md)）。
+Windows x64 でも `run` は動きます（W1。描画なし）。2026-10-26 にユーザーの PC の実ゲームで、fixture 行列 22 ケースと C の 6 ケースが Linux と同じ判定になりました（[記録](research/2026-10-26-windows-w1-real-game.md)）。ただし公式との比較はまだなので、結果は常に `experimental`（全体は `incomplete`）です。Linux での合格を Windows の合格とは読み替えません。Windows では次の点が Linux と違います（[設計](superpowers/specs/2026-10-26-windows-host-design.md)）。
 
 - スナップショットは、そのスナップショットと同じ OS 用のゲームでしか使えません。別 OS 用なら `platformMismatch` で `blocked`。
 - 実行ディレクトリはシンボリックリンクではなく、ファイルのハードリンク（別ドライブなどで作れなければ複製）とフォルダのジャンクションで作ります。管理者権限や開発者モードは要りません。使った方式の数は `process.<run>.linkModes` に出ます。

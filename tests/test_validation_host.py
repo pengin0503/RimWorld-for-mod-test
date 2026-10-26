@@ -42,7 +42,8 @@ def pid_alive(pid):
             kernel32.CloseHandle(ctypes.c_void_p(handle))
     try:
         return 'Z' not in Path(f'/proc/{pid}/stat').read_text().split(')')[1][:3]
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # Gone before or while /proc was read (the read itself fails with ESRCH when the process is reaped).
         return False
 
 

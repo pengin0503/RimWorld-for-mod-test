@@ -4,7 +4,7 @@
 
 2026-10-26 のユーザーからの報告で、Codex Cloud (Linux x86_64、Python 3.12.14、.NET SDK 10.0.403) から Cloudflare R2 バケット rimworld-17 の Game-Linux/Version.txt に HEAD 200、GET 成功。バージョンは 1.7.4985 rev1269。
 
-同日のユーザー報告では、コミット `5ff1a52` の Codex Cloud 実行で Harmony の A 検証が `passed / completed / qualified`。これはユーザー報告の実績として扱い、本会話での再実行や B・マップ検証の成功とは区別する。
+同日のコミット `5ff1a52` の Codex Cloud 実行で Harmony の A 検証が `passed / completed / qualified`。保存済み結果を確認した[実測記録](research/2026-10-26-codex-cloud-a-validation.md)を参照。更新版 `59dde4d` の限定取得経路は非公開索引 ZIP の HEAD が 404 のため `blocked`。旧コミットの成功を更新版の再検証成功とは扱わない。
 
 ## Codex Cloud の設定
 
@@ -91,6 +91,12 @@ prepare はゲーム本体を新たな私有スナップショットへコピー
 4. 必要な次の実MOD検証で既存資材・スナップショットを再利用し、修正後CLIの取得範囲と実処理結果を確認する。B・マップは明示した要求の範囲だけを評価する。
 
 C（指定動作）、D（tick）、Windows GUIには、ユーザーの明示的な了承なしに着手しない。
+
+### 2026-10-26 の更新版の接続確認
+
+`59dde4d` で `fetch-mods --target Harmony --language English` を実行したところ、既定の非公開索引を取得する段階で `blocked`。認証付き HEAD では `Game-Linux/Version.txt` が成功（18 bytes）、`PrivateIndex/rimworld-mod-index-2026-10-26.zip` は 404。同じ資格情報によるゲームファイルへのアクセスは利用可能だが、指定キーの索引は取得できていない。利用可能なローカル索引 ZIP も見つからなかった。
+
+再開には、正規の索引 ZIP を R2 の指定キーに非公開配置するか、checkout 外の私有領域へ渡して `--index-zip` で指定する。404 だけでバケット全体の欠損や認証不良とは判断せず、キー・大文字小文字・配置先を確認する。索引を取得できたら同じ限定取得コマンドを再実行し、名前・ID・PackageId の照合、About と payload の段階取得、スナップショット再利用、A 検証へ進む。索引なしで ID を推測したり `--scope all` に切り替えたりしない。
 
 ## 制限・既知の課題
 

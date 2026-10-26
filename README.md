@@ -59,10 +59,10 @@ AI の通常の検証先は Linux、Windows は利用者自身の検証先とし
 
 ## Cloudflare R2 からのオンデマンド資材取得
 
-[Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。R2 の Secrets 設定と実接続テストは未実施です。
+[Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。Codex Cloud からの接続は確認済みですが、GitHub Actions 側の Secrets 設定・実接続は別途確認が必要です。
 
 ## Codex Cloud での R2 参照・MOD 検証
 
 [Codex Cloud の接続・実行手順](docs/codex-cloud.md) と [Codex 向け作業規約](AGENTS.md) を追加しました。ユーザーの非公開 MOD 索引（ZIP）は公開リポジトリに置かず、Codex の私有領域で Workshop ID の解決に利用します。`tools/codex_workflow.py` は索引検索、指定 MOD の R2 取得、Linux ゲームスナップショットの準備、既存検証ホストの実行を補助します。
 
-2026-10-26 のユーザー報告では、Codex Cloud からの `Game-Linux/Version.txt` 取得に加え、コミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified`。今回の修正後の実R2取得・実ゲーム処理は未再実行です。既存の適格化済み検証範囲と判定ロジックは変更していません。
+2026-10-26 にコミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified`。更新版 `59dde4d` の索引を使う限定取得経路は、指定された非公開索引 ZIP の HEAD が 404 のため `blocked` で、実ゲーム処理には進んでいません。[Codex Cloud の実測記録](docs/research/2026-10-26-codex-cloud-a-validation.md) に成功範囲と残作業を分けて記録しています。

@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 where py >nul 2>nul
 if errorlevel 1 (
-  echo Python 3.12 or newer with Tcl/Tk is required.
+  echo Python 3.12 or newer is required.
   echo Install Python, then run this file again.
   pause
   exit /b 1
@@ -14,5 +14,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-py -3 tools\mod_preflight.py desktop
+rem Opens the validation GUI (test-only, never playable). Run "py -3 tools\gui_host.py setup" once first.
+py -3 tools\gui_host.py launch
 if errorlevel 1 pause

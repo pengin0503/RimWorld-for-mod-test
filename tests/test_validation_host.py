@@ -1034,8 +1034,8 @@ class MapRenderTests(unittest.TestCase):
 class ProductBoundaryTests(unittest.TestCase):
     def test_product_code_never_starts_the_official_game(self):
         root = Path(__file__).resolve().parents[1]
-        for path in [root / 'tools' / 'validation_host.py', root / 'tools' / 'mod_preflight.py', root / 'tools' / 'preflight_gui.py',
-                     *sorted((root / 'worker').rglob('*.cs'))]:
+        for path in [root / 'tools' / 'validation_host.py', root / 'tools' / 'mod_preflight.py', root / 'tools' / 'gui_host.py',
+                     *sorted((root / 'worker').rglob('*.cs')), *sorted((root / 'gui').rglob('*.cs'))]:
             text = path.read_text(encoding='utf-8')
             for forbidden in ('-QuitAfterBoot', "'-headless'", '-savedatafolder', 'official-comparison', 'compare_official'):
                 self.assertNotIn(forbidden, text, f'{path} mentions {forbidden}')

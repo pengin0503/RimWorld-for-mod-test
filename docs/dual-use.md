@@ -9,7 +9,7 @@
 | 機能 | Linux x86_64 | Windows |
 |---|---|---|
 | 実ゲーム処理による検証（A：実ローダー、B：DLL・Harmony）。[使い方](validation-host.md) | 実装済み。1.7.4985 rev1269＋WaylithClr で `qualified` | 未対応（`run` は `blocked`） |
-| 静的な事前検査（`mod_preflight.py check`、Windows 画面） | 実装済み | 実装済み |
+| 静的な事前検査（`mod_preflight.py check`） | 実装済み | 実装済み |
 | C：指定動作テスト | 未実装（`blocked`） | 未実装 |
 
 以下は静的な事前検査の説明です。静的検査はゲームコードを実行せず、DLL は識別用にハッシュするだけです。結果は常に `gameVerification=notRun` で、実ゲーム処理による検証の代わりにはなりません。
@@ -51,7 +51,7 @@ OS 上に実在するパスを指定します。相対パスはプロフィー�
 
 ## 現在の Windows 画面
 
-Python 3.12+ を Tcl/Tk・Python Launcher 付きで用意し、`Start-Windows.cmd` を開きます。ゲーム/保存先/追加 MOD 検索先を設定し、静的事前検査、プロフィール保存、結果保存を使えます。単体 EXE 配布ではありません。
+`Start-Windows.cmd` は、ゲームの描画で作った検証用 GUI（W2、`tools/gui_host.py launch`）を開きます。設計は `docs/superpowers/specs/2026-10-26-windows-gui-w2-design.md` を参照してください。以前の Tk 画面（`mod_preflight.py desktop`）は 2026-10-26 に削除し、`desktop` は移行のためのエラーを返すだけです。静的事前検査は `mod_preflight.py check` で引き続き使えます。
 
 画面のゲーム起動ボタンと CLI の `play` は 2026-10-25 に削除しました。`play` は移行のためのエラーを返すだけです。遊ぶときは、ツールとは別に通常どおりゲームを起動してください。
 

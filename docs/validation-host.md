@@ -106,6 +106,24 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 
 `passed` は「要求した範囲で、対応環境の実物の処理で問題が見つからなかった」という意味です。プレイ中の挙動や Windows 固有の動作は保証しません。
 
+## 5. 画面（W2・作成中）
+
+ゲーム自身の描画と UI 部品で作った検証用の画面です（[設計](superpowers/specs/2026-10-26-windows-gui-w2-design.md)）。MOD と検証内容を選び、上の `run` を実行し、`result.json` を表示します。画面は判定しません。メインメニュー・ゲーム開始・開発者モード・Steam はなく、遊ぶことはできません。作成中のため、タブの中身は順に追加しています。
+
+画面はゲームの DLL を参照してビルドするので、ゲームのある PC でだけビルドします（公開 CI ではビルドしません）。`GameDir` にはスナップショットの `game` フォルダを渡します。
+
+```bash
+dotnet build gui/RimWorldValidation.Gui -c Release -o gui/bin -p:GameDir=/private/rw-snapshot/game
+python3 tools/gui_host.py setup --snapshot /private/rw-snapshot --results /private/gui-results
+python3 tools/gui_host.py launch
+```
+
+`setup` は設定を `%LOCALAPPDATA%\rwmt\gui-settings.json`（Linux は `~/.config/rwmt/gui-settings.json`）に保存します。MOD の候補は、指定がなければゲームの `Mods` と Steam の Workshop フォルダ（`steamapps/workshop/content/294100`）です。同じ packageId が複数あれば先に見つかったほうを使い、残りは理由付きで飛ばします。Windows では `Start-Windows.cmd` が `launch` を実行します。
+
+`launch` は結果フォルダの中に `.gui-session` を作り（スナップショットへのリンク、公式コンテンツだけの `ModsConfig.xml`、`devMode=false` の `Prefs.xml`）、画面を Linux はプロセスグループ、Windows は Job Object の中で動かします。画面を閉じると、画面から始めた検証も止めて `.gui-session` を消します。利用者の本家の設定やセーブは読み書きしません（本家の `ModsConfig.xml` は読み込み順の取り込みに読むだけ）。
+
+画面の終了コード：0 閉じた、2 起動方法か `gui-request.json` が不正、3 遊べる状態になりかけた（Game の作成やシーン切り替え。その場で終了）、4 このゲームのビルドに画面が使う非公開メンバーがない、5 試験用の手順（`--script`）が失敗。
+
 ## AI に任せる流れ（iPad から）
 
 1. iPad から AI に MOD（または変更内容）と確認したいことを伝える。

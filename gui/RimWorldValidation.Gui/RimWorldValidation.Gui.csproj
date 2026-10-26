@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The validation GUI (W2): a window drawn by the game's own renderer and UI
+    widgets, never playable. Unlike the Worker it is compiled against the
+    user's game (Verse.Window, Root, UIRoot), so it is built only where the game
+    is installed and never in public CI:
+
+      dotnet build gui/RimWorldValidation.Gui -c Release -o gui/bin -p:GameDir=<snapshot>/game
+
+    The game's DLLs are referenced, not copied (Private=false): at run time the
+    copies linked into the GUI's run directory by tools/gui_host.py are used.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>RimWorldValidationGui</AssemblyName>
+    <RootNamespace>RimWorldValidation.Gui</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- CS0618: the game marks some UI members obsolete that its own windows still use. -->
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <Target Name="RequireGameDir" BeforeTargets="ResolveAssemblyReferences;CoreCompile">
+    <Error Condition="'$(GameDir)' == ''"
+           Text="GameDir is not set. Build with -p:GameDir=&lt;snapshot&gt;/game (the folder holding Assembly-CSharp.dll); see docs/validation-host.md." />
+    <Error Condition="'$(GameDir)' != '' And !Exists('$(GameDir)/Assembly-CSharp.dll')"
+           Text="GameDir '$(GameDir)' has no Assembly-CSharp.dll; pass the snapshot's game folder." />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp" HintPath="$(GameDir)/Assembly-CSharp.dll" Private="false" />
+    <Reference Include="UnityStubs" HintPath="$(GameDir)/UnityStubs.dll" Private="false" />
+    <Reference Include="Waylith" HintPath="$(GameDir)/Waylith.dll" Private="false" />
+    <Reference Include="Waylith.UnityCompat" HintPath="$(GameDir)/Waylith.UnityCompat.dll" Private="false" />
+    <Reference Include="Brutal.Core.Logging" HintPath="$(GameDir)/Brutal.Core.Logging.dll" Private="false" />
+    <Reference Include="Microsoft.Extensions.Logging" HintPath="$(GameDir)/Microsoft.Extensions.Logging.dll" Private="false" />
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions" HintPath="$(GameDir)/Microsoft.Extensions.Logging.Abstractions.dll" Private="false" />
+    <Reference Include="Microsoft.Extensions.Logging.Console" HintPath="$(GameDir)/Microsoft.Extensions.Logging.Console.dll" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../RimWorldValidation.Gui.Model/RimWorldValidation.Gui.Model.csproj" />
+  </ItemGroup>
+</Project>

@@ -169,5 +169,59 @@ class CodexWorkflowTests(unittest.TestCase):
                 validate.assert_not_called()
 
 
+    def test_fetch_mod_creates_A_request_from_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "private-index.zip"
+            sample_index(archive)
+            private = root / "private"
+            content = b'<ModMetaData><name>Example</name><packageId>author.example</packageId></ModMetaData>'
+
+            class FakeR2:
+                def list_prefix(self, prefix):
+                    return [{"key": prefix + "About/About.xml", "size": len(content)}]
+
+                def get(self, key, dest, size, *, refresh=False):
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(content)
+                    return "downloaded"
+
+            args = SimpleNamespace(private_root=private, index_zip=str(archive), aws="aws",
+                                   dependency=[], target="Example", language="English", refresh=False)
+            with patch.object(cw, "r2_client", return_value=FakeR2()):
+                result = cw.fetch_mods(args)
+            request_path = Path(result["request"])
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+            self.assertEqual(request["recordType"], "modValidationRequest")
+            self.assertEqual(request["levels"], ["A"])
+            self.assertEqual(request["mods"][0]["packageId"], "author.example")
+            self.assertTrue(request["mods"][0]["target"])
+            self.assertEqual(result["fetched"][0]["workshopId"], "1234567890")
+            self.assertIsInstance(cw.validation_host.validate_request(request, request_path.parent), dict)
+
+    def test_fetch_mod_refuses_index_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "private-index.zip"
+            sample_index(archive)
+            private = root / "private"
+
+            class FakeR2:
+                def list_prefix(self, prefix):
+                    return [{"key": prefix + "About/About.xml", "size": 80}]
+
+                def get(self, key, dest, size, *, refresh=False):
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_text("<ModMetaData><packageId>evil.other</packageId></ModMetaData>")
+                    return "downloaded"
+
+            args = SimpleNamespace(private_root=private, index_zip=str(archive), aws="aws",
+                                   dependency=[], target="Example", language="English", refresh=False)
+            with patch.object(cw, "r2_client", return_value=FakeR2()):
+                with self.assertRaises(cw.WorkflowError):
+                    cw.fetch_mods(args)
+            self.assertFalse((private / "request.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

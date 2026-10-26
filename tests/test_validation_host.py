@@ -9,6 +9,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -70,6 +71,41 @@ FAKE_WORKER = textwrap.dedent('''\
                    'harmony': {'assemblies': [], 'available': True, 'expected': patches, 'unexpected': []}},
         'diagnosticsSummary': {'written': 2, 'dropped': 1 if mods == ['droppy'] else 0, 'truncated': 0, 'byLevel': {}},
     }
+    if 'loadfail' in mods:
+        result['playDataLoaded'] = False
+        result['loadException'] = 'System.Exception: load failed on purpose'
+    if request.get('map'):
+        if 'loadfail' in mods:
+            result['map'] = {'status': 'notStarted', 'skippedOfficialSteps': []}
+        elif 'maperror' in mods:
+            result['map'] = {'status': 'failed', 'exception': 'System.NullReferenceException: in GenStep', 'skippedOfficialSteps': []}
+        elif 'nobiome' in mods:
+            result['map'] = {'status': 'failed', 'setupError': 'biome def X is not loaded', 'skippedOfficialSteps': []}
+        else:
+            import base64, struct
+            ruins = 'ruins' in mods
+            things = [{'defName': 'Granite', 'mod': 'ludeon.rimworld', 'category': 'Building', 'count': 2,
+                       'naturalRock': True, 'resourceRock': False, 'tree': False, 'humanlike': False, 'animal': False}]
+            if ruins:
+                things.append({'defName': 'Ruin_Wall', 'mod': 'test.ruins', 'category': 'Building', 'count': 1,
+                               'naturalRock': False, 'resourceRock': False, 'tree': False, 'humanlike': False, 'animal': False})
+            terrain = [{'defName': 'Soil', 'mod': 'ludeon.rimworld', 'cells': 4, 'fertility': 1.0, 'passability': 'Standable',
+                        'natural': True, 'water': False, 'ice': False, 'rock': False, 'soil': True, 'floor': False,
+                        'constructed': False, 'color': [1, 1, 1, 1]}]
+            observation = {
+                'recordType': 'rwmtMapObservation', 'schemaVersion': 1, 'width': 2, 'height': 2, 'tile': 7,
+                'biome': 'TemperateForest', 'genSteps': [{'defName': 'RuinsStep', 'mod': 'test.ruins', 'order': 1}] if ruins else [],
+                'palettes': {'terrain': terrain, 'roof': [{'defName': 'RoofRockThick', 'mod': 'ludeon.rimworld', 'thick': True,
+                                                          'natural': True, 'cells': 1}], 'thing': things},
+                'layers': {'terrain': base64.b64encode(struct.pack('<4H', 0, 0, 0, 0)).decode(),
+                           'roof': base64.b64encode(bytes([0, 0, 0, 1])).decode(),
+                           'thing': base64.b64encode(struct.pack('<4H', 0, 2 if ruins else 0, 1, 1)).decode()},
+                'things': [{'def': 2, 'x': 1, 'z': 0, 'rect': [1, 0, 1, 0], 'rotation': 0, 'faction': None,
+                            'playerFaction': False, 'stuff': 'BlocksGranite'}] if ruins else [],
+            }
+            with open(request['map']['observationPath'], 'w', encoding='utf-8') as stream:
+                json.dump(observation, stream)
+            result['map'] = {'status': 'completed', 'summary': {'width': 2, 'height': 2}, 'skippedOfficialSteps': ['x']}
     with open(request['resultPath'], 'w', encoding='utf-8') as stream:
         json.dump(result, stream)
 ''')
@@ -378,6 +414,21 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual((status, reasons), ('passed', []))
         wrong_level = dict(request, allow={'diagnostics': [{'level': 'error', 'match': '^Known', 'reason': 'r'}]})
         self.assertEqual(self.evaluate(events=[warning], request=wrong_level)[0], 'failed')
+
+    def test_known_engine_noise_is_kept_but_does_not_fail(self):
+        def leak(address, stage='checks', category='NativeAllocationRuntime', level='warning'):
+            return {'level': level, 'category': category, 'stage': stage,
+                    'message': f'Persistent allocation 0x{address} (479616 bytes, align 8) was not freed before shutdown.'}
+
+        status, _, reasons, _, fresh = self.evaluate(events=[leak('7FC2380102E0'), leak('7FC2380862D0')])
+        self.assertEqual((status, reasons), ('passed', []))
+        self.assertEqual(fresh[0]['knownNoise']['id'], 'shutdownNativeAllocations')
+        # The same text anywhere else (another stage, category or level) is still judged.
+        for event in (leak('1', stage='map.generateMap'), leak('1', category='Verse'), leak('1', level='error')):
+            self.assertNotEqual(self.evaluate(events=[event])[0], 'passed', event)
+        extra = leak('1')
+        extra['message'] += ' and something else'
+        self.assertEqual(self.evaluate(events=[extra])[0], 'failed')
 
     def test_translation_errors_are_judged_one_by_one(self):
         summary = {'level': 'warning', 'category': 'Verse',
@@ -691,6 +742,147 @@ class RunTests(TempCase):
         self.assertEqual(result['reasons'][0]['code'], 'outputNotEmpty')
         self.assertEqual((out / 'inputs' / 'evidence.txt').read_text(encoding='utf-8'), 'y')
         self.assertEqual((out / 'result.json').read_text(encoding='utf-8'), '{"old": true}')
+
+
+class MapRequestTests(TempCase):
+    def test_map_request_defaults_and_rejections(self):
+        base = {'recordType': 'modValidationRequest', 'schemaVersion': 1, 'levels': ['A'],
+                'mods': [{'path': 'm', 'target': True}]}
+        request = vh.validate_request(dict(base, map={}), self.root)
+        self.assertEqual(request['map']['seed'], 'rwmt')
+        self.assertEqual(request['map']['size'], 250)
+        self.assertIsNone(vh.validate_request(base, self.root)['map'])
+        bad = {
+            'unknown field': {'map': {'colour': 1}},
+            'size too small': {'map': {'size': 10}},
+            'coverage': {'map': {'planetCoverage': 2}},
+            'biome and tile': {'map': {'biome': 'TemperateForest', 'tile': 3}},
+            'bad def name': {'map': {'biome': '../x'}},
+            'mapThings without map': {'expectations': {'mapThings': [{'type': 'ThingDef', 'defName': 'X'}]}},
+            'mapThings bad type': {'map': {}, 'expectations': {'mapThings': [{'type': 'PawnKindDef', 'defName': 'X'}]}},
+            'min over max': {'map': {}, 'expectations': {'mapThings': [{'type': 'ThingDef', 'defName': 'X', 'minCount': 3, 'maxCount': 1}]}},
+        }
+        for name, fields in bad.items():
+            with self.subTest(name), self.assertRaises(vh.RequestError):
+                vh.validate_request(dict(base, **fields), self.root)
+
+
+@unittest.skipUnless(LINUX, 'running the Worker is implemented for Linux only')
+class MapTests(TempCase):
+    def setUp(self):
+        super().setUp()
+        self.fx.prepare()
+        self.fx.mod('ruins', 'test.ruins')
+
+    def test_map_is_generated_rendered_and_marked_experimental(self):
+        result, out = self.fx.run(['*ruins'], map={'imageScale': 3},
+                                  expectations={'mapThings': [{'type': 'ThingDef', 'defName': 'Ruin_Wall'},
+                                                              {'type': 'TerrainDef', 'defName': 'Soil', 'minCount': 4}]})
+        self.assertEqual(result['status'], 'incomplete')
+        self.assertEqual([r['code'] for r in result['reasons']], ['mapNotQualified'])
+        self.assertEqual(result['stages']['map']['status'], 'completed')
+        self.assertEqual(result['map']['fidelity'], 'experimental')
+        self.assertEqual([c['outcome'] for c in result['map']['checks']], ['match', 'match'])
+        content = result['map']['targetContent']
+        self.assertEqual(content['targetThings'][0]['defName'], 'Ruin_Wall')
+        self.assertEqual(content['targetPlacements'][0]['x'], 1)
+        self.assertEqual(content['genStepsFromTargets'][0]['defName'], 'RuinsStep')
+        image = (out / 'map.png').read_bytes()
+        self.assertTrue(image.startswith(b'\x89PNG'))
+        self.assertTrue((out / 'map-baseline.png').is_file())
+        legend = {e['key']: e['cells'] for e in result['map']['legend']}
+        self.assertEqual(legend['targetThing'], 1)
+        self.assertEqual(legend['naturalRock'], 2)
+        worker_request = json.loads((out / 'target' / 'worker-request.json').read_text(encoding='utf-8'))
+        self.assertNotIn('mapThings', worker_request['expectations'])
+        self.assertNotIn('imageScale', worker_request['map'])
+
+    def test_qualified_map_can_pass_and_mismatch_fails(self):
+        for adapter in self.fx.adapters.values():
+            adapter['qualified'][('linux-x64', 'waylith')]['features'] = ('map',)
+        result, _ = self.fx.run(['*ruins'], map={})
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual(result['map']['fidelity'], 'qualified')
+        result, _ = self.fx.run(['*ruins'], map={},
+                                expectations={'mapThings': [{'type': 'ThingDef', 'defName': 'Ruin_Wall', 'minCount': 2}]})
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual([r['code'] for r in result['reasons']], ['mapExpectationMismatch'])
+        self.assertEqual(result['map']['checks'][0]['actual'], 1)
+
+    def test_map_failures(self):
+        self.fx.mod('maperror')
+        result, _ = self.fx.run(['*maperror'], map={})
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('mapGenerationFailed', [r['code'] for r in result['reasons']])
+        self.fx.mod('nobiome')
+        result, _ = self.fx.run(['*nobiome'], map={'biome': 'X'})
+        self.assertEqual(result['status'], 'incomplete')
+        self.assertIn('mapNotGenerated', [r['code'] for r in result['reasons']])
+
+    def test_failed_load_is_the_verdict_not_the_missing_map(self):
+        self.fx.mod('loadfail')
+        result, _ = self.fx.run(['*loadfail'], map={})
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['stages']['map']['status'], 'notStarted')
+        self.assertEqual([r['code'] for r in result['reasons']], ['loadException', 'playDataNotLoaded'])
+
+    def test_baseline_cache_key_includes_the_map(self):
+        cache = self.root / 'cache'
+
+        def entries():
+            return [p for p in cache.iterdir() if not p.name.endswith(vh.MAP_OBSERVATION)]
+        self.fx.run(['*ruins'], map={'seed': 'a'}, baseline_cache=cache)
+        self.fx.run(['*ruins'], map={'seed': 'a', 'imageScale': 4}, baseline_cache=cache)
+        self.assertEqual(len(entries()), 1)
+        self.fx.run(['*ruins'], map={'seed': 'b'}, baseline_cache=cache)
+        self.assertEqual(len(entries()), 2)
+
+    def test_cached_baseline_keeps_its_map_observation(self):
+        for adapter in self.fx.adapters.values():
+            adapter['qualified'][('linux-x64', 'waylith')]['features'] = ('map',)
+        cache = self.root / 'cache'
+        first, out = self.fx.run(['*ruins'], map={}, baseline_cache=cache)
+        self.assertEqual(first['status'], 'passed')
+        shutil.rmtree(out)  # the cached baseline's runDir is gone
+        result, _ = self.fx.run(['*ruins'], map={}, baseline_cache=cache)
+        self.assertTrue(result['diagnostics']['baselineCached'])
+        self.assertEqual(result['status'], 'passed')
+        self.assertIn('baselineImage', result['map'])
+        # Without its observation copy the cache entry is not used.
+        for copy in cache.glob(f'*.{vh.MAP_OBSERVATION}'):
+            copy.unlink()
+        result, _ = self.fx.run(['*ruins'], map={}, baseline_cache=cache)
+        self.assertFalse(result['diagnostics']['baselineCached'])
+        self.assertEqual(result['status'], 'passed')
+
+
+class MapRenderTests(unittest.TestCase):
+    def test_png_is_valid(self):
+        import zlib, struct
+        data = vh.map_render.png(2, 1, [bytes([255, 0, 0, 0, 255, 0])])
+        self.assertTrue(data.startswith(b'\x89PNG\r\n\x1a\n'))
+        width, height = struct.unpack('>II', data[16:24])
+        self.assertEqual((width, height), (2, 1))
+        idat = data[data.index(b'IDAT') + 4:data.index(b'IEND') - 8]
+        self.assertEqual(zlib.decompress(idat), b'\x00' + bytes([255, 0, 0, 0, 255, 0]))
+
+    def test_unreadable_observation_is_rejected(self):
+        with self.assertRaises(vh.map_render.ObservationError):
+            vh.map_render.decode({'recordType': 'other'})
+
+    def test_terrain_classes(self):
+        base = {'defName': 'X', 'water': False, 'ice': False, 'constructed': False, 'floor': False, 'rock': False,
+                'natural': True, 'fertility': 1.0}
+        self.assertEqual(vh.map_render.terrain_class(dict(base, water=True, defName='WaterDeep')), 'deepWater')
+        self.assertEqual(vh.map_render.terrain_class(dict(base, constructed=True)), 'constructedFloor')
+        self.assertEqual(vh.map_render.terrain_class(dict(base, fertility=1.4)), 'richSoil')
+        self.assertEqual(vh.map_render.terrain_class(dict(base, fertility=0.0)), 'sand')
+
+    def test_thing_classes(self):
+        item = {'category': 'Item', 'humanlike': False, 'resourceRock': False, 'naturalRock': False, 'tree': False}
+        self.assertEqual(vh.map_render.thing_class(item, False), 'item')
+        self.assertEqual(vh.map_render.thing_class(dict(item, chunk=True), False), 'chunk')
+        self.assertEqual(vh.map_render.thing_class(dict(item, category='Filth'), False), None)
 
 
 class ProductBoundaryTests(unittest.TestCase):

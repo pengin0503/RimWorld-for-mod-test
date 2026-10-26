@@ -13,10 +13,11 @@ RimWorld を通常起動できない環境でも、作成した MOD を実物の
 |---|---|
 | 実ゲーム処理による検証（`tools/validation_host.py` と C# Worker） | **Linux x86_64 で実装済み**。RimWorld 1.7.4985 rev1269＋同梱 WaylithClr で `qualified`。XML パッチ失敗、未解決参照、Mod 初期化例外、期待した Harmony パッチの欠落、パッチの副作用（公式の Def 検査エラー）を実物の処理で検出 |
 | 公式 headless との比較（開発用） | 自作 fixture 9 ケースで、エラー・警告と読込結果（Def 値、翻訳、MOD 順序、Harmony 登録）が一致。[適格化の記録](docs/research/test-host-qualification.md) |
-| 実際の MOD | Harmony 3.0.1 と Vanilla Expanded Framework で実行。VEF は Core・全 DLC 英語で passed、全 DLC 日本語では公式翻訳の注入先を消すパッチのため翻訳エラーの警告が 3 件増えて failed。公式 headless と同じ結果。[実 MOD 検証](docs/research/real-mod-validation.md) |
+| 実際の MOD | Harmony 3.0.1 と Vanilla Expanded Framework で実行。VEF は Core・全 DLC 英語で passed、全 DLC 日本語では公式翻訳の注入先を消すパッチのため翻訳エラーの警告が 3 件増えて failed。公式 headless と同じ結果。2026-10-26 に索引から選んだ Vanilla Psycasts Expanded（VEF 依存、Harmony 登録 86 件）と TD Enhancement Pack（登録 180 件、うち transpiler 27 件）も Core・全 DLC 英語・全 DLC 日本語で passed、公式 headless と一致。[実 MOD 検証](docs/research/real-mod-validation.md) |
 | Windows での実ゲーム検証 | 未対応（`run` は `blocked`）。Linux の結果を Windows の保証にしない |
 | 標準 .NET での実行 | 実験扱い（常に `incomplete`）。WaylithClr との実害のある差を確認済み |
-| C：指定動作テスト／D：一時マップ・tick | 未実装（`blocked`） |
+| マップ生成（`map`） | Linux x86_64 で実装・適格化済み。ロード後に一時的なワールドとマップを 1 枚生成し、模式図の画像・内容・期待値の判定を出す。このビルドのマップ生成は同じ種でも毎回少し違う（公式も同じ）ため、公式 quick test と各 5 回の分布で比較。[マップ生成の適格化](docs/research/map-qualification.md) |
+| C：指定動作テスト／D：ゲーム開始後・tick | 未実装（`blocked`） |
 | 入力監査 CLI | 実装済み。ZIP・XML 構文・manifest を検査 |
 | MOD 事前検査 CLI / Windows 画面 | 実装済み。静的検査のみ（`gameVerification=notRun`） |
 | 既存の通常起動機能 | **削除済み**。CLI `play` は移行エラーを返すだけ。画面の起動ボタンも削除 |

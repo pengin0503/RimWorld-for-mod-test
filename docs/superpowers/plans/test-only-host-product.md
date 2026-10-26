@@ -35,8 +35,9 @@
 
 ## 残りのタスク
 
-- [x] 実際の MOD での検証：Harmony 3.0.1 と Vanilla Expanded Framework で実施（[実 MOD 検証](../../research/real-mod-validation.md)）。ほかの MOD は今後。
-- [x] 既知の警告の許可：要求の `allow` で、理由付きの規則を明示した場合だけ（組み込みの許可リストは持たない）。
+- [x] 実際の MOD での検証：Harmony 3.0.1 と Vanilla Expanded Framework で実施（[実 MOD 検証](../../research/real-mod-validation.md)）。2026-10-26 に Vanilla Psycasts Expanded と TD Enhancement Pack を追加。
+- [x] 既知の警告の許可：要求の `allow` で、理由付きの規則を明示した場合だけ。組み込みは MOD と関係のないエンジンのメッセージ（`KNOWN_NOISE`）だけ。
+- [x] マップ生成段：実ゲームで実行し、公式 quick test との分布比較で適格化（[マップ生成の適格化](../../research/map-qualification.md)）。
 - [ ] Windows の Worker 実行（apphost .exe、パス、Job Object によるメモリ上限）と、Windows での公式比較による適格化。現在は `blocked`。
 - [ ] Windows 画面からの `run`。既存の画面は静的検査のみ。
 - [ ] C：指定動作テストの interface（テスト ID、上限、実メソッド呼び出し）。D は別計画。

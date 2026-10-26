@@ -24,7 +24,8 @@ import validation_host  # noqa: E402
 
 FIXTURES = REPO / 'tests' / 'fixtures' / 'validation-mods'
 SOURCES = REPO / 'tests' / 'fixtures' / 'validation-mods-src'
-ASSEMBLIES = {'initthrow': 'InitThrow', 'harmonyok': 'HarmonyOk', 'harmonymissing': 'HarmonyMissing'}
+ASSEMBLIES = {'initthrow': 'InitThrow', 'harmonyok': 'HarmonyOk', 'harmonymissing': 'HarmonyMissing',
+              'mapgenthrow': 'MapGenThrow', 'mapprobe': 'MapProbe'}
 
 OK_EXPECTATIONS = {
     'defs': [{'type': 'ThingDef', 'defName': 'RWMT_Widget', 'exists': True}],
@@ -47,7 +48,7 @@ HARMONY_OK = patch('rwmodtest.harmonyok', 'RWMT.HarmonyOk.ToSpaceListPatch')
 HARMONY_MISSING = patch('rwmodtest.harmonymissing', 'RWMT.HarmonyMissing.ToSpaceListPatch')
 
 
-def case(levels, mods, expectations=None, *, official=('Core',), language='English', limits=None, tests=None):
+def case(levels, mods, expectations=None, *, official=('Core',), language='English', limits=None, tests=None, map=None):
     request = {'recordType': 'modValidationRequest', 'schemaVersion': 1, 'levels': list(levels), 'official': list(official),
                'mods': [{'path': name.lstrip('*'), 'target': name.startswith('*')} for name in mods],
                'language': language, 'expectations': expectations or {}}
@@ -55,7 +56,14 @@ def case(levels, mods, expectations=None, *, official=('Core',), language='Engli
         request['limits'] = limits
     if tests:
         request['tests'] = tests
+    if map is not None:
+        request['map'] = map
     return request
+
+
+MONOLITH = {'mapThings': [{'type': 'ThingDef', 'defName': 'RWMT_Monolith', 'minCount': 1}]}
+# Map generation is qualified for Linux x64 + WaylithClr on 1.7.4985 rev1269 (docs/research/map-qualification.md).
+MAP_LIMITS = {'timeoutSeconds': 300}
 
 
 # name -> (request, expected status, reason codes that must be present, runtime)
@@ -84,6 +92,17 @@ CASES = {
                      limits={'timeoutSeconds': 10}), 'incomplete', ['workerInterrupted'], 'waylith'),
     'standard-runtime-ok': (case('A', ['*okxml'], OK_EXPECTATIONS), 'incomplete', ['experimental'], 'standard'),
     'standard-runtime-bad-reference': (case('A', ['*badref']), 'incomplete', ['experimental', 'newErrors'], 'standard'),
+    'map-ok': (case('A', ['*okxml'], map={}, limits=MAP_LIMITS), 'passed', [], 'waylith'),
+    'map-structure': (case('A', ['*mapstructure'], MONOLITH, map={}, limits=MAP_LIMITS), 'passed', [], 'waylith'),
+    'map-structure-all-dlc': (case('A', ['*mapstructure'], MONOLITH, map={'biome': 'AridShrubland'}, limits=MAP_LIMITS,
+                                   official=('Core', 'Royalty', 'Ideology', 'Biotech', 'Odyssey')),
+                              'passed', [], 'waylith'),
+    'map-expectation-mismatch': (case('A', ['*okxml'], MONOLITH, map={}, limits=MAP_LIMITS),
+                                 'failed', ['mapExpectationMismatch'], 'waylith'),
+    'map-genstep-throws': (case('A', ['*mapgenthrow'], map={}, limits=MAP_LIMITS),
+                           'failed', ['newErrors'], 'waylith'),
+    'map-unknown-biome': (case('A', ['*okxml'], map={'biome': 'RWMT_NoSuchBiome'}, limits=MAP_LIMITS),
+                          'incomplete', ['mapNotGenerated'], 'waylith'),
 }
 
 

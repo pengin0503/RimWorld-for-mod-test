@@ -27,8 +27,14 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 
+try:
+    import map_render
+except ImportError:  # imported as tools.validation_host
+    from tools import map_render
+
 TOOL_VERSION = '0.1.0'
 WORKER_NAME = 'RimWorldValidationWorker'
+MAP_OBSERVATION = 'map-observation.json'
 EXIT_CODES = {'passed': 0, 'failed': 1, 'blocked': 2, 'incomplete': 3}
 LEVELS = ('A', 'B', 'C')
 OFFICIAL_ORDER = ('Core', 'Royalty', 'Ideology', 'Biotech', 'Anomaly', 'Odyssey')
@@ -68,6 +74,10 @@ ADAPTERS = {
                     'System.Private.CoreLib.dll': 'd2075bc8fd8e2f0b4780ec248034b30e33d4cdd72513730886c5989d1f8008b7',
                 },
                 'evidence': 'docs/research/test-host-qualification.md#linux-x64-waylithclr',
+                # Map generation: compared with the official -quicktest as distributions over
+                # repeated runs, because generation is not reproducible on this build.
+                'features': ('map',),
+                'featureEvidence': {'map': 'docs/research/map-qualification.md'},
             },
         },
     },
@@ -231,7 +241,15 @@ def load_snapshot(snapshot, *, full=False, official=()):
 # Request
 
 REQUEST_KEYS = {'recordType', 'schemaVersion', 'levels', 'official', 'mods', 'language', 'expectations', 'allow', 'limits',
-                'tests'}
+                'tests', 'map'}
+# Defaults follow the official developer quick test (Root_Play.SetupForQuickTestPlay), except
+# the fixed seed: baseline and target must generate from the same seed to be comparable.
+MAP_DEFAULTS = {'seed': 'rwmt', 'size': 250, 'planetCoverage': 0.3, 'scenario': 'Crashlanded',
+                'storyteller': 'Cassandra', 'difficulty': 'Rough', 'extraGenSteps': [], 'imageScale': 2,
+                'maxListedThings': 20000}
+MAP_OPTIONAL = {'biome', 'tile', 'mapGenerator'}
+MAP_INT_RANGES = {'size': (50, 400), 'imageScale': (1, 8), 'maxListedThings': (0, 200000), 'tile': (0, 10_000_000)}
+DEF_NAME = re.compile(r'[A-Za-z0-9_\-]{1,128}')
 ALLOW_KEYS = {
     'diagnostics': ({'level', 'match', 'reason'}, set()),
     'translationErrors': ({'match', 'reason'}, set()),
@@ -239,6 +257,17 @@ ALLOW_KEYS = {
 MAX_ALLOW_ENTRIES = 200
 MAX_MATCH_LENGTH = 500
 # The game's count-only summary of translation load errors (LoadedLanguage.InjectIntoData_AfterImpliedDefs).
+# Diagnostics of the engine itself that say nothing about the mods, judged once
+# from evidence and applied to every run. They stay in the result (knownNoise)
+# but never fail it. Each needs the level, category, the Worker stage it is
+# logged in, and a full-line pattern, so a similar message elsewhere still counts.
+KNOWN_NOISE = (
+    {'id': 'shutdownNativeAllocations', 'level': 'warning', 'category': 'NativeAllocationRuntime', 'stage': 'checks',
+     'match': re.compile(r'^Persistent allocation 0x[0-9A-F]+ \(\d+ bytes, align \d+\) was not freed before shutdown\.$'),
+     'reason': "the engine's leak report when the process quits after the result is written; a generated map's native "
+               'buffers are never released because the worker exits instead of leaving the game. Addresses and counts '
+               'differ from run to run, so they cannot be matched against the baseline'},
+)
 TRANSLATION_SUMMARY = re.compile(r'^Translation data for language .+ has \d+ errors\. Generate translation report for more info\.$')
 MOD_KEYS = {'path', 'packageId', 'target'}
 EXPECTATION_KEYS = {
@@ -247,7 +276,11 @@ EXPECTATION_KEYS = {
     'keyed': ({'key'}, {'equals'}),
     'harmonyPatches': ({'owner', 'targetAssembly', 'targetType', 'targetMethod', 'targetParameters',
                         'kind', 'patchType', 'patchMethod'}, {'genericArity'}),
+    'mapThings': ({'type', 'defName'}, {'minCount', 'maxCount'}),
 }
+# Judged by the Controller from the map observation; the Worker never sees them.
+CONTROLLER_EXPECTATIONS = {'mapThings'}
+MAP_DEF_TYPES = {'ThingDef', 'TerrainDef'}
 PATCH_KINDS = {'prefix', 'postfix', 'transpiler', 'finalizer'}
 
 
@@ -330,10 +363,16 @@ def validate_request(request, base):
                     _require(isinstance(value, int) and not isinstance(value, bool) and value >= 0, f'{where}.genericArity must be >= 0')
                 elif key == 'targetParameters':
                     _strings(value, f'{where}.targetParameters', allow_empty=True)
+                elif key in ('minCount', 'maxCount'):
+                    _require(isinstance(value, int) and not isinstance(value, bool) and value >= 0, f'{where}.{key} must be >= 0')
                 else:
                     _require(isinstance(value, str) and value, f'{where}.{key} must be a nonempty string')
             if kind == 'harmonyPatches':
                 _require(item['kind'] in PATCH_KINDS, f'{where}.kind must be one of {", ".join(sorted(PATCH_KINDS))}')
+            if kind == 'mapThings':
+                _require(item['type'] in MAP_DEF_TYPES, f'{where}.type must be ThingDef or TerrainDef')
+                _require(item.get('minCount', 1) <= item.get('maxCount', item.get('minCount', 1)),
+                         f'{where}.minCount must not exceed maxCount')
     if expectations.get('harmonyPatches'):
         _require('B' in levels, 'harmonyPatches expectations need level B')
 
@@ -357,6 +396,11 @@ def validate_request(request, base):
             except re.error as error:
                 raise RequestError(f'{where}.match is not a valid regular expression: {error}') from None
 
+    map_request = validate_map(request.get('map'))
+    if map_request is not None:
+        _require('A' in levels, 'map generation needs a completed load (level A)')
+    _require(map_request is not None or not expectations.get('mapThings'), 'mapThings expectations need "map"')
+
     tests = request.get('tests', [])
     _require(isinstance(tests, list), 'tests must be an array')
     if 'C' in levels:
@@ -375,7 +419,35 @@ def validate_request(request, base):
         limits[key] = value
     return {'levels': levels, 'official': official, 'mods': resolved, 'language': language,
             'expectations': {k: expectations.get(k, []) for k in EXPECTATION_KEYS},
-            'allow': {k: allow.get(k, []) for k in ALLOW_KEYS}, 'tests': tests, 'limits': limits}
+            'allow': {k: allow.get(k, []) for k in ALLOW_KEYS}, 'tests': tests, 'limits': limits, 'map': map_request}
+
+
+def validate_map(value):
+    """Normalize the optional "map" object; None when no map is requested."""
+    if value is None:
+        return None
+    _require(isinstance(value, dict), 'map must be an object')
+    unknown = set(value) - set(MAP_DEFAULTS) - MAP_OPTIONAL
+    _require(not unknown, f'unknown map fields: {", ".join(sorted(unknown))}')
+    result = {**MAP_DEFAULTS, **value}
+    _require(isinstance(result['seed'], str) and 0 < len(result['seed']) <= 200, 'map.seed must be a string of 1-200 characters')
+    for key, (low, high) in MAP_INT_RANGES.items():
+        if key in result:
+            item = result[key]
+            _require(isinstance(item, int) and not isinstance(item, bool) and low <= item <= high,
+                     f'map.{key} must be an integer in [{low}, {high}]')
+    coverage = result['planetCoverage']
+    _require(isinstance(coverage, (int, float)) and not isinstance(coverage, bool) and 0.05 <= coverage <= 1,
+             'map.planetCoverage must be a number in [0.05, 1]')
+    result['planetCoverage'] = float(coverage)
+    for key in ('scenario', 'storyteller', 'difficulty', 'biome', 'mapGenerator'):
+        if key in result:
+            _require(isinstance(result[key], str) and DEF_NAME.fullmatch(result[key]), f'map.{key} must be a defName')
+    _require(isinstance(result['extraGenSteps'], list) and len(result['extraGenSteps']) <= 50
+             and all(isinstance(n, str) and DEF_NAME.fullmatch(n) for n in result['extraGenSteps']),
+             'map.extraGenSteps must be an array of at most 50 GenStepDef names')
+    _require(not ('biome' in result and 'tile' in result), 'map.biome and map.tile cannot both be given')
+    return result
 
 
 def resolve_language(game, language):
@@ -600,8 +672,12 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
         'language': request['language'],
         'limits': {'deadlineSeconds': deadline, 'diagnostics': limits['diagnostics'],
                    'messageBytes': limits['messageKiB'] * 1024, 'eventBytes': log_bytes // 2},
-        'expectedModOrder': order, 'expectations': expectations,
+        'expectedModOrder': order,
+        'expectations': {k: v for k, v in expectations.items() if k not in CONTROLLER_EXPECTATIONS},
     }
+    if request.get('map'):
+        worker_request['map'] = {**{k: v for k, v in request['map'].items() if k != 'imageScale'},
+                                 'observationPath': str(run_dir / MAP_OBSERVATION)}
     _write_json(run_dir / 'worker-request.json', worker_request)
     return order
 
@@ -817,9 +893,16 @@ def _first_line(event):
     return (event.get('message') or '').split('\n', 1)[0]
 
 
+def known_noise(event):
+    """The KNOWN_NOISE entry a Worker event matches, or None."""
+    return next((n for n in KNOWN_NOISE if n['level'] == event.get('level') and n['category'] == event.get('category')
+                 and n['stage'] == event.get('stage') and n['match'].match(event.get('message') or '')), None)
+
+
 def mark_allowed(fresh, allow, translation):
     """Annotate new diagnostics; annotated ones stay in the result but do not fail the run.
 
+    "knownNoise": a built-in KNOWN_NOISE entry (engine messages unrelated to mods).
     "allowedBy": the level matches and the first line matches the regular expression
     of an allow.diagnostics entry. "supersededBy": the game's count-only translation
     warning, when the individual errors behind it are fully known; those errors are
@@ -829,6 +912,10 @@ def mark_allowed(fresh, allow, translation):
     rules = [(re.compile(r['match']), r) for r in allow.get('diagnostics', [])]
     for event in fresh:
         line = _first_line(event)
+        noise = known_noise(event)
+        if noise:
+            event['knownNoise'] = {'id': noise['id'], 'reason': noise['reason']}
+            continue
         rule = next((r for pattern, r in rules if r['level'] == event.get('level') and pattern.search(line)), None)
         if rule:
             event['allowedBy'] = {'match': rule['match'], 'reason': rule['reason']}
@@ -852,7 +939,7 @@ def judge_translation_errors(translation, allow):
 
 
 def _excused(event):
-    return 'allowedBy' in event or 'supersededBy' in event
+    return 'allowedBy' in event or 'supersededBy' in event or 'knownNoise' in event
 
 
 def _mentions(event, mods):
@@ -861,7 +948,7 @@ def _mentions(event, mods):
 
 
 def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_problem, baseline_events, process,
-             fidelity, *, language_check=True):
+             fidelity, *, language_check=True, map_evaluation=None):
     """Apply the status rules of docs/contracts/mod-validation-v1.md. Returns (status, executionStatus, reasons, stages)."""
     incomplete, failed = [], []
     levels = request['levels']
@@ -944,6 +1031,10 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         stages['B'] = stage_b
     if 'C' in levels:
         stages['C'] = {'status': 'blocked', 'detail': 'level C tests are not implemented in this version'}
+    if map_evaluation is not None:
+        stages['map'] = map_evaluation['stage']
+        incomplete.extend(map_evaluation['incomplete'])
+        failed.extend(map_evaluation['failed'])
 
     fresh = []
     if completed and baseline is not None:
@@ -969,10 +1060,104 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         status = 'failed'
     else:
         status = 'passed'
-    for level in levels:
+    for level in [*levels, *(['map'] if 'map' in stages else [])]:
         if stages[level]['status'] == 'completed' and status == 'incomplete':
             stages[level]['note'] = 'stage observations completed, but the run as a whole is incomplete'
     return status, execution, incomplete + failed, stages, fresh
+
+
+# ---------------------------------------------------------------------------
+# Map stage
+
+def read_map_observation(run):
+    """(observation or None, problem or None) for one run's map stage."""
+    worker = run.get('worker') or {}
+    section = worker.get('map')
+    if section is None:
+        return None, 'the Worker reported no map stage'
+    if section.get('status') != 'completed':
+        return None, section.get('setupError') or (section.get('exception') or '').split('\n', 1)[0] or \
+            f'map stage {section.get("status")}'
+    # A cached baseline keeps its own copy: its runDir belongs to an earlier output folder.
+    path = Path(run['mapObservationPath']) if run.get('mapObservationPath') else Path(run['runDir']) / MAP_OBSERVATION
+    try:
+        observation = json.loads(path.read_text(encoding='utf-8'))
+        map_render.decode(observation)
+    except (OSError, ValueError, KeyError, TypeError, map_render.ObservationError) as error:
+        return None, f'{path.name} is unreadable: {error}'
+    return observation, None
+
+
+MAP_VARIATION_NOTE = ('map generation is not reproducible on this build, in the official game too: the same seed and '
+                      'tile give slightly different maps on every run, so this map and its baseline are each one sample '
+                      'and differ in places the target mods do not touch')
+
+
+def evaluate_map(request, mods, target_run, baseline_run, out_dir, *, qualified=False, evidence=None):
+    """Judge the map stage; render images. Returns {'stage', 'incomplete', 'failed', 'section'}."""
+    incomplete, failed = [], []
+    targets = [m['packageId'] for m in mods if m['target']]
+    target_worker = target_run.get('worker') or {}
+    section = {'request': request['map'], 'fidelity': 'qualified' if qualified else 'experimental',
+               'qualificationEvidence': evidence if qualified else None, 'variation': MAP_VARIATION_NOTE,
+               'skippedOfficialSteps': (target_worker.get('map') or {}).get('skippedOfficialSteps')}
+    stage = {'status': 'incomplete'}
+    observation, problem = read_map_observation(target_run)
+    baseline_observation, baseline_problem = read_map_observation(baseline_run)
+    worker_map = target_worker.get('map') or {}
+    # The Worker queues the map only after the load; when the load fails it reports the
+    # map as notStarted (or, if older, not at all). The load failure is the verdict then.
+    load_failed = not target_worker.get('playDataLoaded') or bool(target_worker.get('loadException'))
+    map_not_started = 'map' not in target_worker or (
+        worker_map.get('status') == 'notStarted' and load_failed
+        and not worker_map.get('exception') and not worker_map.get('setupError'))
+    if target_worker.get('executionStatus') == 'completed' and map_not_started:
+        stage = {'status': 'notStarted', 'detail': 'the load did not complete, so no map was generated'}
+    elif observation is None:
+        detail = f'target map: {problem}'
+        if worker_map.get('exception') and baseline_observation is not None:
+            failed.append({'code': 'mapGenerationFailed', 'detail': detail})
+            stage = {'status': 'failed', 'detail': detail}
+        else:
+            incomplete.append({'code': 'mapNotGenerated', 'detail': detail})
+            stage = {'status': 'incomplete', 'detail': detail}
+        section['error'] = worker_map.get('exception') or worker_map.get('setupError') or problem
+    else:
+        stage = {'status': 'completed'}
+        scale = request['map']['imageScale']
+        image, legend = map_render.render(observation, targets, scale)
+        (out_dir / 'map.png').write_bytes(image)
+        section.update({
+            'image': str(out_dir / 'map.png'), 'legend': legend,
+            'summary': worker_map.get('summary'),
+            'observationFile': str(Path(target_run['runDir']) / MAP_OBSERVATION),
+            'targetContent': map_render.summarize(observation, targets),
+        })
+        checks = []
+        for item in request['expectations'].get('mapThings', []):
+            actual = map_render.count_def(observation, item['type'], item['defName'])
+            low, high = item.get('minCount', 1), item.get('maxCount')
+            ok = actual >= low and (high is None or actual <= high)
+            checks.append({'expected': item, 'actual': actual, 'outcome': 'match' if ok else 'mismatch'})
+        section['checks'] = checks
+        bad = [c for c in checks if c['outcome'] == 'mismatch']
+        if bad:
+            failed.append({'code': 'mapExpectationMismatch', 'detail': f'{len(bad)} map expectations did not match'})
+            stage['status'] = 'failed'
+    if baseline_observation is not None:
+        image, _ = map_render.render(baseline_observation, targets, request['map']['imageScale'])
+        (out_dir / 'map-baseline.png').write_bytes(image)
+        section['baselineImage'] = str(out_dir / 'map-baseline.png')
+        section['baselineSummary'] = ((baseline_run.get('worker') or {}).get('map') or {}).get('summary')
+    elif (baseline_run.get('worker') or {}).get('executionStatus') == 'completed':
+        incomplete.append({'code': 'baselineMapIncomplete',
+                           'detail': f'baseline map: {baseline_problem}; diagnostics of map generation cannot be compared'})
+    if observation is not None and not qualified:
+        incomplete.append({'code': 'mapNotQualified',
+                           'detail': 'map generation has not been compared with the official game on this build; '
+                                     'its observations are shown but cannot prove compatibility'})
+    stage['fidelity'] = section['fidelity']
+    return {'stage': stage, 'incomplete': incomplete, 'failed': failed, 'section': section}
 
 
 # ---------------------------------------------------------------------------
@@ -1095,12 +1280,17 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'worker': result['tool']['workerSha256'], 'runtime': runtime,
         'official': request['official'], 'language': request['language'], 'limits': limits,
         'mods': [(m['packageId'], m['sha256']) for m in baseline_mods],
+        'map': {k: v for k, v in request['map'].items() if k != 'imageScale'} if request['map'] else None,
     }, sort_keys=True).encode()).hexdigest()
     baseline_run = None
     cache_file = Path(baseline_cache) / f'{baseline_key}.json' if baseline_cache else None
+    map_cache_file = cache_file.with_name(f'{baseline_key}.{MAP_OBSERVATION}') if cache_file else None
     if cache_file and cache_file.is_file():
         baseline_run = json.loads(cache_file.read_text(encoding='utf-8'))
         baseline_run['cached'] = True
+        map_completed = ((baseline_run.get('worker') or {}).get('map') or {}).get('status') == 'completed'
+        if request['map'] and map_completed and not Path(baseline_run.get('mapObservationPath') or map_cache_file).is_file():
+            baseline_run = None  # the cached map observation is gone: run the baseline again
     mark = time.monotonic()
     if baseline_run is None:
         baseline_run = one_run('baseline', baseline_mods, {k: [] for k in expectations})
@@ -1108,7 +1298,13 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         if cache_file and baseline_run['worker'] and baseline_run['worker'].get('executionStatus') == 'completed' \
                 and not baseline_run['process'].get('killedFor') and not baseline_issues(baseline_run['worker']):
             cache_file.parent.mkdir(parents=True, exist_ok=True)
-            _write_json(cache_file, baseline_run)
+            cached = dict(baseline_run)
+            observation = Path(baseline_run['runDir']) / MAP_OBSERVATION
+            if request['map'] and (baseline_run['worker'].get('map') or {}).get('status') == 'completed' \
+                    and observation.is_file():
+                shutil.copyfile(observation, map_cache_file)
+                cached['mapObservationPath'] = str(map_cache_file)
+            _write_json(cache_file, cached)
     timings['baselineSeconds'] = round(time.monotonic() - mark, 3)
     mark = time.monotonic()
     target_run = one_run('target', mods, expectations)
@@ -1120,9 +1316,15 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         else f'baseline run did not complete: {(baseline_worker or {}).get("failure") or baseline_run["process"].get("killedFor")}')
     if not baseline_problem and baseline_issues(baseline_worker):
         baseline_problem = 'baseline observations are not reliable: ' + '; '.join(baseline_issues(baseline_worker))
+    map_evaluation = None
+    if request['map']:
+        map_qualified = fidelity == 'qualified' and 'map' in (qualification or {}).get('features', ())
+        map_evaluation = evaluate_map(request, mods, target_run, baseline_run, out_dir, qualified=map_qualified,
+                                      evidence=(qualification or {}).get('featureEvidence', {}).get('map'))
     status, execution, reasons, stages, fresh = evaluate(
         request, mods, target_run['worker'], target_run['problem'], target_run['events'],
-        baseline_worker, baseline_problem, baseline_run['events'], target_run['process'], fidelity)
+        baseline_worker, baseline_problem, baseline_run['events'], target_run['process'], fidelity,
+        map_evaluation=map_evaluation)
     worker = target_run['worker'] or {}
     result.update({
         'status': status, 'executionStatus': execution, 'reasons': reasons, 'stages': stages,
@@ -1133,6 +1335,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'diagnostics': {
             'newInTarget': fresh,
             'allowedInTarget': sum(1 for e in fresh if 'allowedBy' in e),
+            'knownNoiseInTarget': sum(1 for e in fresh if 'knownNoise' in e),
             'translationErrors': judge_translation_errors(new_translation_errors(worker, baseline_worker), request['allow']),
             'target': worker.get('diagnosticsSummary'),
             'baseline': (baseline_worker or {}).get('diagnosticsSummary'),
@@ -1144,6 +1347,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'process': {'baseline': baseline_run['process'], 'target': target_run['process']},
         'scope': _scope(request, stages),
     })
+    if map_evaluation is not None:
+        result['map'] = map_evaluation['section']
     timings['baselinePrepareSeconds'] = baseline_run['prepareSeconds']
     timings['targetPrepareSeconds'] = target_run['prepareSeconds']
     return _finish(result, out_dir, started, timings, keep_run_dirs)
@@ -1153,14 +1358,21 @@ def _scope(request, stages):
     checked = ['real mod/patch/def/translation loading of the selected language, including the official def error checks (DevMode)']
     if 'B' in request['levels']:
         checked.append('mod assembly loading and Mod constructors, startup static constructors, Harmony registry vs expected patches')
+    if request['map']:
+        checked.append('generation of one temporary world and map by the game code (gen steps, scenario map parts, '
+                       'map components) with the requested seed; diagnostics compared with the baseline map')
     not_checked = [
         'other languages than ' + request['language'],
-        'anything that needs a map, a game, ticks, UI, rendering, audio output or Steam',
+        ('the game start after map generation (Game.FinalizeInit, GameComponent.StartedNewGame), ticks, UI, rendering, '
+         'audio output or Steam' if request['map'] else
+         'anything that needs a map, a game, ticks, UI, rendering, audio output or Steam'),
         'what Harmony patches do at run time (level C is not implemented)',
         'behaviour on other platforms or runtimes than the one recorded in "runtime"',
     ]
     if 'B' not in request['levels']:
         not_checked.insert(0, 'Harmony patch expectations (level B not requested; mod code still ran while loading)')
+    if request['map']:
+        not_checked.append('maps with other seeds, sizes, biomes or scenarios; world/quest/site maps other than the player start map')
     return {'checked': checked, 'notChecked': not_checked}
 
 
@@ -1194,9 +1406,14 @@ def _summary(result):
     for level, stage in (result.get('stages') or {}).items():
         if stage['status'] != 'notRequested':
             lines.append(f'  stage {level}: {stage["status"]}')
+    if (result.get('map') or {}).get('image'):
+        lines.append(f'  map image: {result["map"]["image"]}')
     allowed = (result.get('diagnostics') or {}).get('allowedInTarget')
     if allowed:
         lines.append(f'  allowed by the request: {allowed} new diagnostics (see diagnostics.newInTarget[].allowedBy)')
+    noise = (result.get('diagnostics') or {}).get('knownNoiseInTarget')
+    if noise:
+        lines.append(f'  known engine noise: {noise} new diagnostics (see diagnostics.newInTarget[].knownNoise)')
     lines.append(f'  total {result["timings"]["totalSeconds"]} s')
     return '\n'.join(lines)
 

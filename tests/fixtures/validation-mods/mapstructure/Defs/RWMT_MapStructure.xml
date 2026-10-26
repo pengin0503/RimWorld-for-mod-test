@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <ThingDef ParentName="BuildingBase">
+    <defName>RWMT_Monolith</defName>
+    <label>validation monolith</label>
+    <description>Placed by the map generation fixture of the MOD validation host.</description>
+    <thingClass>Building</thingClass>
+    <altitudeLayer>Building</altitudeLayer>
+    <passability>Impassable</passability>
+    <fillPercent>1</fillPercent>
+    <size>(2,2)</size>
+    <rotatable>false</rotatable>
+    <statBases>
+      <MaxHitPoints>500</MaxHitPoints>
+      <Mass>50</Mass>
+      <Flammability>0</Flammability>
+    </statBases>
+    <building>
+      <isInert>true</isInert>
+    </building>
+    <graphicData>
+      <texPath>Things/Building/Furniture/Column</texPath>
+      <graphicClass>Graphic_Single</graphicClass>
+      <drawSize>(2,2)</drawSize>
+    </graphicData>
+  </ThingDef>
+
+  <GenStepDef>
+    <defName>RWMT_ScatterMonoliths</defName>
+    <order>760</order>
+    <genStep Class="GenStep_ScatterThings">
+      <thingDef>RWMT_Monolith</thingDef>
+      <count>4</count>
+      <minSpacing>8</minSpacing>
+      <spotMustBeStandable>true</spotMustBeStandable>
+      <allowInWaterBiome>false</allowInWaterBiome>
+    </genStep>
+  </GenStepDef>
+</Defs>

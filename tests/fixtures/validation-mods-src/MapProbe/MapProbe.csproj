@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RWMT.MapProbe</AssemblyName>
+    <UsesHarmony>true</UsesHarmony>
+  </PropertyGroup>
+</Project>

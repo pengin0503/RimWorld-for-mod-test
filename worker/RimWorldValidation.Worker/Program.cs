@@ -7,7 +7,8 @@ namespace RimWorldValidation.Worker;
 /// Entry point of the validation worker. It is started only by the Controller
 /// (tools/validation_host.py) inside a prepared run directory, with
 /// <c>--worker-request &lt;path&gt;</c>. It never shows a window, never accepts
-/// interactive input and always exits after one finite load.
+/// interactive input and always exits after one finite load (and, when
+/// requested, one generated map that is observed but never played).
 /// Exit codes: 0 completed, 2 bad invocation or request, 3 failed/interrupted,
 /// 4 adapter mismatch (this game build lacks a member the worker needs).
 /// </summary>
@@ -46,9 +47,11 @@ public static class Program
     private static int RunWorker(WorkerRequest request, Stopwatch clock)
     {
         GameApi api;
+        MapApi? mapApi;
         try
         {
             api = GameApi.Bind();
+            mapApi = request.Map == null ? null : MapApi.Bind();
         }
         catch (AdapterMismatchException e)
         {
@@ -57,7 +60,7 @@ public static class Program
         }
 
         using var diagnostics = new Diagnostics(request.EventsPath, clock, request.MaxDiagnostics, request.MaxMessageBytes, request.MaxEventBytes);
-        var host = new Host(request, api, diagnostics, clock);
+        var host = new Host(request, api, mapApi, diagnostics, clock);
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             // Last chance: keep the evidence. The process terminates after this handler.

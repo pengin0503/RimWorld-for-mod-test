@@ -50,9 +50,36 @@ Worker は今回から、ゲームが件数しか出さない翻訳エラーの�
 
 ベースラインを含む 1 回の `run` は、キャッシュなしで全 DLC 日本語が約 36 秒、キャッシュありで Core＋VEF が約 13 秒でした。しばらく使わなかった後の最初の実行は、ファイルキャッシュが冷えていたためか 2〜3 倍かかりました（例：ベースライン 35 秒）。
 
+## 2026-10-26：索引から選んだ MOD（Vanilla Psycasts Expanded、TD Enhancement Pack）
+
+ゲームファイルは Cloudflare R2 の `Game-Linux/`、MOD は `Workshop/<ID>/` から必要な分だけ取得しました（各 MOD の 1.7 以外の版フォルダ、`Source/`、.git は除外）。MOD はユーザーが作った MOD 索引で選びました。
+
+| MOD | Workshop ID | packageId | 依存 | 中身 |
+|---|---|---|---|---|
+| Harmony | 2009463077 | `brrainz.harmony` | — | 0Harmony 3.0.0.0 |
+| Vanilla Expanded Framework | 2023507013 | `OskarPotocki.VanillaFactionsExpanded.Core` | Harmony | 1.7 用 DLL 8 個 |
+| Vanilla Psycasts Expanded（VPE） | 2842502659 | `VanillaExpanded.VPsycastsE` | Harmony、Royalty、VEF | 1.7 用 DLL 1 個、Defs、テクスチャ・音 |
+| TD Enhancement Pack - Continued | 3525414162 | `MemeGoddess.TDPack` | Harmony | 1.7 用 DLL 1 個 |
+
+選んだ理由：VPE は VEF に依存する VE の大型 MOD。TD Enhancement Pack は索引の 1.7 対応 MOD の DLL で transpiler の多いものを調べて選んだ（`[HarmonyPatch]` 付きのクラス 102 個、transpiler 25 個）。B の期待パッチは、DLL を逆コンパイルして属性と Harmony ID を読み、実行前に書きました（VPE：postfix・transpiler・prefix 各 1、TD：transpiler 3）。
+
+| ケース | 構成 | 判定 | 内容 |
+|---|---|---|---|
+| vpe-royalty | Core＋Royalty＋Harmony＋VEF＋VPE（A/B） | passed | 新しい診断なし。期待パッチ 3 件が登録済み。VPE の登録は全部で 86 件（transpiler 12） |
+| vpe-alldlc-en | Core＋4 DLC、英語（A/B） | passed | 同上 |
+| vpe-alldlc-ja | Core＋4 DLC、日本語（A） | passed | 新しい翻訳エラーなし |
+| tdp-core | Core＋Harmony＋TD（A/B） | passed | 期待パッチ 3 件が登録済み。TD の登録は全部で 180 件（transpiler 27） |
+| tdp-alldlc-en | Core＋4 DLC、英語（A/B） | passed | 同上 |
+| tdp-alldlc-ja | Core＋4 DLC、日本語（A） | passed | 新しい翻訳エラーなし |
+| vpe-map / tdp-map | 上の構成で `map` を追加 | 問題なし（当時は map 未適格のため incomplete/`mapNotQualified` だけ） | マップ生成中の新しいエラー・警告なし。どちらの MOD も生成時にマップへ物を置かない |
+
+公式 headless との突き合わせ（`compare_official.py --request`）：vpe-alldlc-en、vpe-alldlc-ja、tdp-alldlc-en、tdp-alldlc-ja の 4 ケースで、エラー/警告とプローブの出力（MOD 順序、言語、Harmony の全登録と効果）が全て一致しました。
+
+この 2 つの MOD では問題は見つかりませんでした。ただし確かめたのは読み込み・パッチの登録・マップ生成までで、transpiler が書き換えたメソッドを実際に呼んだわけではありません（C は未実装）。
+
 ## 未確認
 
 - Harmony パッチの実行時の効果。登録は確認しましたが、transpiler 65 件が書き換えたメソッドを実際に呼んではいません（C は未実装）。プローブで効果を見たのは自作 fixture のパッチだけです。
 - マップ、tick、UI、セーブを使う VEF の機能。
 - Anomaly を含む構成（スナップショットにない）、ほかの言語、Windows。
-- VEF に依存する個々の Vanilla Expanded MOD。
+- VPE 以外の、VEF に依存する個々の Vanilla Expanded MOD。

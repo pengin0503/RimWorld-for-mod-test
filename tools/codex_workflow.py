@@ -5,6 +5,7 @@ The Controller/Worker remain the authority for validation semantics.
 """
 from __future__ import annotations
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -28,9 +29,10 @@ class WorkflowError(Exception):
 
 
 def _safe_private(root: Path) -> Path:
-    root = Path(root).expanduser().absolute()
-    if root.is_symlink():
-        raise WorkflowError("private work root cannot be a symbolic link")
+    raw = Path(root).expanduser().absolute()
+    if any(part.is_symlink() for part in (raw, *raw.parents)):
+        raise WorkflowError("private work root has a symbolic-link component")
+    root = raw.resolve()
     if any((parent / ".git").exists() for parent in (root, *root.parents)):
         raise WorkflowError("private work root must be outside the Git checkout")
     if root.exists() and not root.is_dir():
@@ -198,6 +200,22 @@ def fetch_mods(args) -> dict:
             "note": "Check dependency order, DLCs and level B expectations before running"}
 
 
+@contextmanager
+def _no_cloud_credentials():
+    """Do not hand R2/AWS secrets to untrusted MOD DLL code in the Worker."""
+    names = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+             "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "R2_ENDPOINT", "R2_BUCKET")
+    saved = {k: os.environ[k] for k in names if k in os.environ}
+    for key in names:
+        os.environ.pop(key, None)
+    try:
+        yield
+    finally:
+        for key in names:
+            os.environ.pop(key, None)
+        os.environ.update(saved)
+
+
 def validate(args) -> dict:
     root = _safe_private(args.private_root)
     snapshot = root / "game-snapshot"
@@ -208,11 +226,16 @@ def validate(args) -> dict:
         raise WorkflowError("request JSON missing; run fetch-mods or supply --request")
     if not Path(args.worker).exists():
         raise WorkflowError("built Worker missing; run dotnet build")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", args.run_id):
+        raise WorkflowError("invalid run ID")
     out = root / "results" / args.run_id
+    if out.parent.is_symlink():
+        raise WorkflowError("result directory cannot be a symlink")
     if out.exists():
         raise WorkflowError("result directory already exists; use a new --run-id")
-    result = validation_host.run_validation(snapshot, request, out, args.worker,
-                                            baseline_cache=root / "baseline-cache")
+    with _no_cloud_credentials():
+        result = validation_host.run_validation(snapshot, request, out, args.worker,
+                                                baseline_cache=root / "baseline-cache")
     return {"status": result.get("status"),
             "reasons": [r.get("code") for r in result.get("reasons", [])],
             "result": str(out / "result.json"),

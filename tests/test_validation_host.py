@@ -689,7 +689,7 @@ class RunTests(TempCase):
         self.fx.mod('official', 'ludeon.rimworld.fake')
         cases = [
             ('platformUnsupported', ['*target'], {'platform': 'windows-x64'}),
-            ('levelUnsupported', ['*target'], {'levels': ['A', 'B', 'C'], 'tests': ['t1']}),
+            ('invalidRequest', ['*target'], {'levels': ['A', 'B', 'C'], 'tests': ['t1']}),
             ('officialContentMissing', ['*target'], {'official': ['Core', 'Biotech']}),
             ('languageMissing', ['*target'], {'language': 'Klingon'}),
             ('modInvalid', ['*official'], {}),

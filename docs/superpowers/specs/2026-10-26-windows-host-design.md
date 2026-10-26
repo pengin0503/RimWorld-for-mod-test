@@ -1,6 +1,6 @@
 # Windows 版：設計（W1 実ゲーム実行）
 
-日付：2026-10-26。状態：**ユーザーの承認待ち**。
+日付：2026-10-26。状態：2026-10-26 ユーザー承認。W1 実装済み（実ゲーム未確認）。
 
 ## 前提（ユーザーの指示と保存済みの方針）
 
@@ -45,11 +45,12 @@ Windows 版は独立した 3 つの段階に分ける。各段階に、それぞ
    - 子プロセスが残らないよう、KILL_ON_JOB_CLOSE を設定する。
    - ジョブのメモリ上限（JOB_MEMORY）で、**ハードな上限**をかける。結果は `memoryHard=true` で、Linux の未実装分を Windows では満たせる。
    - 時間切れは TerminateJobObject で止める。ピークメモリはジョブの集計から取る。
-   - Worker は起動直後に自分がジョブに入っているかを確かめ、入っていなければ終了する。起動から割り当てまでの隙間を、これで閉じる。
+   - Worker は停止状態で起動し、ジョブに割り当ててから再開する（`CREATE_SUSPENDED` → `AssignProcessToJobObject` → `NtResumeProcess`）。起動から割り当てまでの隙間は、これで閉じる（実装時に、Worker 側の確認より確実なこの方式へ変更）。
+   - ジョブのメモリ上限に達すると確保が失敗し、Worker は自分で終了し得る。その場合も、ジョブの通知（`JOB_OBJECT_MSG_JOB_MEMORY_LIMIT`）から `killedFor=memoryLimit` と記録する。
 5. **環境変数**：`USERPROFILE`・`APPDATA`・`LOCALAPPDATA`・`TEMP`・`TMP` を実行ディレクトリの中に向ける。`SystemRoot` と `PATH` だけを引き継ぐ。R2 の認証情報は引き継がない。
 6. **パス**：
    - 長いパスを避けるため、実行ディレクトリは短く保つ。
-   - Windows のファイルシステムは大文字と小文字を区別しない。このため、ロードフォルダの選び方が Linux と変わり得る（例：`common` と `Common`）。`mod_load_plan` にプラットフォームの引数を足す。実ロードとの照合（`loadFolderMismatch`）は、そのまま安全装置として残す。
+   - Windows のファイルシステムは大文字と小文字を区別しない。このため、ロードフォルダの選び方が Linux と変わり得る（例：`common` と `Common`）。W1 では `mod_load_plan` は変えず、実ロードとの照合（`loadFolderMismatch`）で食い違いを検出する（実装時の判断。食い違えば incomplete になり、誤った合格にはならない）。
 
 ### 適格化
 

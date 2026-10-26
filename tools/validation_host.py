@@ -277,6 +277,7 @@ EXPECTATION_KEYS = {
     'harmonyPatches': ({'owner', 'targetAssembly', 'targetType', 'targetMethod', 'targetParameters',
                         'kind', 'patchType', 'patchMethod'}, {'genericArity'}),
     'mapThings': ({'type', 'defName'}, {'minCount', 'maxCount'}),
+    'billIngredients': ({'recipe', 'thing', 'visible', 'allowed'}, set()),
 }
 # Judged by the Controller from the map observation; the Worker never sees them.
 CONTROLLER_EXPECTATIONS = {'mapThings'}
@@ -357,8 +358,8 @@ def validate_request(request, base):
             _require(required <= set(item) <= required | optional,
                      f'{where} needs exactly {", ".join(sorted(required))}' + (f' (optional {", ".join(sorted(optional))})' if optional else ''))
             for key, value in item.items():
-                if key == 'exists':
-                    _require(isinstance(value, bool), f'{where}.exists must be a boolean')
+                if key in ('exists', 'visible', 'allowed'):
+                    _require(isinstance(value, bool), f'{where}.{key} must be a boolean')
                 elif key == 'genericArity':
                     _require(isinstance(value, int) and not isinstance(value, bool) and value >= 0, f'{where}.genericArity must be >= 0')
                 elif key == 'targetParameters':
@@ -367,6 +368,9 @@ def validate_request(request, base):
                     _require(isinstance(value, int) and not isinstance(value, bool) and value >= 0, f'{where}.{key} must be >= 0')
                 else:
                     _require(isinstance(value, str) and value, f'{where}.{key} must be a nonempty string')
+            if kind == 'billIngredients':
+                _require(all(DEF_NAME.fullmatch(item[k]) for k in ('recipe', 'thing')),
+                         f'{where} recipe and thing must be Def names (1–128 ASCII characters)')
             if kind == 'harmonyPatches':
                 _require(item['kind'] in PATCH_KINDS, f'{where}.kind must be one of {", ".join(sorted(PATCH_KINDS))}')
             if kind == 'mapThings':
@@ -404,9 +408,14 @@ def validate_request(request, base):
     tests = request.get('tests', [])
     _require(isinstance(tests, list), 'tests must be an array')
     if 'C' in levels:
-        _strings(tests, 'tests')
+        _require(tests == ['bill-ingredient-options.v1'], 'C requires exactly bill-ingredient-options.v1')
+        ingredients = expectations.get('billIngredients', [])
+        _require(1 <= len(ingredients) <= 128, 'C requires 1–128 billIngredients expectations')
+        pairs = [(i['recipe'], i['thing']) for i in ingredients]
+        _require(len(set(pairs)) == len(pairs), 'billIngredients recipe/thing pairs must be distinct')
     else:
         _require(not tests, 'tests need level C')
+        _require(not expectations.get('billIngredients'), 'billIngredients need level C')
 
     limits = dict(DEFAULT_LIMITS)
     given = request.get('limits', {})
@@ -1030,7 +1039,10 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
                 stage_b['unexpectedPatches'] = len(harmony['unexpected'])
         stages['B'] = stage_b
     if 'C' in levels:
-        stages['C'] = {'status': 'blocked', 'detail': 'level C tests are not implemented in this version'}
+        c_stage, c_incomplete, c_failed = evaluate_bill_ingredients(request, checks or {})
+        stages['C'] = c_stage
+        incomplete.extend(c_incomplete)
+        failed.extend(c_failed)
     if map_evaluation is not None:
         stages['map'] = map_evaluation['stage']
         incomplete.extend(map_evaluation['incomplete'])
@@ -1054,7 +1066,9 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
     for event in fresh:
         event['mentionsTargets'] = _mentions(event, mods)
 
-    if incomplete:
+    if stages['C']['status'] == 'blocked':
+        status = 'blocked'
+    elif incomplete:
         status = 'incomplete'
     elif failed:
         status = 'failed'
@@ -1064,6 +1078,60 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         if stages[level]['status'] == 'completed' and status == 'incomplete':
             stages[level]['note'] = 'stage observations completed, but the run as a whole is incomplete'
     return status, execution, incomplete + failed, stages, fresh
+
+
+BILL_CASE = 'bill-ingredient-options.v1'
+BILL_COMPONENTS = ('paneEligible', 'categoryReachable', 'categoryVisible', 'itemVisible', 'hiddenByDiscovery', 'parentAllows', 'specialFilterDisallows', 'visible', 'allowed')
+
+
+def evaluate_bill_ingredients(request, checks):
+    """Judge complete, identity-bound observations; A/B qualification never qualifies C."""
+    expected = request['expectations']['billIngredients']
+    rows = checks.get('billIngredients')
+    stage = {'status': 'incomplete', 'caseId': BILL_CASE, 'fidelity': 'experimental',
+             'qualificationEvidence': None, 'checks': [], 'rendered': False}
+    incomplete = [{'code': 'cNotQualified', 'detail': 'this non-rendered C case has not yet been independently qualified'}]
+    failed = []
+    valid = isinstance(rows, list) and len(rows) == len(expected)
+    if valid:
+        for wanted, row in zip(expected, rows):
+            actual = row.get('actual') if isinstance(row, dict) else None
+            good = (isinstance(row, dict) and row.get('caseId') == BILL_CASE and row.get('expected') == wanted
+                    and row.get('outcome') in ('match', 'mismatch') and isinstance(actual, dict)
+                    and all(type(actual.get(k)) is bool for k in BILL_COMPONENTS)
+                    and actual.get('context') == 'freshGameNewBill' and actual.get('rendered') is False
+                    and actual.get('paneEligible') is True and actual.get('categoryReachable') is True
+                    and actual.get('visible') == (actual.get('categoryVisible') and actual.get('itemVisible') and not actual.get('hiddenByDiscovery'))
+                    and isinstance(actual.get('reasons'), list)
+                    and all(isinstance(r, str) for r in actual['reasons']))
+            if good:
+                reason_flags = {'categoryNotVisible': not actual['categoryVisible'],
+                                'parentFilterDisallows': not actual['parentAllows'],
+                                'specialFilterDisallows': actual['specialFilterDisallows'],
+                                'itemNotVisible': not actual['itemVisible'],
+                                'undiscoveredItem': actual['hiddenByDiscovery']}
+                wanted_reasons = {key for key, present in reason_flags.items() if present}
+                good = set(actual['reasons']) == wanted_reasons and len(actual['reasons']) == len(wanted_reasons)
+            if not good:
+                valid = False
+                continue
+            matches = actual['visible'] == wanted['visible'] and actual['allowed'] == wanted['allowed']
+            stage['checks'].append({'expected': wanted, 'actual': actual, 'outcome': 'match' if matches else 'mismatch'})
+    api_unavailable = (isinstance(rows, list) and len(rows) == len(expected) and any(
+        isinstance(row, dict) and row.get('caseId') == BILL_CASE and row.get('expected') == wanted
+        and row.get('outcome') == 'error' and row.get('reason') == 'apiUnavailable'
+        for wanted, row in zip(expected, rows)))
+    if api_unavailable:
+        stage['status'] = 'blocked'
+        incomplete.append({'code': 'billIngredientApiUnavailable', 'detail': 'required C adapter API is unavailable; A load observations are retained'})
+    if not valid:
+        incomplete.append({'code': 'billIngredientObservationIncomplete',
+                           'detail': 'missing, invalid or unresolved bill ingredient observations'})
+    bad = sum(row['outcome'] == 'mismatch' for row in stage['checks'])
+    if bad:
+        failed.append({'code': 'billIngredientMismatch', 'detail': f'{bad} bill ingredient expectations did not match'})
+    stage['status'] = 'blocked' if api_unavailable else 'incomplete' if not valid else 'failed' if bad else 'completed'
+    return stage, incomplete, failed
 
 
 # ---------------------------------------------------------------------------
@@ -1193,8 +1261,6 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
                           f'running the Worker is implemented for linux-x64 only; this is {result["platform"]}')
         if runtime not in ('waylith', 'standard'):
             raise Blocked('runtimeUnsupported', f'unknown runtime {runtime}')
-        if 'C' in request['levels']:
-            raise Blocked('levelUnsupported', 'level C (specified behaviour tests) is not implemented in this version')
         worker_dir = Path(worker_dir).resolve()
         if not (worker_dir / WORKER_NAME).is_file() or not (worker_dir / f'{WORKER_NAME}.dll').is_file():
             raise Blocked('workerMissing', f'Worker build not found in {worker_dir}; build worker/RimWorldValidation.Worker first')
@@ -1361,12 +1427,14 @@ def _scope(request, stages):
     if request['map']:
         checked.append('generation of one temporary world and map by the game code (gen steps, scenario map parts, '
                        'map components) with the requested seed; diagnostics compared with the baseline map')
+    if 'C' in request['levels']:
+        checked.append('non-rendered new-bill ingredient option predicates (experimental); see stages.C')
     not_checked = [
         'other languages than ' + request['language'],
-        ('the game start after map generation (Game.FinalizeInit, GameComponent.StartedNewGame), ticks, UI, rendering, '
+        ('the game start after map generation (Game.FinalizeInit, GameComponent.StartedNewGame), ticks, rendered UI, rendering, '
          'audio output or Steam' if request['map'] else
-         'anything that needs a map, a game, ticks, UI, rendering, audio output or Steam'),
-        'what Harmony patches do at run time (level C is not implemented)',
+         'map activity, started gameplay, ticks, rendered UI, rendering, audio output or Steam'),
+        'runtime behavior outside the requested fixed C case; events, quests and ticks',
         'behaviour on other platforms or runtimes than the one recorded in "runtime"',
     ]
     if 'B' not in request['levels']:

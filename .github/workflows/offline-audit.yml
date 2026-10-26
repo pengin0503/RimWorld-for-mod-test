@@ -47,6 +47,8 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Build Worker (warnings are errors)
         run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+      - name: Bound category traversal before game predicates (synthetic only)
+        run: dotnet run --project tests/worker/CategoryTree -c Release
       - name: Worker refuses to run without a Controller request
         shell: bash
         run: |

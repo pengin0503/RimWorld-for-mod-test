@@ -77,5 +77,28 @@ class AssetTests(unittest.TestCase):
             self.assertEqual(list(Path(d).glob('.r2-*')), [])
 
 
+    def test_profile_is_unset_only_in_aws_child(self):
+        r2 = ra.R2(endpoint='https://abc.r2.cloudflarestorage.com', bucket='rimworld-17')
+        with patch.dict('os.environ', {'AWS_PROFILE': 'nonexistent', 'AWS_DEFAULT_PROFILE': 'missing',
+                                      'AWS_ACCESS_KEY_ID': 'test-id', 'AWS_SECRET_ACCESS_KEY': 'test-secret'}), \
+             patch.object(ra.subprocess, 'run') as call:
+            call.return_value.returncode = 0
+            call.return_value.stdout = '{}'
+            r2.call('head-object', '--bucket', 'rimworld-17', '--key', 'Game-Linux/Version.txt')
+            child = call.call_args.kwargs['env']
+            self.assertNotIn('AWS_PROFILE', child)
+            self.assertNotIn('AWS_DEFAULT_PROFILE', child)
+            self.assertEqual(child['AWS_ACCESS_KEY_ID'], 'test-id')
+
+    def test_private_index_allows_only_known_exact_objects(self):
+        self.assertEqual(ra.validate_key("rimworld-mod-index.zip"), "rimworld-mod-index.zip")
+        self.assertEqual(ra.validate_key(ra.LEGACY_PRIVATE_INDEX_KEY), ra.LEGACY_PRIVATE_INDEX_KEY)
+        for key in ('rimworld-mod-index-other.zip', 'rimworld-mod-index.zip/extra',
+                    'PrivateIndex/other.zip', 'PrivateIndex/../outside',
+                    'PrivateIndex/rimworld-mod-index-2026-10-26.zip/another'):
+            with self.subTest(key=key), self.assertRaises(ra.AssetError):
+                ra.validate_key(key)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -22,6 +22,15 @@ public sealed class Checks(GameApi api)
             json.WriteString("name", (string?)Reflect.Member(mod, "Name"));
             json.WriteString("folderName", (string?)Reflect.Member(mod, "FolderName"));
             json.WriteBoolean("official", (bool)Reflect.Member(mod, "IsOfficialMod")!);
+            json.WriteNumber("defCount", ((IEnumerable)Reflect.Member(mod, "AllDefs")!).Cast<object>().Count());
+            string root = (string)Reflect.Member(mod, "RootDir")!;
+            json.WriteStartArray("loadFolders");
+            foreach (string folder in (IEnumerable)Reflect.InstanceField(mod.GetType(), "foldersToLoadDescendingOrder").GetValue(mod)!)
+            {
+                string relative = Path.GetRelativePath(root, folder);
+                json.WriteStringValue(relative == "." ? "" : relative.Replace(Path.DirectorySeparatorChar, '/'));
+            }
+            json.WriteEndArray();
             json.WriteEndObject();
         }
         json.WriteEndArray();
@@ -90,6 +99,7 @@ public sealed class Checks(GameApi api)
         }
         json.WriteEndArray();
         new HarmonyInspector().Write(json, Items(expectations, "harmonyPatches").ToList());
+        BillIngredientOptions.Write(json, expectations);
         json.WriteEndObject();
     }
 

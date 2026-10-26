@@ -10,7 +10,7 @@
 | `Workshop/<数字ID>/` | Steam Workshop の MOD |
 | バケット直下 | 誤ってアップロードされた Windows 版（このツールの取得対象外） |
 
-既定バケット名は `rimworld-17`。本リポジトリから R2 に実接続した結果はまだ得られていない。正確なキーは読取権限のある環境で確認する。
+既定バケット名は `rimworld-17`。2026-10-26 に Codex Cloud から `Game-Linux/Version.txt` の HEAD/GET が成功したとユーザーが報告。同日のコミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified` となったこともユーザー報告で確認。今回の修正後の実R2取得・実ゲーム処理は未再実行。正確なキーは読取権限のある環境で確認する。
 
 ## 認証
 
@@ -91,3 +91,9 @@ python3 tools/validation_host.py run \
 ChatGPT の GitHub 連携からコードの調査・修正・PRは可能だが、この会話の GitHub ツールには任意の Actions workflow_dispatch を直接起動する操作がない。GitHub Actions を UI から実行するか、起動に対応する Codex/Work 等から使う。**Actions で取得した私有バイナリが ChatGPT の会話コンテキストへ自動投入されるわけではない。**
 
 R2の利用量とトークン消費を抑えるため、ゲーム本体・Workshop全件の再取得は常用しない。
+
+## Codex Cloudとの統合
+
+[Codex用の設定・検証コマンド](codex-cloud.md) を参照。新しい `tools/codex_workflow.py` は非公開索引の検索、対象MODの取得、対応Linuxゲーム資材の準備、既存検証ホストの実行を補助する。`AGENTS.md` はCodex向け共通指示。
+
+索引の既定取得元は、2026-10-26 に実取得した R2 直下の **`rimworld-mod-index.zip`**。後方互換として旧キー `PrivateIndex/rimworld-mod-index-2026-10-26.zip` の明示取得も許可するが、自動探索・自動フォールバックはしない。これら以外のルートファイルや索引 prefix 全体は許可しない。公開GitHubには索引の中身を置かない。Codexで継承された存在しない`AWS_PROFILE`はAWS CLIの子プロセスに限って除去する。

@@ -17,7 +17,8 @@ RimWorld を通常起動できない環境でも、作成した MOD を実物の
 | Windows での実ゲーム検証 | 未対応（`run` は `blocked`）。Linux の結果を Windows の保証にしない |
 | 標準 .NET での実行 | 実験扱い（常に `incomplete`）。WaylithClr との実害のある差を確認済み |
 | マップ生成（`map`） | Linux x86_64 で実装・適格化済み。ロード後に一時的なワールドとマップを 1 枚生成し、模式図の画像・内容・期待値の判定を出す。このビルドのマップ生成は同じ種でも毎回少し違う（公式も同じ）ため、公式 quick test と各 5 回の分布で比較。[マップ生成の適格化](docs/research/map-qualification.md) |
-| C：指定動作テスト／D：ゲーム開始後・tick | 未実装（`blocked`） |
+| C：指定動作テスト | 新規 Bill の材料表示候補/許可状態のみ実装（Linux 非描画・experimental、適格化未完了）。[契約](docs/contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental) |
+| D：ゲーム開始後・tick | 未実装 |
 | 入力監査 CLI | 実装済み。ZIP・XML 構文・manifest を検査 |
 | MOD 事前検査 CLI / Windows 画面 | 実装済み。静的検査のみ（`gameVerification=notRun`） |
 | 既存の通常起動機能 | **削除済み**。CLI `play` は移行エラーを返すだけ。画面の起動ボタンも削除 |
@@ -59,4 +60,12 @@ AI の通常の検証先は Linux、Windows は利用者自身の検証先とし
 
 ## Cloudflare R2 からのオンデマンド資材取得
 
-[Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。R2 の Secrets 設定と実接続テストは未実施です。
+[Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。Codex Cloud からの接続は確認済みですが、GitHub Actions 側の Secrets 設定・実接続は別途確認が必要です。
+
+## Codex Cloud での R2 参照・MOD 検証
+
+[Codex Cloud の接続・実行手順](docs/codex-cloud.md) と [Codex 向け作業規約](AGENTS.md) を追加しました。ユーザーの非公開 MOD 索引（ZIP）は公開リポジトリに置かず、Codex の私有領域で Workshop ID の解決に利用します。`tools/codex_workflow.py` は索引検索、指定 MOD の R2 取得、Linux ゲームスナップショットの準備、既存検証ホストの実行を補助します。
+
+2026-10-26 にコミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified`。その後、R2 直下の `rimworld-mod-index.zip` を取得し、索引照合・1.7 向け限定取得を経た Harmony の A 検証も `passed / completed / qualified`（6ファイル・約2.55 MB、ゲーム再取得なし）。既定の索引キーも実配置へ修正しました。[Codex Cloud の実測記録](docs/research/2026-10-26-codex-cloud-a-validation.md) に成功範囲と残作業を分けて記録しています。
+
+限定取得はゲームの有効ロードフォルダ・条件・版別依存に合わせて計画し、判断できない場合は `blocked` にします。VPE と Harmony・VEF、Core＋Royalty・英語の A 検証で、限定取得と全取得のロード順・実フォルダ・Def 数・診断が一致しました。[限定取得の比較記録](docs/research/2026-10-26-limited-fetch-parity.md)を参照してください。

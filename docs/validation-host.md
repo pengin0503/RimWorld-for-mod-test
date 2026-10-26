@@ -2,7 +2,7 @@
 
 `tools/validation_host.py` は、利用者が用意した RimWorld Linux 版のゲーム DLL を使い、MOD の実際の読み込み（A）と DLL・Harmony の登録（B）を検証して終了します。公式ゲーム実行ファイルは起動しません。ゲーム画面・メインメニュー・プレイ機能はありません。判定の意味は [契約](contracts/mod-validation-v1.md) を参照してください。
 
-現在の対応：Linux x86_64、ゲーム同梱の WaylithClr、RimWorld 1.7.4985 rev1269。この組だけが `qualified` です。Windows での `run` は未対応で `blocked` を返します。
+A/B とマップ生成の現在の対応：Linux x86_64、ゲーム同梱の WaylithClr、RimWorld 1.7.4985 rev1269。この組だけが `qualified` です。Windows での `run` は未対応で `blocked` を返します。
 
 ## 1. 準備（初回のみ）
 
@@ -63,6 +63,12 @@ python3 tools/validation_host.py prepare-game --source /private/rimworld-linux -
 `--out/map.png` が対象込みのマップ、`--out/map-baseline.png` が対象を外したマップです。対象 MOD の物はマゼンタで描かれます。ゲームの見た目ではなく、地形・岩・建物・植物・物・石の破片・ポーン・屋根を色分けした模式図です。詳しい項目と判定は [契約のマップ生成](contracts/mod-validation-v1.md#マップ生成) を参照してください。
 
 マップ生成は Linux x64＋WaylithClr＋1.7.4985 rev1269 で公式の quick test と比べて適格化済みです（[マップ生成の適格化](research/map-qualification.md)）。このビルドでは**同じ種でも実行のたびに少し違うマップになります（公式も同じ）**。2 枚の画像は MOD と関係のない場所でも違って見えます。ランダムに置かれる物の正確な個数を `mapThings` の期待値にしないでください。
+
+### クラフト材料の表示候補を調べる（C・実験）
+
+`levels: ["A", "C"]`、`tests: ["bill-ingredient-options.v1"]` と `expectations.billIngredients` の `recipe` / `thing` / `visible` / `allowed` を指定します。[C の契約と要求例](contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental)を参照してください。
+
+新規 Bill と、実ゲーム UI のカテゴリ・材料表示判定を使います。Linux では画面を描画しません。自作 fixture で特殊フィルターによる欠落を観測していますが、ケース固有の適格化は未完了です。現在は観測が揃っても全体 `incomplete` / `cNotQualified`。これは小麦粉 MOD や他の MOD の動作合格を意味しません。イベント/クエスト・Windows 描画は今後の別ケースです。
 
 ## 3. 実行
 

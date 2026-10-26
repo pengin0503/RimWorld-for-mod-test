@@ -38,7 +38,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 | 項目 | 規則 |
 |---|---|
 | 未知のフィールド | 全階層で拒否（`blocked` / `invalidRequest`） |
-| `levels` | `A` 必須。`B`（DLL・Harmony）と `C`（指定動作）は A の完了が前提。`C` は v1 では未実装で `blocked` |
+| `levels` | `A` 必須。`B`（DLL・Harmony）と `C`（指定動作）は A の完了が前提。`C` は固定ケース `bill-ingredient-options.v1` のみ実装（非描画・experimental）。その他は要求不正で `blocked` |
 | `official` | 既定 `["Core"]`。先頭は Core。Royalty/Ideology/Biotech/Odyssey から選ぶ。Anomaly は対象外（スナップショットにないため `officialContentMissing`） |
 | `mods` | 読み込み順。公式コンテンツの後に並ぶ。`path` は要求ファイルからの相対パス可。`packageId` は任意で、指定時は About.xml と一致必須。`target: true` を 1 個以上。`path` が `.zip` で終わる場合は ZIP を `--out` の下へ展開して使う（下記） |
 | `target` | 検証対象。ベースライン（同じ構成から対象だけ外した実行）との差分で、対象が持ち込んだ診断を判定する |
@@ -67,9 +67,11 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 - `workerStages`（engineInit → globalInit → staticConstructorsEarly → loadPlayData → lateLoadActions、各秒数と証拠）、`skippedOfficialSteps`、`deviations`、`scope`（確認した範囲と確認していない範囲）。
 - `process`（終了コード、停止理由、最大 RSS、ログ量、上限の実施方式。メモリは監視ポーリングで `memoryHard=false`）、`timings`。
 
+`runningMods[]` は比較用の追加観測として `defCount`（`ModContentPack.AllDefs` の件数）と `loadFolders`（実際の優先順、MOD root からの相対パス、root 自身は空文字）も記録する。これらは Def の内容を書き換えず、単独で合否を決めるものではない。
+
 ## 判定順序
 
-1. **blocked**（`executionStatus=notStarted`）：要求不正、出力先が空でない（このときは出力先に何も書かず、何も消さない）、Linux x64 以外、未実装の C、Worker なし、スナップショット改変、公式コンテンツ・言語・MOD の不足、対応 Adapter のないビルド（`--allow-unknown-build` なし）、B で Harmony を同梱した MOD がない。
+1. **blocked**（`executionStatus=notStarted`）：要求不正、出力先が空でない（このときは出力先に何も書かず、何も消さない）、Linux x64 以外、未知の C ケース、Worker なし、スナップショット改変、公式コンテンツ・言語・MOD の不足、対応 Adapter のないビルド（`--allow-unknown-build` なし）、B で Harmony を同梱した MOD がない。
 2. **incomplete**：Controller による停止（timeout/memoryLimit/logLimit）、Worker 結果の欠落・不正・古い nonce、Worker の未完了、ベースラインの未完了または信頼できないベースライン（診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、翻訳エラーの切り詰め。キャッシュもしない）、`experimental`、診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、言語が適用されない、期待値を評価できない、B で期待パッチ未指定。
 3. **failed**：上記がなく、qualified な範囲で期待値の不一致、期待パッチの未登録、ロード例外、対象で新たに出た error/warning（`allow` で外したものを除く）、対象で増えた翻訳エラー（同）のいずれかを確認。
 4. **passed**：上記のいずれもない。限定範囲の合格で、`scope.notChecked` は未検証。
@@ -112,6 +114,30 @@ incomplete でも、確認できた不一致や新しい診断は `reasons` と 
 
 - incomplete：`mapNotQualified`（その環境でマップ生成を公式の quick test と比べていない。Linux x64＋WaylithClr＋1.7.4985 rev1269 は比較済み：[マップ生成の適格化](../research/map-qualification.md)）、`mapNotGenerated`（設定の誤りなどで生成できなかった。例：存在しないバイオーム）、`baselineMapIncomplete`（ベースラインのマップが生成できず、生成中の診断を比べられない）。
 - failed：`mapGenerationFailed`（ベースラインは生成できたのに、対象では例外で生成が止まった）、`mapExpectationMismatch`。
+
+## C：製造指示の材料候補（非描画・experimental）
+
+Linux は画面を描画しません。固定ケース `bill-ingredient-options.v1` は、実ロード済みのレシピから新規 Bill を作り、材料一覧のカテゴリと材料の表示判定、現在の許可状態を読みます。
+
+```json
+"levels": ["A", "C"],
+"tests": ["bill-ingredient-options.v1"],
+"expectations": {"billIngredients": [
+  {"recipe": "My_Recipe", "thing": "My_Flour", "visible": true, "allowed": true}
+]}
+```
+
+- C では `tests` はこの 1 要素に固定。`billIngredients` は 1〜128 件、`recipe` / `thing` の組は重複不可。各項目は上記の 4 フィールドだけ。名前は英数・`_`・`-` の 1〜128 文字、`visible` / `allowed` は JSON 真偽値。C なしの非空 `billIngredients`、未知ケース、空の C 要求は `invalidRequest`。
+- 実際の `BillUtility.MakeNewBill` を使うため、検査中だけ新規の `Game` を作り `Current.Game` を差し替え、finally で元に戻します。ワールド・マップ・プレイ開始・tick・描画・保存は行いません。ゲームの GameComponent コンストラクターは実行されるため、その診断も残ります。既存セーブは読みません。
+- 発見状態は新規 Game の初期状態。未発見アイテムを発見済みにする操作はしません。ゲーム UI の親フィルターによる表示 root を選び、カテゴリの構造的到達性と実 `Visible(TreeNode_ThingCategory)`、実 `Visible(ThingDef)`、新規 Game の HiddenItemsManager を調べます。検索なし、カテゴリの開閉・スクロールによる画面内外は扱いません。
+- `visible = paneEligible && categoryReachable && categoryVisible && itemVisible && !hiddenByDiscovery`。最初の 2 つが満たされない文脈は観測失敗として扱い、期待 false でも合格にしません。`allowed` は新規 Bill の `ingredientFilter.Allows(ThingDef)`。Def やフィルターの許可を変更して期待値に合わせません。
+- `checks.billIngredients[]` に `caseId` / `expected` / `actual` / `outcome`。`actual` は上記 6 真偽値と `allowed`、`parentAllows` / `specialFilterDisallows`、`reasons[]`、`context=freshGameNewBill`、`rendered=false`。解決失敗では `outcome=error` と `reason`（`defMissing` / `paneNotEditable` / `categoryMissing` / `categoryTraversalLimit` / `apiUnavailable` / `observationError` 等）。走査は深度 128・延べ 20000 ノードで停止します。表示 root の解決やゲームの再帰的な表示判定の前に、登録済みカテゴリの各生ツリーを上限付きで事前確認します。
+- Controller は期待値の同一性・件数・必須真偽値・成分整合性、`context=freshGameNewBill` / `rendered=false`、理由と成分の整合性を確認し、実際の `visible` / `allowed` を再比較します。Worker の `outcome=match` だけでは信用しません。結果は `stages.C.checks` にも記録します。C の期待値は対象 run だけに送ります。対象専用レシピがない baseline には送らず、既存のロード診断比較を維持します。
+- `stages.C` は観測完了なら `completed`、不一致なら `failed`、未観測・不正文脈・例外なら `incomplete`。必要 API がないときは `blocked` / `billIngredientApiUnavailable`。この場合は A のロードが既に走ったので、全体 `status=blocked` でも `executionStatus=completed` を維持します（起動前 blocked との違い）。
+- **ケース適格化は未完了**。`stages.C.fidelity=experimental`、全体 `fidelity=experimental` / `status=incomplete`、`cNotQualified`。不一致は `billIngredientMismatch` として併記しますが、全体の合格・不合格を確定しません。API 不足の blocked が優先。A/B の既存資格を C に流用しません。
+- 画面上の存在・ラベル・見切れ・配置・クリックを保証しません。描画コールバックだけで項目を消す MOD は取り逃がし得ます。Windows 描画、既存 Bill 移行、実際の材料探索・クラフト完了、イベント、クエスト、tick は対象外です。
+
+自作 fixture での実ゲーム観測は [C の実装記録](../research/2026-10-26-bill-ingredient-options.md)。小麦粉 MOD 本体での検証や独立した参照経路との適格化は別に必要です。
 
 ## ZIP 入力
 

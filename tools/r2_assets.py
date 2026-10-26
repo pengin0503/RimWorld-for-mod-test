@@ -24,6 +24,9 @@ class AssetError(Exception):
     pass
 
 
+PRIVATE_INDEX_KEY = "PrivateIndex/rimworld-mod-index-2026-10-26.zip"
+
+
 def validate_key(key: str) -> str:
     """Accept only well-formed keys in the approved private game/MOD prefixes."""
     if not key or "\\" in key or any(ord(c) < 32 for c in key):
@@ -31,6 +34,8 @@ def validate_key(key: str) -> str:
     parts = key.split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise AssetError("object key contains an unsafe path component")
+    if key == PRIVATE_INDEX_KEY:
+        return key
     if parts[0] == "Game-Linux" and len(parts) >= 2:
         return key
     if parts[0] == "Workshop" and len(parts) >= 3 and WORKSHOP_ID.fullmatch(parts[1]):
@@ -63,8 +68,13 @@ class R2:
 
     def call(self, *args: str) -> dict:
         cmd = [self.aws, "--endpoint-url", self.endpoint, "--region", "auto", "--no-cli-pager", "s3api", *args, "--output", "json"]
+        # Codex Cloud may inherit AWS_PROFILE for a profile that does not exist.
+        # Do not change the parent process; explicit R2 keys remain available.
+        child_env = os.environ.copy()
+        child_env.pop("AWS_PROFILE", None)
+        child_env.pop("AWS_DEFAULT_PROFILE", None)
         try:
-            result = subprocess.run(cmd, text=True, capture_output=True, check=False)
+            result = subprocess.run(cmd, text=True, capture_output=True, check=False, env=child_env)
         except FileNotFoundError as exc:
             raise AssetError("AWS CLI not found (install awscli)") from exc
         if result.returncode != 0:
@@ -105,6 +115,7 @@ class R2:
             return "cached"
         dest.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=".r2-", dir=dest.parent, delete=False) as temp:
+            os.chmod(temp.name, 0o600)
             temporary = Path(temp.name)
         try:
             metadata = self.call("get-object", "--bucket", self.bucket, "--key", key, str(temporary))
@@ -175,7 +186,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", help="Cloudflare R2 endpoint; otherwise R2_ENDPOINT env")
     parser.add_argument("--bucket", help="R2 bucket; otherwise R2_BUCKET env (default rimworld-17)")
-    parser.add_argument("--aws", default="aws", help="AWS CLI executable")
+    parser.add_argument("--aws", default=os.environ.get("AWS_CLI_PATH", "aws"), help="AWS CLI executable")
     sub = parser.add_subparsers(dest="action", required=True)
     for command in ("file", "mod", "game"):
         p = sub.add_parser(command)

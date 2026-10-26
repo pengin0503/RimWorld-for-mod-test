@@ -35,8 +35,10 @@ def _safe_private(root: Path) -> Path:
     if any(part.is_symlink() for part in (raw, *raw.parents)):
         raise WorkflowError("private work root has a symbolic-link component")
     root = raw.resolve()
-    if any((parent / ".git").exists() for parent in (root, *root.parents)):
-        raise WorkflowError("private work root must be outside the Git checkout")
+    # Restrict the real project checkout, not unrelated sandbox .git ancestors.
+    checkout = Path(__file__).resolve().parents[1]
+    if root == checkout or checkout in root.parents or (root / ".git").exists():
+        raise WorkflowError("private work root must be outside the project checkout")
     if root.exists() and not root.is_dir():
         raise WorkflowError("private work root is not a directory")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -105,16 +107,21 @@ def r2_client(aws: str) -> r2_assets.R2:
                         bucket=os.environ.get("R2_BUCKET", "rimworld-17"), aws=aws)
 
 
-def _fetch(r2: r2_assets.R2, prefix: str, dest: Path, *, runtime=False, refresh=False) -> dict:
-    items = r2.list_prefix(prefix)
+def _fetch(r2: r2_assets.R2, prefix: str, dest: Path, *, runtime=False,
+           include=None, refresh=False) -> dict:
+    listed = r2.list_prefix(prefix)
+    items = listed
     if runtime:
         items = [item for item in items if game_runtime_asset(item["key"])]
+    if include is not None:
+        items = [item for item in items if include(item["key"])]
     if not items:
         raise WorkflowError("requested R2 prefix has no matching files")
     size = sum(item["size"] for item in items)
     if len(items) > r2_assets.MAX_OBJECTS or size > r2_assets.MAX_BYTES:
         raise WorkflowError("R2 selection exceeds safety caps; narrow the request")
-    counts = {"selected": len(items), "listedBytes": size, "downloaded": 0, "cached": 0}
+    counts = {"selected": len(items), "skipped": len(listed) - len(items),
+              "listedBytes": size, "downloaded": 0, "cached": 0}
     # AWS CLI get-object is one subprocess per object; bounded parallelism avoids
     # a multi-hour sequential download while keeping R2 requests scoped.
     with ThreadPoolExecutor(max_workers=min(4, len(items))) as pool:
@@ -143,6 +150,41 @@ def game_runtime_asset(key: str) -> bool:
             if following.lower().endswith(".tar"):
                 return following.casefold().startswith(("english", "japanese"))
     return True
+
+
+
+def mod_validation_asset(key: str, *, version: str = "1.7", language: str = "English") -> bool:
+    """First-pass A/B loader inputs; custom LoadFolders/resources may need more."""
+    r2_assets.validate_key(key)
+    if not key.startswith("Workshop/"):
+        raise WorkflowError("MOD selection requires Workshop/<ID>/")
+    parts = key.split("/")[2:]
+    if not parts:
+        return False
+    if re.fullmatch(r"(?:v)?1\.[0-9]+", parts[0], re.IGNORECASE):
+        if parts[0].lower().lstrip("v") != version:
+            return False
+        parts = parts[1:]
+    elif parts[0].casefold() == "common":
+        parts = parts[1:]
+    if not parts:
+        return False
+    name = parts[-1].casefold()
+    top = parts[0].casefold()
+    if len(parts) == 1:
+        return name in {"loadfolders.xml", "about.xml", "loadfolders.txt"}
+    if top == "about":
+        return name.endswith((".xml", ".txt"))
+    if top in {"defs", "patches"}:
+        return name.endswith(".xml")
+    if top == "assemblies":
+        return name.endswith(".dll")
+    if top == "languages":
+        return (len(parts) >= 3 and
+                (parts[1].casefold() == language.casefold() or
+                 parts[1].casefold().startswith(language.casefold() + " (")) and
+                name.endswith((".xml", ".txt")))
+    return False
 
 
 def prepare(args) -> dict:
@@ -190,7 +232,9 @@ def fetch_mods(args) -> dict:
     r2 = r2_client(args.aws)
     for mod in selected:
         destination = root / "mods" / mod["workshopId"]
-        summary = _fetch(r2, f"Workshop/{mod['workshopId']}/", destination, refresh=args.refresh)
+        include = None if args.scope == "all" else (lambda k: mod_validation_asset(k, language=args.language))
+        summary = _fetch(r2, f"Workshop/{mod['workshopId']}/", destination,
+                         include=include, refresh=args.refresh)
         about = destination / "About" / "About.xml"
         if not about.is_file():
             raise WorkflowError("selected MOD is missing About/About.xml")
@@ -203,7 +247,8 @@ def fetch_mods(args) -> dict:
         package_id = (meta.findtext("packageId") or "").strip()
         if package_id.casefold() != mod["packageId"].casefold():
             raise WorkflowError("private index and downloaded MOD disagree on packageId")
-        fetched.append({"workshopId": mod["workshopId"], "name": mod["name"], "r2": summary})
+        fetched.append({"workshopId": mod["workshopId"], "name": mod["name"],
+                        "r2": summary, "scope": args.scope})
     mods = [{"path": str((root / "mods" / m["workshopId"]).absolute()),
              "packageId": m["packageId"], "target": m is selected[-1]} for m in selected]
     request = {"recordType": "modValidationRequest", "schemaVersion": 1,
@@ -214,7 +259,9 @@ def fetch_mods(args) -> dict:
     os.chmod(req_path, 0o600)
     return {"status": "modsReady", "fetched": fetched, "request": str(req_path),
             "validationLevel": "A",
-            "note": "Check dependency order, DLCs and level B expectations before running"}
+            "note": "Limited scope may omit custom LoadFolders/resources. Check effective "
+                    "load folders, dependency order, DLCs and B expectations; "
+                    "use --scope all only when additional assets are proven necessary"}
 
 
 @contextmanager
@@ -278,6 +325,7 @@ def main(argv=None) -> int:
             sub.add_argument("--target", required=True)
             sub.add_argument("--dependency", action="append", default=[])
             sub.add_argument("--language", default="English")
+            sub.add_argument("--scope", choices=("validation", "all"), default="validation")
         if name == "validate":
             sub.add_argument("--request")
             sub.add_argument("--worker", default="worker/bin")

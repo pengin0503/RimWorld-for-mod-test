@@ -40,7 +40,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 | 未知のフィールド | 全階層で拒否（`blocked` / `invalidRequest`） |
 | `levels` | `A` 必須。`B`（DLL・Harmony）と `C`（指定動作）は A の完了が前提。`C` は固定ケース `bill-ingredient-options.v1` のみ実装（非描画・experimental）。その他は要求不正で `blocked` |
 | `official` | 既定 `["Core"]`。先頭は Core。Royalty/Ideology/Biotech/Odyssey から選ぶ。Anomaly は対象外（スナップショットにないため `officialContentMissing`） |
-| `mods` | 読み込み順。公式コンテンツの後に並ぶ。`path` は要求ファイルからの相対パス可。`packageId` は任意で、指定時は About.xml と一致必須。`target: true` を 1 個以上。`path` が `.zip` で終わる場合は ZIP を `--out` の下へ展開して使う（下記） |
+| `mods` | 読み込み順。公式コンテンツの後に並ぶ。`path` は要求ファイルからの相対パス可。`packageId` は任意で、指定時は About.xml と一致必須。`target: true` を 1 個以上。`path` が `.zip` で終わる場合は ZIP を `--out` の下へ展開して使う（下記）。`expectedLoadFolders` は任意で、入力を限定取得したときに計画したロードフォルダ（優先順、MOD root からの相対パス、root は空文字）。指定時は対象実行の `runningMods[].loadFolders` と完全一致を要求する |
 | `target` | 検証対象。ベースライン（同じ構成から対象だけ外した実行）との差分で、対象が持ち込んだ診断を判定する |
 | `language` | Core の言語フォルダ名またはアーカイブ名（例 `Japanese (日本語)`）。括弧の前の英語名が一意なら受け付け、実名へ解決して結果に記録する |
 | `expectations.defs` | `type` は Def の型名（一意でなければ完全名）。`exists` は真偽 |
@@ -67,12 +67,12 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 - `workerStages`（engineInit → globalInit → staticConstructorsEarly → loadPlayData → lateLoadActions、各秒数と証拠）、`skippedOfficialSteps`、`deviations`、`scope`（確認した範囲と確認していない範囲）。
 - `process`（終了コード、停止理由、最大 RSS、ログ量、上限の実施方式。メモリは監視ポーリングで `memoryHard=false`）、`timings`。
 
-`runningMods[]` は比較用の追加観測として `defCount`（`ModContentPack.AllDefs` の件数）と `loadFolders`（実際の優先順、MOD root からの相対パス、root 自身は空文字）も記録する。これらは Def の内容を書き換えず、単独で合否を決めるものではない。
+`runningMods[]` は比較用の追加観測として `defCount`（`ModContentPack.AllDefs` の件数）と `loadFolders`（実際の優先順、MOD root からの相対パス、root 自身は空文字）も記録する。これらは Def の内容を書き換えない。`defCount` は単独で合否を決めない。`loadFolders` は、要求の `mods[].expectedLoadFolders` がある MOD についてだけ比較し、異なれば `loadFolderMismatch` で incomplete（取得しなかったフォルダをゲームが読もうとした可能性があり、合格の根拠にならないため）。
 
 ## 判定順序
 
 1. **blocked**（`executionStatus=notStarted`）：要求不正、出力先が空でない（このときは出力先に何も書かず、何も消さない）、Linux x64 以外、未知の C ケース、Worker なし、スナップショット改変、公式コンテンツ・言語・MOD の不足、対応 Adapter のないビルド（`--allow-unknown-build` なし）、B で Harmony を同梱した MOD がない。
-2. **incomplete**：Controller による停止（timeout/memoryLimit/logLimit）、Worker 結果の欠落・不正・古い nonce、Worker の未完了、ベースラインの未完了または信頼できないベースライン（診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、翻訳エラーの切り詰め。キャッシュもしない）、`experimental`、診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、言語が適用されない、期待値を評価できない、B で期待パッチ未指定。
+2. **incomplete**：Controller による停止（timeout/memoryLimit/logLimit）、Worker 結果の欠落・不正・古い nonce、Worker の未完了、ベースラインの未完了または信頼できないベースライン（診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、翻訳エラーの切り詰め。キャッシュもしない）、`experimental`、診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、計画したロードフォルダとの不一致（`loadFolderMismatch`）、言語が適用されない、期待値を評価できない、B で期待パッチ未指定。
 3. **failed**：上記がなく、qualified な範囲で期待値の不一致、期待パッチの未登録、ロード例外、対象で新たに出た error/warning（`allow` で外したものを除く）、対象で増えた翻訳エラー（同）のいずれかを確認。
 4. **passed**：上記のいずれもない。限定範囲の合格で、`scope.notChecked` は未検証。
 

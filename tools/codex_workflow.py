@@ -287,8 +287,11 @@ def fetch_mods(args) -> dict:
             summary[outcome] += count
         fetched.append({"workshopId": mod["workshopId"], "name": mod["name"],
                         "r2": summary, "scope": args.scope, "loadFolders": folders})
+    # The Controller compares these with the folders the game actually loaded.
+    planned = {item["workshopId"]: item["loadFolders"] for item in fetched}
     mods = [{"path": str((root / "mods" / m["workshopId"]).absolute()),
-             "packageId": m["packageId"], "target": m is selected[-1]} for m in selected]
+             "packageId": m["packageId"], "target": m is selected[-1],
+             "expectedLoadFolders": planned[m["workshopId"]]} for m in selected]
     request = {"recordType": "modValidationRequest", "schemaVersion": 1,
                "levels": ["A"], "official": official, "language": args.language,
                "mods": mods, "expectations": {}}

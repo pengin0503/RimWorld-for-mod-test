@@ -269,7 +269,7 @@ KNOWN_NOISE = (
                'differ from run to run, so they cannot be matched against the baseline'},
 )
 TRANSLATION_SUMMARY = re.compile(r'^Translation data for language .+ has \d+ errors\. Generate translation report for more info\.$')
-MOD_KEYS = {'path', 'packageId', 'target'}
+MOD_KEYS = {'path', 'packageId', 'target', 'expectedLoadFolders'}
 EXPECTATION_KEYS = {
     'defs': ({'type', 'defName', 'exists'}, set()),
     'defValues': ({'type', 'defName', 'path', 'equals'}, set()),
@@ -337,8 +337,18 @@ def validate_request(request, base):
         _require(isinstance(mod.get('target', False), bool), f'mods[{index}].target must be a boolean')
         if 'packageId' in mod:
             _require(isinstance(mod['packageId'], str) and mod['packageId'], f'mods[{index}].packageId must be a string')
-        resolved.append({'path': str((base / mod['path']).resolve()), 'packageId': mod.get('packageId'),
-                         'target': mod.get('target', False)})
+        entry = {'path': str((base / mod['path']).resolve()), 'packageId': mod.get('packageId'),
+                 'target': mod.get('target', False)}
+        if 'expectedLoadFolders' in mod:
+            folders = mod['expectedLoadFolders']
+            _require(isinstance(folders, list) and folders and all(isinstance(f, str) for f in folders)
+                     and len(set(folders)) == len(folders)
+                     and all(f == '' or (f == f.strip() and '\\' not in f
+                                         and all(part not in ('', '.', '..') for part in f.split('/')))
+                             for f in folders),
+                     f'mods[{index}].expectedLoadFolders must be distinct relative folders ("" is the mod root)')
+            entry['expectedLoadFolders'] = list(folders)
+        resolved.append(entry)
     _require(any(m['target'] for m in resolved), 'at least one mod must have "target": true')
 
     language = request.get('language', 'English')
@@ -586,6 +596,8 @@ def inspect_mods(request, inputs_dir=None):
                      'archive': archive,
                      'files': len(files), 'bytes': size, 'sha256': digest.hexdigest(), 'fileHashes': entries,
                      'harmonyAssemblies': sorted(rel for rel in files if rel.lower().endswith('/0harmony.dll'))})
+        if 'expectedLoadFolders' in mod:
+            mods[-1]['expectedLoadFolders'] = mod['expectedLoadFolders']
     return mods
 
 
@@ -991,6 +1003,18 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         if not order or not order.get('matches'):
             incomplete.append({'code': 'modOrderMismatch', 'detail': 'the mods that actually loaded differ from the request',
                                'expected': (order or {}).get('expected'), 'actual': (order or {}).get('actual')})
+        planned = [m for m in mods if 'expectedLoadFolders' in m]
+        if planned:
+            # A limited fetch was planned for these folders; a different selection by the
+            # game means inputs may be missing, so the run cannot vouch for the mod.
+            loaded = {str(r.get('packageId', '')).lower(): r.get('loadFolders')
+                      for r in worker.get('runningMods') or [] if isinstance(r, dict)}
+            differ = [{'packageId': m['packageId'], 'expected': m['expectedLoadFolders'],
+                       'actual': loaded.get(m['packageId'].lower())}
+                      for m in planned if loaded.get(m['packageId'].lower()) != m['expectedLoadFolders']]
+            if differ:
+                incomplete.append({'code': 'loadFolderMismatch', 'mods': differ,
+                                   'detail': 'the game loaded other folders than the fetched inputs were planned for'})
         if language_check and worker.get('activeLanguage') != request['language']:
             incomplete.append({'code': 'languageNotApplied',
                                'detail': f'active language is {worker.get("activeLanguage")}, requested {request["language"]}'})

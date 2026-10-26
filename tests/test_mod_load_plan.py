@@ -68,3 +68,26 @@ class LoadPlanTests(unittest.TestCase):
     def test_sound_grains_loaded_during_A_are_kept(self):
         self.assertTrue(p.select_asset('1.6/Sounds/Cast.wav',['1.6',''],'English'))
         self.assertFalse(p.select_asset('1.5/Sounds/Cast.wav',['1.6',''],'English'))
+
+    def test_every_audio_extension_the_game_accepts_is_kept(self):
+        for ext in ('wav','mp3','ogg','xm','it','mod','s3m','OGG'):
+            with self.subTest(ext=ext):
+                self.assertTrue(p.select_asset(f'1.6/Sounds/Music.{ext}',['1.6',''],'English'))
+
+    def test_language_archives_are_kept_like_folders(self):
+        folders=['1.6','']
+        self.assertTrue(p.select_asset('Languages/English.tar',folders,'English'))
+        self.assertTrue(p.select_asset('1.6/Languages/Japanese (日本語).tar',folders,'Japanese'))
+        self.assertTrue(p.select_asset('Languages/Japanese.tar',folders,'Japanese'))
+        self.assertFalse(p.select_asset('Languages/French.tar',folders,'Japanese'))
+        self.assertFalse(p.select_asset('1.5/Languages/English.tar',folders,'English'))
+
+    def test_other_content_folders_the_loader_reads_are_kept(self):
+        folders=['1.6','']
+        self.assertTrue(p.select_asset('1.6/Strings/Names/First.txt',folders,'English'))
+        self.assertFalse(p.select_asset('1.6/Strings/Names/First.xml',folders,'English'))
+        self.assertTrue(p.select_asset('AssetBundles/shaders_linux',folders,'English'))
+        self.assertTrue(p.select_asset('1.6/AssetBundles/shaders_win',folders,'English'))
+        self.assertFalse(p.select_asset('AssetBundles/shaders.manifest',folders,'English'))
+        self.assertTrue(p.select_asset('1.6/Shaders/Custom/Glow.wgsl',folders,'English'))
+        self.assertFalse(p.select_asset('1.5/Shaders/Custom/Glow.wgsl',folders,'English'))

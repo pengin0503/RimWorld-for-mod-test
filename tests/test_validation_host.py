@@ -218,6 +218,14 @@ class RequestTests(TempCase):
         self.fx.mod('one')
         return vh.load_request(self.fx.request(['*one'], **fields))
 
+    def load_mod(self, **mod_fields):
+        self.fx.mod('one')
+        path = self.fx.request(['*one'])
+        body = json.loads(path.read_text(encoding='utf-8'))
+        body['mods'][0].update(mod_fields)
+        path.write_text(json.dumps(body), encoding='utf-8')
+        return vh.load_request(path)
+
     def test_minimal_request_gets_defaults_and_absolute_paths(self):
         request = self.load()
         self.assertEqual(request['official'], ['Core'])
@@ -225,6 +233,11 @@ class RequestTests(TempCase):
         self.assertEqual(request['limits'], vh.DEFAULT_LIMITS)
         self.assertTrue(Path(request['mods'][0]['path']).is_absolute())
         self.assertEqual(len(request['sha256']), 64)
+
+    def test_planned_load_folders_are_carried_to_the_mod(self):
+        request = self.load_mod(expectedLoadFolders=['Mods/Foo/1.7', '1.7', ''])
+        self.assertEqual(request['mods'][0]['expectedLoadFolders'], ['Mods/Foo/1.7', '1.7', ''])
+        self.assertNotIn('expectedLoadFolders', self.load()['mods'][0])
 
     def test_invalid_requests_are_rejected(self):
         cases = {
@@ -254,6 +267,11 @@ class RequestTests(TempCase):
             with self.subTest(name):
                 with self.assertRaises(vh.RequestError):
                     self.load(**fields)
+
+    def test_invalid_planned_load_folders_are_rejected(self):
+        for folders in ('1.7', [], ['../x'], ['/x'], ['a\\b'], ['', ''], [1], ['a//b'], [' 1.7']):
+            with self.subTest(folders=folders), self.assertRaises(vh.RequestError):
+                self.load_mod(expectedLoadFolders=folders)
 
     def test_a_target_mod_is_required(self):
         self.fx.mod('one')
@@ -351,6 +369,24 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual((status, execution, reasons, fresh), ('passed', 'completed', [], []))
         self.assertEqual((stages['A']['status'], stages['B']['status'], stages['C']['status']),
                          ('completed', 'completed', 'notRequested'))
+
+    def test_planned_load_folders_must_match_what_the_game_loaded(self):
+        mods = [dict(self.mods[0], expectedLoadFolders=['1.7', ''])]
+        running = lambda folders: worker_result(runningMods=[
+            {'packageId': 'Ludeon.RimWorld', 'loadFolders': ['']},
+            {'packageId': 'Test.Target', 'loadFolders': folders}])
+        def run(worker):
+            return vh.evaluate(self.request, mods, worker, None, [], worker_result(), None, [self.warning], {}, 'qualified')
+        self.assertEqual(run(running(['1.7', '']))[0], 'passed')
+        for folders in (['1.6', ''], [''], ['', '1.7']):
+            with self.subTest(folders=folders):
+                status, _, reasons, _, _ = run(running(folders))
+                self.assertEqual(status, 'incomplete')
+                self.assertIn('loadFolderMismatch', [r['code'] for r in reasons])
+        status, _, reasons, _, _ = run(worker_result(runningMods=[]))
+        self.assertEqual((status, [r['code'] for r in reasons]), ('incomplete', ['loadFolderMismatch']))
+        # Without a plan nothing is compared, as before.
+        self.assertEqual(self.evaluate(worker=running(['x']))[0], 'passed')
 
     def test_status_table(self):
         warning, error, request = self.warning, self.error, self.request

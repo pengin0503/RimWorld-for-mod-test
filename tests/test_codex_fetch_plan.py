@@ -30,6 +30,8 @@ class FetchPlanTests(unittest.TestCase):
         self.assertIn('1.6/Defs/A.xml',self.pulled)
         self.assertNotIn('1.5/Defs/B.xml',self.pulled)
         self.assertEqual(result['fetched'][0]['loadFolders'],['1.6',''])
+        request=json.loads(Path(result['request']).read_text())
+        self.assertEqual(request['mods'][0]['expectedLoadFolders'],['1.6',''])
     def test_custom_folders_and_dlc_condition(self):
         self.run_fetch({'LoadFolders.xml':b'<loadFolders><v1.7><li>/</li><li IfModActive="ludeon.rimworld.royalty">Mods/Foo</li></v1.7></loadFolders>','Mods/Foo/Defs/A.xml':b'<Defs/>'},official=['Core','Royalty'])
         self.assertIn('Mods/Foo/Defs/A.xml',self.pulled)

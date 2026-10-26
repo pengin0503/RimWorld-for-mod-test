@@ -117,9 +117,22 @@ def select_asset(relative, folders, language):
         if top=='assemblies' and name.endswith('.dll'): return True
         # Def initialization constructs graphics during A; missing textures are real load errors.
         if top=='textures' and name.endswith(('.png','.jpg','.jpeg','.tga','.dds','.psd')): return True
-        if top=='sounds' and name.endswith(('.wav','.ogg','.mp3','.aif','.aiff','.flac')): return True
-        if top=='languages' and len(parts)>=3 and name.endswith(('.xml','.txt')):
-            if any(parts[1].casefold()==x or parts[1].casefold().startswith(x+' (') for x in {'english',language.casefold()}): return True
+        # ModContentLoader's audio list plus formats the earlier filter already kept.
+        if top=='sounds' and name.endswith(('.wav','.ogg','.mp3','.xm','.it','.mod','.s3m','.aif','.aiff','.flac')): return True
+        # Other per-load-folder content the 1.7.4985 loader reads: Strings/*.txt,
+        # extensionless AssetBundles (OS suffix chosen by the game), and Shaders/ sources.
+        if top=='strings' and name.endswith('.txt'): return True
+        if top=='assetbundles' and '.' not in parts[-1]: return True
+        if top=='shaders': return True
+        if top=='languages':
+            wanted={'english',language.casefold()}
+            folder=parts[1].casefold()
+            # The game reads Languages/<name>/ or the same name as a .tar archive.
+            if len(parts)==2 and folder.endswith('.tar'):
+                folder=folder[:-len('.tar')]
+            elif len(parts)<3 or not name.endswith(('.xml','.txt')):
+                return False
+            if any(folder==x or folder.startswith(x+' (') for x in wanted): return True
     return False
 
 

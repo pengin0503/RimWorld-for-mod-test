@@ -65,6 +65,16 @@ ZIPに同梱された index_mods.py も私有領域で利用できる。正確�
 
 結果の $RWMT_PRIVATE/request.json は現時点では **A / Core / English / 期待値なし**を既定とする。実際のB検証には要求JSONの levelsと完全指定のHarmony期待値、対象DLCを明示する。マップテストも明示する。生成済み request.json は誤上書きを防ぐため再生成しない。別run用に新しい私有ディレクトリを使うか、既存要求を保管してから実行する。
 
+### 自作 MOD など R2 にない対象
+
+ユーザーのリポジトリからビルドした MOD は索引にも R2 にもない。`--target` の代わりに `--local-target <MODフォルダ>` を指定すると、依存（`--dependency`）だけを索引と R2 から取得し、ローカルの MOD は取得せずにそのまま対象として要求に載せる。About・LoadFolders・依存の照合とロードフォルダの計画は R2 の MOD と同じ規則で行い、計画は `expectedLoadFolders` として要求に入る。MOD フォルダとその中にシンボリックリンクがあれば `invalidLocalMod`。ビルドした DLL がソースと一致することは、この経路では確かめない（ビルド手順の記録で担保する）。
+
+    python3 tools/codex_workflow.py fetch-mods \
+      --private-root "$RWMT_PRIVATE" \
+      --dependency 'Harmony' --dependency 'Vanilla Expanded Framework' \
+      --dependency 'Vanilla Cooking Expanded' \
+      --local-target "$HOME/flour/mod-main/VCE-Flour-Alternatives"
+
 ## 3. 実ゲーム処理検証が必要な時だけ、ゲーム資材とスナップショットを準備
 
     python3 tools/codex_workflow.py prepare --private-root "$RWMT_PRIVATE"

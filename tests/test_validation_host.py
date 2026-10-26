@@ -118,27 +118,29 @@ def sha(data):
 class Fixture:
     """A synthetic game folder, snapshot, fake Worker and mods in a temporary directory."""
 
-    def __init__(self, root):
+    def __init__(self, root, platform='linux-x64'):
         self.root = root
+        self.platform = platform
+        layout = vh.BUILD_FILES[platform]
         self.game = root / 'game-source'
-        for name in vh.REQUIRED_GAME_FILES:
+        for name in vh.required_game_files(platform):
             path = self.game / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(f'fake {name}'.encode())
         (self.game / 'Version.txt').write_text('9.9.1 rev1\n', encoding='utf-8')
-        (self.game / 'RimWorld').write_bytes(b'official executable - must never be linked or run')
+        (self.game / layout['host']).write_bytes(b'official executable - must never be linked or run')
         (self.game / 'Other.dll').write_bytes(b'other')
         self.about(self.game / 'Data' / 'Core', 'Ludeon.RimWorld')
         self.about(self.game / 'Data' / 'Royalty', 'Ludeon.RimWorld.Royalty')
         languages = self.game / 'Data' / 'Core' / 'Languages'
         (languages / 'English').mkdir(parents=True)
         (languages / 'Japanese (日本語).tar').write_bytes(b'tar')
-        target = '.NETCoreApp,Version=v10.0/linux-x64'
+        target = f'.NETCoreApp,Version=v10.0/{"win-x64" if platform == "windows-x64" else "linux-x64"}'
         (self.game / 'RimWorld.deps.json').write_text(json.dumps({
             'runtimeTarget': {'name': target},
             'targets': {target: {'RimWorld/1.0.0': {'runtime': {'RimWorld.dll': {}}},
                                  'runtimepack.Fake/1.0': {'runtime': {'System.Private.CoreLib.dll': {}},
-                                                          'native': {'libcoreclr.so': {}}}}},
+                                                          'native': {layout['coreclr']: {}}}}},
             'libraries': {'RimWorld/1.0.0': {'type': 'project'}, 'runtimepack.Fake/1.0': {'type': 'runtimepack'}},
         }), encoding='utf-8')
         (self.game / 'RimWorld.runtimeconfig.json').write_text(json.dumps({'runtimeOptions': {
@@ -280,6 +282,37 @@ class RequestTests(TempCase):
 
 
 class SnapshotTests(TempCase):
+    # IDENTITY_FILES before Windows support; Linux fingerprints must not change.
+    LINUX_IDENTITY = ('Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
+                      'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', 'libcoreclr.so',
+                      'System.Private.CoreLib.dll')
+
+    def test_windows_build_is_recognised(self):
+        linux = self.fx.prepare()
+        self.assertEqual(linux['buildPlatform'], 'linux-x64')
+        digest = hashlib.sha256()
+        for rel in self.LINUX_IDENTITY:
+            digest.update(f'{rel}\0{linux["files"][rel]["sha256"]}\n'.encode())
+        self.assertEqual(linux['fingerprint'], digest.hexdigest())
+        (self.root / 'win').mkdir()
+        windows = Fixture(self.root / 'win', 'windows-x64')
+        info = vh.prepare_game(windows.game, self.root / 'snapshot-windows', log=lambda *_: None)
+        self.assertEqual(info['buildPlatform'], 'windows-x64')
+        self.assertNotEqual(info['fingerprint'], linux['fingerprint'])
+        (windows.game / 'coreclr.dll').unlink()
+        with self.assertRaises(vh.Blocked) as caught:
+            vh.prepare_game(windows.game, self.root / 'snapshot-broken', log=lambda *_: None)
+        self.assertEqual(caught.exception.code, 'missingGameFiles')
+
+    def test_old_snapshot_without_platform_is_inferred(self):
+        info = self.fx.prepare()
+        record = self.fx.snapshot / 'snapshot.json'
+        record.chmod(0o644)
+        data = json.loads(record.read_text(encoding='utf-8'))
+        del data['buildPlatform']
+        record.write_text(json.dumps(data), encoding='utf-8')
+        self.assertEqual(vh.load_snapshot(self.fx.snapshot)['buildPlatform'], info['buildPlatform'])
+
     def test_snapshot_is_read_only_copy_with_manifest_and_adapter(self):
         info = self.fx.prepare()
         game = self.fx.snapshot / 'game'
@@ -724,7 +757,8 @@ class RunTests(TempCase):
         self.fx.mod('target')
         self.fx.mod('official', 'ludeon.rimworld.fake')
         cases = [
-            ('platformUnsupported', ['*target'], {'platform': 'windows-x64'}),
+            ('platformUnsupported', ['*target'], {'platform': 'osx-arm64'}),
+            ('platformMismatch', ['*target'], {'platform': 'windows-x64'}),
             ('invalidRequest', ['*target'], {'levels': ['A', 'B', 'C'], 'tests': ['t1']}),
             ('officialContentMissing', ['*target'], {'official': ['Core', 'Biotech']}),
             ('languageMissing', ['*target'], {'language': 'Klingon'}),
@@ -738,6 +772,15 @@ class RunTests(TempCase):
                 self.assertEqual((result['status'], result['executionStatus']), ('blocked', 'notStarted'))
                 self.assertEqual(result['reasons'][0]['code'], code)
                 self.assertEqual(vh.EXIT_CODES[result['status']], 2)
+
+    def test_windows_snapshot_is_not_run_on_linux(self):
+        (self.root / 'win').mkdir()
+        windows = Fixture(self.root / 'win', 'windows-x64')
+        windows.prepare()
+        windows.mod('target')
+        result = vh.run_validation(windows.snapshot, windows.request(['*target']), self.root / 'out-win', windows.worker,
+                                   adapters=windows.adapters, platform='linux-x64')
+        self.assertEqual((result['status'], result['reasons'][0]['code']), ('blocked', 'platformMismatch'))
 
     def test_controller_error_is_reported_as_incomplete(self):
         self.fx.mod('target')

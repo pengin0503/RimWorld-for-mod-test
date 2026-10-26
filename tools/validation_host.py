@@ -41,17 +41,37 @@ OFFICIAL_ORDER = ('Core', 'Royalty', 'Ideology', 'Biotech', 'Anomaly', 'Odyssey'
 EXPANSION_IDS = tuple(f'ludeon.rimworld.{name.lower()}' for name in OFFICIAL_ORDER[1:])
 # Mods: the install's own local mods never join a run; only the requested ones are copied into host/Mods.
 GAME_EXCLUDED = {'RimWorld', 'RimWorld.exe', 'RimWorld.deps.json', 'RimWorld.runtimeconfig.json', 'Data', 'Mods'}
-REQUIRED_GAME_FILES = (
+# Per-platform layout of the official build. Managed game files are the same on both;
+# the host executable, the native runtime and the Worker's apphost differ.
+BUILD_FILES = {
+    'linux-x64': {'host': 'RimWorld', 'native': ('libhostfxr.so', 'libcoreclr.so'), 'coreclr': 'libcoreclr.so',
+                  'workerExe': WORKER_NAME},
+    'windows-x64': {'host': 'RimWorld.exe', 'native': ('hostfxr.dll', 'coreclr.dll'), 'coreclr': 'coreclr.dll',
+                    'workerExe': WORKER_NAME + '.exe'},
+}
+_COMMON_GAME_FILES = (
     'Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
     'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', 'Assets.zip',
-    'libhostfxr.so', 'libcoreclr.so', 'System.Private.CoreLib.dll', 'Data/Core/About/About.xml',
 )
-# Files whose content decides which adapter applies; re-hashed on every run.
-IDENTITY_FILES = (
-    'Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
-    'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', 'libcoreclr.so',
-    'System.Private.CoreLib.dll',
-)
+
+
+def required_game_files(platform):
+    return (*_COMMON_GAME_FILES, *BUILD_FILES[platform]['native'], 'System.Private.CoreLib.dll',
+            'Data/Core/About/About.xml')
+
+
+def identity_files(platform):
+    """Files whose content decides which adapter applies; re-hashed on every run."""
+    return ('Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'Waylith.UnityCompat.dll',
+            'UnityStubs.dll', 'RimWorld.runtimeconfig.json', 'RimWorld.deps.json', BUILD_FILES[platform]['coreclr'],
+            'System.Private.CoreLib.dll')
+
+
+def detect_build_platform(files):
+    """The platform a game folder was built for, from its native runtime files."""
+    present = set(files)
+    found = [name for name, layout in BUILD_FILES.items() if layout['coreclr'] in present]
+    return found[0] if len(found) == 1 else None
 
 # Builds the Worker has been checked against. ``qualifiedLevels`` is only granted
 # for the platform/runtime pair that was compared with the official headless boot
@@ -140,7 +160,12 @@ def prepare_game(source, snapshot, *, log=print):
     """Copy the user's game folder into a private read-only snapshot with a SHA-256 manifest."""
     source = Path(source).resolve()
     snapshot = Path(snapshot).resolve()
-    missing = [name for name in REQUIRED_GAME_FILES if not (source / name).is_file()]
+    build_platform = detect_build_platform(name for layout in BUILD_FILES.values() for name in layout['native']
+                                           if (source / name).is_file())
+    expected = required_game_files(build_platform) if build_platform else required_game_files('linux-x64')
+    missing = [name for name in expected if not (source / name).is_file()]
+    if build_platform is None and not missing:
+        missing = ['a native runtime of exactly one supported platform']
     if missing:
         raise Blocked('missingGameFiles', 'game folder lacks required files: ' + ', '.join(missing))
     if snapshot.exists():
@@ -171,7 +196,8 @@ def prepare_game(source, snapshot, *, log=print):
         'officialContent': _official_folders(game),
         'fileCount': len(manifest), 'totalBytes': sum(e['size'] for e in manifest.values()),
         'symlinks': links,
-        'fingerprint': _fingerprint(manifest),
+        'buildPlatform': build_platform,
+        'fingerprint': _fingerprint(manifest, build_platform),
         'adapter': match_adapter(manifest)[0],
         'timings': {'copySeconds': round(copied - started, 3), 'hashSeconds': round(hashed - copied, 3),
                     'totalSeconds': round(time.monotonic() - started, 3)},
@@ -188,9 +214,9 @@ def _official_folders(game):
     return [name for name in OFFICIAL_ORDER if (data / name / 'About' / 'About.xml').is_file()]
 
 
-def _fingerprint(manifest):
+def _fingerprint(manifest, platform):
     digest = hashlib.sha256()
-    for rel in IDENTITY_FILES:
+    for rel in identity_files(platform):
         entry = manifest.get(rel)
         digest.update(f'{rel}\0{entry["sha256"] if entry else "-"}\n'.encode())
     return digest.hexdigest()
@@ -223,7 +249,10 @@ def load_snapshot(snapshot, *, full=False, official=()):
                 problems.append(rel)
         except FileNotFoundError:
             problems.append(rel)
-    for rel in (manifest if full else [r for r in IDENTITY_FILES if r in manifest]):
+    info.setdefault('buildPlatform', detect_build_platform(manifest))
+    if info['buildPlatform'] is None:
+        raise Blocked('snapshotInvalid', 'the snapshot does not hold the runtime of exactly one supported platform')
+    for rel in (manifest if full else [r for r in identity_files(info['buildPlatform']) if r in manifest]):
         if rel not in problems and sha256_file(game / rel) != manifest[rel]['sha256']:
             problems.append(rel)
     for folder in official:
@@ -1280,9 +1309,9 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
             raise Blocked('invalidRequest', str(error)) from None
         result['request'].update({'sha256': request['sha256'], 'levels': request['levels'], 'official': request['official'],
                                   'language': request['language'], 'limits': request['limits']})
-        if result['platform'] != 'linux-x64':
+        if result['platform'] not in BUILD_FILES:
             raise Blocked('platformUnsupported',
-                          f'running the Worker is implemented for linux-x64 only; this is {result["platform"]}')
+                          f'running the Worker is implemented for {" and ".join(BUILD_FILES)} only; this is {result["platform"]}')
         if runtime not in ('waylith', 'standard'):
             raise Blocked('runtimeUnsupported', f'unknown runtime {runtime}')
         worker_dir = Path(worker_dir).resolve()
@@ -1293,6 +1322,9 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         mark = time.monotonic()
         snapshot = load_snapshot(snapshot_dir, full=verify_full, official=request['official'])
         timings['verifySnapshotSeconds'] = round(time.monotonic() - mark, 3)
+        if snapshot['buildPlatform'] != result['platform']:
+            raise Blocked('platformMismatch', f'the snapshot holds the {snapshot["buildPlatform"]} build of the game; '
+                          f'this host is {result["platform"]}')
         missing = [f for f in request['official'] if f not in snapshot['officialContent']]
         if missing:
             raise Blocked('officialContentMissing', 'snapshot lacks official content: ' + ', '.join(missing))

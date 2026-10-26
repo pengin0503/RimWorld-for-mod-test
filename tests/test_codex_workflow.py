@@ -97,8 +97,19 @@ class CodexWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory) / "repo"
             (repo / ".git").mkdir(parents=True)
-            with self.assertRaises(cw.WorkflowError):
-                cw._safe_private(repo / "private")
+            with patch.object(cw, "__file__", str(repo / "tools" / "codex_workflow.py")):
+                with self.assertRaises(cw.WorkflowError):
+                    cw._safe_private(repo / "private")
+
+    def test_private_root_allows_unrelated_sandbox_git_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory) / "sandbox"
+            (sandbox / ".git").mkdir(parents=True)
+            checkout = sandbox / "repository"
+            private = sandbox / "private-assets"
+            with patch.object(cw, "__file__", str(checkout / "tools" / "codex_workflow.py")):
+                self.assertEqual(cw._safe_private(private), private)
+                self.assertTrue(private.is_dir())
 
     def test_index_selection_checks_duplicates_before_network(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -106,7 +117,7 @@ class CodexWorkflowTests(unittest.TestCase):
             sample_index(archive)
             args = SimpleNamespace(private_root=Path(directory) / "private", index_zip=str(archive),
                                    aws="aws", dependency=["Harmony"], target="brrainz.harmony",
-                                   language="English", refresh=False)
+                                   language="English", scope="validation", refresh=False)
             with patch.object(cw, "r2_client") as client:
                 with self.assertRaises(cw.WorkflowError):
                     cw.fetch_mods(args)
@@ -121,7 +132,7 @@ class CodexWorkflowTests(unittest.TestCase):
             (private / "request.json").write_text("original", encoding="utf-8")
             args = SimpleNamespace(private_root=private, index_zip=str(archive),
                                    aws="aws", dependency=[], target="Example",
-                                   language="English", refresh=False)
+                                   language="English", scope="validation", refresh=False)
             with patch.object(cw, "r2_client") as client:
                 with self.assertRaises(cw.WorkflowError):
                     cw.fetch_mods(args)
@@ -187,7 +198,7 @@ class CodexWorkflowTests(unittest.TestCase):
                     return "downloaded"
 
             args = SimpleNamespace(private_root=private, index_zip=str(archive), aws="aws",
-                                   dependency=[], target="Example", language="English", refresh=False)
+                                   dependency=[], target="Example", language="English", scope="validation", refresh=False)
             with patch.object(cw, "r2_client", return_value=FakeR2()):
                 result = cw.fetch_mods(args)
             request_path = Path(result["request"])
@@ -216,11 +227,76 @@ class CodexWorkflowTests(unittest.TestCase):
                     return "downloaded"
 
             args = SimpleNamespace(private_root=private, index_zip=str(archive), aws="aws",
-                                   dependency=[], target="Example", language="English", refresh=False)
+                                   dependency=[], target="Example", language="English", scope="validation", refresh=False)
             with patch.object(cw, "r2_client", return_value=FakeR2()):
                 with self.assertRaises(cw.WorkflowError):
                     cw.fetch_mods(args)
             self.assertFalse((private / "request.json").exists())
+
+
+    def test_validation_scope_selects_only_loader_inputs_for_1_7(self):
+        keep = [
+            "Workshop/123/About/About.xml",
+            "Workshop/123/LoadFolders.xml",
+            "Workshop/123/Defs/ThingDefs.xml",
+            "Workshop/123/Common/Patches/Shared.xml",
+            "Workshop/123/1.7/Defs/Test.xml",
+            "Workshop/123/1.7/Assemblies/Mod.dll",
+            "Workshop/123/Languages/English/Keyed/strings.xml",
+            "Workshop/123/1.7/Languages/English/DefInjected/Labels.xml",
+        ]
+        omit = [
+            "Workshop/123/1.6/Assemblies/Old.dll",
+            "Workshop/123/1.4/Defs/Old.xml",
+            "Workshop/123/Textures/Test.png",
+            "Workshop/123/Sounds/A.wav",
+            "Workshop/123/1.7/Source/Code.cs",
+            "Workshop/123/Languages/German/Keyed/a.xml",
+            "Workshop/123/1.7/Assemblies/Mod.pdb",
+        ]
+        for key in keep:
+            with self.subTest(key=key):
+                self.assertTrue(cw.mod_validation_asset(key))
+        for key in omit:
+            with self.subTest(key=key):
+                self.assertFalse(cw.mod_validation_asset(key))
+        self.assertTrue(cw.mod_validation_asset(
+            "Workshop/123/Languages/Japanese (日本語)/Keyed/a.xml", language="Japanese"))
+
+    def test_scoped_mod_fetch_does_not_download_textures_or_old_versions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "private-index.zip"
+            sample_index(archive)
+            content = b"<ModMetaData><packageId>author.example</packageId></ModMetaData>"
+            pulled = []
+
+            class FakeR2:
+                def list_prefix(self, prefix):
+                    return [
+                        {"key": prefix + "About/About.xml", "size": len(content)},
+                        {"key": prefix + "Textures/Thing.png", "size": 999},
+                        {"key": prefix + "1.5/Assemblies/Old.dll", "size": 100},
+                        {"key": prefix + "1.7/Assemblies/New.dll", "size": 101},
+                    ]
+
+                def get(self, key, dest, size, *, refresh=False):
+                    pulled.append(key)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    if key.endswith("About/About.xml"):
+                        dest.write_bytes(content)
+                    else:
+                        dest.write_bytes(b"x" * size)
+                    return "downloaded"
+
+            args = SimpleNamespace(private_root=root / "private", index_zip=str(archive),
+                                   aws="aws", dependency=[], target="Example",
+                                   language="English", scope="validation", refresh=False)
+            with patch.object(cw, "r2_client", return_value=FakeR2()):
+                result = cw.fetch_mods(args)
+            self.assertEqual(result["fetched"][0]["r2"]["selected"], 2)
+            self.assertEqual(result["fetched"][0]["r2"]["skipped"], 2)
+            self.assertFalse(any("/Textures/" in k or "/1.5/" in k for k in pulled))
 
 
 if __name__ == "__main__":

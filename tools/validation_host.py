@@ -645,7 +645,9 @@ def _official_package_id(game, folder):
 
 
 def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expectations, run_id, nonce, deadline):
-    """Create host/ (symlinks to the read-only snapshot + copied mods + Worker) and userdata/."""
+    """Create host/ (links to the read-only snapshot + copied mods + Worker) and userdata/.
+
+    Returns the expected mod order and the count of each link kind made into the snapshot."""
     game = Path(snapshot['path']) / 'game'
     host = run_dir / 'host'
     userdata = run_dir / 'userdata'
@@ -662,12 +664,28 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
             if key.startswith('runtimepack.'):
                 for section in ('runtime', 'native'):
                     runtime_pack.update(Path(f).name for f in value.get(section, {}))
+    link_modes = {}
+
+    def link(source, destination):
+        if os.name == 'nt':
+            # Windows symlinks need admin rights or Developer Mode: hard links and junctions instead.
+            win_fs = _win_fs()
+            if source.is_dir():
+                win_fs.link_dir(source, destination)
+                mode = 'junction'
+            else:
+                mode = win_fs.link_file(source, destination)
+        else:
+            os.symlink(source, destination)
+            mode = 'symlink'
+        link_modes[mode] = link_modes.get(mode, 0) + 1
+
     for name in sorted(os.listdir(game)):
         if name in GAME_EXCLUDED or name in runtime_pack:
             continue
-        os.symlink(game / name, host / name)
+        link(game / name, host / name)
     for folder in request['official']:
-        os.symlink(game / 'Data' / folder, host / 'Data' / folder)
+        link(game / 'Data' / folder, host / 'Data' / folder)
     for mod in mods:
         destination = host / 'Mods' / mod['folderName']
         source = Path(mod['sourcePath'])
@@ -729,7 +747,29 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
         worker_request['map'] = {**{k: v for k, v in request['map'].items() if k != 'imageScale'},
                                  'observationPath': str(run_dir / MAP_OBSERVATION)}
     _write_json(run_dir / 'worker-request.json', worker_request)
-    return order
+    return order, link_modes
+
+
+def _win_fs():
+    try:
+        import win_fs
+    except ImportError:  # imported as tools.validation_host
+        from tools import win_fs
+    return win_fs
+
+
+def remove_run_host(host):
+    """Delete a run's host/ folder without touching the snapshot it links to. Returns an error text or None."""
+    if not host.exists():
+        return None
+    try:
+        if os.name == 'nt':
+            _win_fs().remove_tree(host)
+        else:
+            shutil.rmtree(host)
+    except OSError as error:
+        return f'{type(error).__name__}: {error}'
+    return None
 
 
 def _xml_text(value):
@@ -1381,14 +1421,18 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         run_id = f'{result["runId"]}-{name}'
         nonce = secrets.token_hex(16)
         mark = time.monotonic()
-        order = build_run_dir(run_dir, snapshot, request, run_mods, worker_dir, runtime,
-                              expectations=run_expectations, run_id=run_id, nonce=nonce, deadline=deadline)
+        order, link_modes = build_run_dir(run_dir, snapshot, request, run_mods, worker_dir, runtime,
+                                          expectations=run_expectations, run_id=run_id, nonce=nonce,
+                                          deadline=deadline)
         prepared = time.monotonic() - mark
         wall = time.time()
         process = supervise(run_dir, limits, worker_environment(run_dir, limits, runtime))
+        process['linkModes'] = link_modes
         worker, problem, events = read_worker_output(run_dir, run_id, nonce, wall, limits['diagnostics'] + 10)
         if not keep_run_dirs:
-            shutil.rmtree(run_dir / 'host', ignore_errors=True)
+            cleanup_error = remove_run_host(run_dir / 'host')
+            if cleanup_error:
+                process['cleanupError'] = cleanup_error
         return {'runDir': str(run_dir), 'order': order, 'prepareSeconds': round(prepared, 3), 'process': process,
                 'worker': worker, 'problem': problem, 'events': events}
 

@@ -570,6 +570,24 @@ class RunTests(TempCase):
         self.assertIn('<devMode>true</devMode><resetModsConfigOnCrash>false</resetModsConfigOnCrash>', prefs)
         self.assertEqual(json.loads((out / 'result.json').read_text(encoding='utf-8'))['status'], 'passed')
 
+    def test_run_host_is_removed_and_links_are_counted(self):
+        self.fx.mod('target')
+        result, out = self.fx.run(['*target'])
+        self.assertEqual(result['status'], 'passed', result.get('reasons'))
+        game = Path(self.fx.snapshot) / 'game'
+        linked = [n for n in os.listdir(game) if n not in vh.GAME_EXCLUDED]
+        kinds = {'hardlink', 'copy', 'junction'} if os.name == 'nt' else {'symlink'}
+        for name in ('baseline', 'target'):
+            process = result['process'][name]
+            self.assertFalse((out / name / 'host').exists())
+            self.assertNotIn('cleanupError', process)
+            self.assertLessEqual(set(process['linkModes']), kinds)
+            self.assertEqual(sum(process['linkModes'].values()), len(linked) + 1)  # + Data/Core
+        if os.name == 'nt':
+            self.assertEqual(result['process']['target']['linkModes'].get('copy', 0), 0)
+        self.assertEqual(vh.load_snapshot(self.fx.snapshot, full=True)['fileCount'],
+                         json.loads((Path(self.fx.snapshot) / 'snapshot.json').read_text(encoding='utf-8'))['fileCount'])
+
     def test_new_error_from_target_fails(self):
         self.fx.mod('bad')
         result, _ = self.fx.run(['*bad'])

@@ -615,6 +615,13 @@ class RunTests(TempCase):
         self.assertIn('<devMode>true</devMode><resetModsConfigOnCrash>false</resetModsConfigOnCrash>', prefs)
         self.assertEqual(json.loads((out / 'result.json').read_text(encoding='utf-8'))['status'], 'passed')
 
+    def test_changed_mod_is_reported_as_incomplete(self):
+        self.fx.mod('target')
+        with mock.patch.object(vh, 'build_run_dir', side_effect=vh.Blocked('modChanged', 'changed')):
+            result, _ = self.fx.run(['*target'])
+        self.assertEqual(result['status'], 'incomplete')
+        self.assertIn('modChanged', [r['code'] for r in result['reasons']])
+
     def test_run_host_is_removed_and_links_are_counted(self):
         self.fx.mod('target')
         result, out = self.fx.run(['*target'])
@@ -1107,3 +1114,88 @@ class ProductBoundaryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class ModInspectionCapacityTests(unittest.TestCase):
+    def test_total_limit_precedes_all_hashes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mods = []
+            for name in ('first', 'second'):
+                root = Path(tmp) / name
+                (root / 'About').mkdir(parents=True)
+                (root / 'About' / 'About.xml').write_text(f'<ModMetaData><packageId>test.{name}</packageId></ModMetaData>')
+                (root / 'payload').write_bytes(b'x' * 32)
+                mods.append({'path': str(root), 'packageId': None, 'target': False})
+            with mock.patch.object(vh, 'MAX_MOD_BYTES', 100), mock.patch.object(vh, 'sha256_file', wraps=vh.sha256_file) as hashed:
+                with self.assertRaises(vh.Blocked) as caught:
+                    vh.inspect_mods({'mods': mods})
+                self.assertEqual(caught.exception.code, 'modTooLarge')
+                hashed.assert_not_called()
+
+    def test_hash_cache_reuses_unchanged_files_and_rehashes_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'mod'
+            (root / 'About').mkdir(parents=True)
+            (root / 'About' / 'About.xml').write_text('<ModMetaData><packageId>test.mod</packageId></ModMetaData>')
+            payload = root / 'payload'
+            payload.write_bytes(b'first')
+            request = {'mods': [{'path': str(root), 'packageId': None, 'target': False}]}
+            cache = Path(tmp) / 'cache.json'
+            with mock.patch.object(vh, 'sha256_file', wraps=vh.sha256_file) as hashed:
+                vh.inspect_mods(request, hash_cache=cache)
+                self.assertEqual(hashed.call_count, 2)
+                hashed.reset_mock()
+                vh.inspect_mods(request, hash_cache=cache)
+                self.assertEqual(hashed.call_count, 0)
+                payload.write_bytes(b'changed size')
+                vh.inspect_mods(request, hash_cache=cache)
+                self.assertEqual(hashed.call_count, 1)
+
+    def test_copy_detects_same_size_and_timestamp_content_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'mod'
+            (root / 'About').mkdir(parents=True)
+            (root / 'About' / 'About.xml').write_text('<ModMetaData><packageId>test.mod</packageId></ModMetaData>')
+            payload = root / 'payload'
+            payload.write_bytes(b'first')
+            request = {'mods': [{'path': str(root), 'packageId': None, 'target': False}]}
+            cache = Path(tmp) / 'cache.json'
+            vh.inspect_mods(request, hash_cache=cache)
+            original = payload.stat()
+            payload.write_bytes(b'other')
+            os.utime(payload, ns=(original.st_atime_ns, original.st_mtime_ns))
+            stale = vh.inspect_mods(request, hash_cache=cache)[0]['fileHashes']['payload']
+            with self.assertRaises(vh.Blocked) as caught:
+                vh.copy_verified_mod_file(payload, Path(tmp) / 'copied', stale)
+            self.assertEqual(caught.exception.code, 'modChanged')
+
+    def test_progress_finishes_with_all_mods(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mods = []
+            for name in ('first', 'second'):
+                root = Path(tmp) / name
+                (root / 'About').mkdir(parents=True)
+                (root / 'About' / 'About.xml').write_text(f'<ModMetaData><packageId>test.{name}</packageId></ModMetaData>')
+                mods.append({'path': str(root), 'packageId': None, 'target': False})
+            events = []
+            vh.inspect_mods({'mods': mods}, progress=lambda kind, **values: events.append((kind, values)))
+            counts = [e['completed'] for kind, e in events if kind == 'modsInspectionProgress']
+            self.assertEqual(counts[-1], 2)
+            self.assertEqual(counts, sorted(counts))
+
+    def test_corrupt_cache_is_rebuilt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'mod'
+            (root / 'About').mkdir(parents=True)
+            (root / 'About' / 'About.xml').write_text('<ModMetaData><packageId>test.mod</packageId></ModMetaData>')
+            cache = Path(tmp) / 'cache.json'
+            cache.write_text('{broken')
+            vh.inspect_mods({'mods': [{'path': str(root), 'packageId': None, 'target': False}]}, hash_cache=cache)
+            self.assertIsInstance(json.loads(cache.read_text()), dict)
+
+    def test_progress_during_single_large_file_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / 'payload'
+            payload.write_bytes(b'x' * (3 * 1024 * 1024))
+            progress = []
+            vh.sha256_file(payload, chunk=1024 * 1024, progress=lambda: progress.append(True))
+            self.assertEqual(len(progress), 3)

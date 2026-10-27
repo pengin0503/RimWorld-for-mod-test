@@ -24,6 +24,7 @@ import stat
 import subprocess
 import sys
 import time
+import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -132,11 +133,13 @@ class Blocked(Exception):
 # ---------------------------------------------------------------------------
 # Hashing and snapshots
 
-def sha256_file(path, chunk=1024 * 1024):
+def sha256_file(path, chunk=1024 * 1024, *, progress=None):
     digest = hashlib.sha256()
     with open(path, 'rb') as stream:
         while block := stream.read(chunk):
             digest.update(block)
+            if progress:
+                progress()
     return digest.hexdigest()
 
 
@@ -602,9 +605,19 @@ def extract_mod_archive(archive, dest, max_bytes):
     return candidates[0]
 
 
-def inspect_mods(request, inputs_dir=None):
+def inspect_mods(request, inputs_dir=None, *, hash_cache=None, progress=None):
     """Resolve mod folders (extracting ZIPs into inputs_dir), packageIds and content hashes before anything starts."""
-    mods, folders, ids, total = [], set(), set(), 0
+    cache = {}
+    if hash_cache:
+        try:
+            value = json.loads(Path(hash_cache).read_text(encoding='utf-8'))
+            if isinstance(value, dict):
+                cache = {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str)
+                         and len(v) == 64 and all(c in '0123456789abcdef' for c in v)}
+        except (OSError, ValueError, UnicodeError):
+            pass
+    mods, folders, ids, total, pending = [], set(), set(), 0, []
+    last_progress = time.monotonic()
     for index, mod in enumerate(request['mods']):
         root = Path(mod['path'])
         archive = None
@@ -613,7 +626,7 @@ def inspect_mods(request, inputs_dir=None):
                 raise Blocked('modMissing', f'mod archive not found: {root}')
             if inputs_dir is None:
                 raise Blocked('modInvalid', f'{root}: archives need an output directory to extract into')
-            archive = {'path': str(root), 'sha256': sha256_file(root)}
+            archive = {'path': str(root)}
             root = extract_mod_archive(root, Path(inputs_dir) / f'{index:02d}', MAX_MOD_BYTES - total)
         if not root.is_dir():
             raise Blocked('modMissing', f'mod folder not found: {root}')
@@ -627,23 +640,61 @@ def inspect_mods(request, inputs_dir=None):
         files, links = _tree_files(root)
         if links:
             raise Blocked('modInvalid', f'{root} contains symbolic links: {", ".join(links[:5])}')
-        digest, size, entries = hashlib.sha256(), 0, {}
+        size = 0
         for rel in files:
-            file_hash = sha256_file(root / rel)
-            entries[rel] = file_hash
             size += (root / rel).stat().st_size
-            digest.update(f'{rel}\0{file_hash}\n'.encode())
+            if progress and time.monotonic() - last_progress >= 3:
+                progress('modsInspectionProgress', completed=0, total=len(request['mods']))
+                last_progress = time.monotonic()
         total += size
         if total > MAX_MOD_BYTES:
             raise Blocked('modTooLarge', 'mods exceed 4 GiB in total')
         ids.add(package_id)
         folders.add(root.name)
+        pending.append((mod, root, archive, package_id, files, size))
+    last_progress = time.monotonic()
+    def heartbeat(completed):
+        nonlocal last_progress
+        if progress and time.monotonic() - last_progress >= 3:
+            progress('modsInspectionProgress', completed=completed, total=len(pending))
+            last_progress = time.monotonic()
+    for completed, (mod, root, archive, package_id, files, size) in enumerate(pending):
+        if archive:
+            archive['sha256'] = sha256_file(Path(archive['path']), progress=lambda: heartbeat(completed))
+        digest, entries = hashlib.sha256(), {}
+        for rel in files:
+            if progress and time.monotonic() - last_progress >= 3:
+                progress('modsInspectionProgress', completed=completed, total=len(pending))
+                last_progress = time.monotonic()
+            path = root / rel
+            st = path.stat()
+            key = json.dumps([str(path.resolve()), st.st_size, st.st_mtime_ns], separators=(',', ':'))
+            file_hash = cache.pop(key, None) if hash_cache and not archive else None
+            if file_hash is None:
+                file_hash = sha256_file(path, progress=lambda: heartbeat(completed)) if progress else sha256_file(path)
+            if hash_cache and not archive:
+                cache[key] = file_hash
+            entries[rel] = file_hash
+            digest.update(f'{rel}\0{file_hash}\n'.encode())
         mods.append({'packageId': package_id, 'target': mod['target'], 'sourcePath': str(root), 'folderName': root.name,
                      'archive': archive,
                      'files': len(files), 'bytes': size, 'sha256': digest.hexdigest(), 'fileHashes': entries,
                      'harmonyAssemblies': sorted(rel for rel in files if rel.lower().endswith('/0harmony.dll'))})
         if 'expectedLoadFolders' in mod:
             mods[-1]['expectedLoadFolders'] = mod['expectedLoadFolders']
+    if progress:
+        progress('modsInspectionProgress', completed=len(pending), total=len(pending))
+    if hash_cache:
+        cache_path = Path(hash_cache)
+        cache_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd, temporary = tempfile.mkstemp(prefix='.hash-cache-', dir=cache_path.parent)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                json.dump(dict(list(cache.items())[-50000:]), stream)
+            os.replace(temporary, cache_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
     return mods
 
 
@@ -659,6 +710,16 @@ def current_platform():
 
 def _official_package_id(game, folder):
     return _about_package_id(game / 'Data' / folder)
+
+
+def copy_verified_mod_file(source, destination, expected):
+    digest = hashlib.sha256()
+    with open(source, 'rb') as reader, open(destination, 'wb') as writer:
+        while chunk := reader.read(1024 * 1024):
+            digest.update(chunk)
+            writer.write(chunk)
+    if digest.hexdigest() != expected:
+        raise Blocked('modChanged', f'{source} changed while it was being copied')
 
 
 def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expectations, run_id, nonce, deadline):
@@ -709,9 +770,7 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
         destination.mkdir()
         for rel in mod['fileHashes']:
             (destination / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source / rel, destination / rel)
-            if sha256_file(destination / rel) != mod['fileHashes'][rel]:
-                raise Blocked('modChanged', f'{source / rel} changed while it was being copied')
+            copy_verified_mod_file(source / rel, destination / rel, mod['fileHashes'][rel])
 
     for suffix in ('', '.dll', '.exe'):
         if (worker_dir / (WORKER_NAME + suffix)).is_file():
@@ -1510,7 +1569,7 @@ class EventTail:
 
 def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='waylith', baseline_cache=None,
                    allow_unknown_build=False, verify_full=False, keep_run_dirs=False, adapters=None, platform=None,
-                   progress_stream=None):
+                   progress_stream=None, hash_cache=None):
     started_wall = time.time()
     started = time.monotonic()
     out_dir = Path(out_dir).resolve()
@@ -1577,7 +1636,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
 
         mark = time.monotonic()
         progress('modsInspecting', count=len(request['mods']))
-        mods = inspect_mods(request, out_dir / 'inputs')
+        mods = inspect_mods(request, out_dir / 'inputs', hash_cache=hash_cache, progress=progress)
         timings['inspectModsSeconds'] = round(time.monotonic() - mark, 3)
         progress('modsInspected', count=len(mods), targets=sum(1 for m in mods if m['target']),
                  bytes=sum(m['bytes'] for m in mods), files=sum(m['files'] for m in mods),
@@ -1605,7 +1664,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
             # Recorded as a missing Worker result, so the run can only be incomplete.
             detail = error.detail if isinstance(error, Blocked) else f'{type(error).__name__}: {error}'
             return {'runDir': str(out_dir / name), 'order': [], 'prepareSeconds': 0.0,
-                    'process': {'controllerError': detail}, 'worker': None, 'problem': 'controllerError', 'events': []}
+                    'process': {'controllerError': detail}, 'worker': None,
+                    'problem': error.code if isinstance(error, Blocked) else 'controllerError', 'events': []}
 
     def _one_run(name, run_mods, run_expectations):
         run_dir = out_dir / name
@@ -1805,6 +1865,7 @@ def main(argv=None):
     run.add_argument('--runtime', choices=('waylith', 'standard'), default='waylith',
                      help='waylith: the runtime shipped with the game (default); standard: stock .NET 10 (experimental)')
     run.add_argument('--baseline-cache', help='directory to reuse identical baseline runs')
+    run.add_argument('--hash-cache', help='private file for reusing MOD file hashes')
     run.add_argument('--allow-unknown-build', action='store_true', help='run a build without an adapter (experimental)')
     run.add_argument('--verify-full', action='store_true', help='re-hash every snapshot file before running')
     run.add_argument('--keep-run-dirs', action='store_true', help='keep the per-run host directories for debugging')
@@ -1819,7 +1880,7 @@ def main(argv=None):
     result = run_validation(args.snapshot, args.request, args.out, args.worker, runtime=args.runtime,
                             baseline_cache=args.baseline_cache, allow_unknown_build=args.allow_unknown_build,
                             verify_full=args.verify_full, keep_run_dirs=args.keep_run_dirs,
-                            progress_stream=sys.stderr)
+                            progress_stream=sys.stderr, hash_cache=args.hash_cache)
     print(_summary(result))
     if any(r['code'] == 'outputNotEmpty' for r in result.get('reasons', [])):
         print('result: not written (the output directory was not empty)')

@@ -33,6 +33,7 @@ public static class ProgressLog
         string text = kind switch
         {
             "started" => "検証を始めました。",
+            "modsInspectionProgress" => $"MOD の確認: {Int(e["completed"])} / {Int(e["total"])} 件。",
             "modsInspecting" => $"MOD {Int(e["count"])} 件の中身を確かめています（全ファイルのハッシュ）。",
             "modsInspected" => $"MOD {Int(e["count"])} 件（対象 {Int(e["targets"])}）、{Int(e["files"])} ファイル・{Size(e["bytes"])}を確かめました（{Seconds(e["seconds"])}）。",
             "baselineCached" => "比較用（対象なし）は、同じ条件の前回の結果を使います。",

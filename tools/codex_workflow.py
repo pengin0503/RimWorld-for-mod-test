@@ -473,7 +473,8 @@ def validate(args) -> dict:
         raise WorkflowError("result directory already exists; use a new --run-id")
     with _no_cloud_credentials():
         result = validation_host.run_validation(snapshot, request, out, args.worker,
-                                                baseline_cache=root / "baseline-cache")
+                                                baseline_cache=root / "baseline-cache",
+                                                hash_cache=root / "hash-cache.json")
     return {"status": result.get("status"),
             "reasons": [r.get("code") for r in result.get("reasons", [])],
             "result": str(out / "result.json"),

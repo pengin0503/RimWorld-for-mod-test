@@ -75,7 +75,7 @@ python3 tools/validation_host.py prepare-game --source /private/rimworld-linux -
 
 `levels: ["A", "C"]`、`tests: ["bill-ingredient-options.v1"]` と `expectations.billIngredients` の `recipe` / `thing` / `visible` / `allowed` を指定します。[C の契約と要求例](contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental)を参照してください。
 
-新規 Bill と、実ゲーム UI のカテゴリ・材料表示判定を使います。Linux では画面を描画しません。自作 fixture で特殊フィルターによる欠落を観測していますが、ケース固有の適格化は未完了です。現在は観測が揃っても全体 `incomplete` / `cNotQualified`。これは小麦粉 MOD や他の MOD の動作合格を意味しません。自作 fixture の事件選択肢は `event-choice.v1` で観測できます。任意の MOD のイベントやクエスト、Windows 描画は対象外です。
+新規 Bill と、実ゲーム UI のカテゴリ・材料表示判定を使います。Linux では画面を描画しません。自作 fixture で特殊フィルターによる欠落を観測していますが、ケース固有の適格化は未完了です。現在は観測が揃っても全体 `incomplete` / `cNotQualified`。これは小麦粉 MOD や他の MOD の動作合格を意味しません。自作 fixture の事件選択肢は `event-choice.v1` で観測できます。任意の MOD のイベントやクエストは別途設計が必要です。Windows 描画は中止・凍結しました。
 
 ## 3. 実行
 
@@ -167,3 +167,9 @@ python3 experiments/official-comparison/compare_official.py --map --snapshot /pr
 ### 自作 fixture のイベント選択肢
 
 `event-choice.v1` は自作 fixture の事件・選択肢・Steel の報酬を非描画で観測する実験ケースです。要求形式は [C の契約](contracts/mod-validation-v1.md#c自作-fixture-のイベント選択肢非描画experimental)を参照してください。ゲーム API と選択肢の前提が揃わなければ `incomplete` です。実 MOD のイベントやクエストの動作は確認しません。
+
+### 大量 MOD の検証
+
+MOD のサイズをハッシュ計算前に確認し、合計が上限を超える場合は `modTooLarge` で停止します。`run --hash-cache <私有ファイル>` で変更されていないファイルのハッシュを再利用できます。キャッシュには私有パスが含まれるため公開しないでください。内容がサイズと更新日時を保ったまま変わった場合も、コピー時のハッシュ照合で `modChanged` として停止します。baseline と target の MOD は Worker による変更の混入を防ぐため別々にコピーします。
+
+MOD が多い場合は要求の `limits.timeoutSeconds` と `limits.memoryMiB` を明示して調整する運用を推奨します。既定値は変更していません。上限に達した実行は成功ではなく `incomplete` として扱います。

@@ -745,7 +745,8 @@ def copy_verified_mod_file(source, destination, expected):
     return 'reflink' if cloned else 'copy'
 
 
-def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expectations, run_id, nonce, deadline):
+def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expectations, run_id, nonce, deadline,
+                  mod_copy_modes=None):
     """Create host/ (links to the read-only snapshot + copied mods + Worker) and userdata/.
 
     Returns the expected mod order and the count of each link kind made into the snapshot."""
@@ -794,7 +795,8 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
         for rel in mod['fileHashes']:
             (destination / rel).parent.mkdir(parents=True, exist_ok=True)
             mode = copy_verified_mod_file(source / rel, destination / rel, mod['fileHashes'][rel])
-            link_modes['mod.' + mode] = link_modes.get('mod.' + mode, 0) + 1
+            if mod_copy_modes is not None:
+                mod_copy_modes[mode] = mod_copy_modes.get(mode, 0) + 1
 
     for suffix in ('', '.dll', '.exe'):
         if (worker_dir / (WORKER_NAME + suffix)).is_file():
@@ -1701,9 +1703,10 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         nonce = secrets.token_hex(16)
         mark = time.monotonic()
         progress('runPreparing', run=name, mods=len(run_mods), bytes=sum(m['bytes'] for m in run_mods))
+        mod_copy_modes = {}
         order, link_modes = build_run_dir(run_dir, snapshot, request, run_mods, worker_dir, runtime,
                                           expectations=run_expectations, run_id=run_id, nonce=nonce,
-                                          deadline=deadline)
+                                          deadline=deadline, mod_copy_modes=mod_copy_modes)
         prepared = time.monotonic() - mark
         progress('runPrepared', run=name, seconds=round(prepared, 1))
         wall = time.time()
@@ -1712,6 +1715,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         process = supervise(run_dir, limits, worker_environment(run_dir, limits, runtime), on_poll=tail.poll)
         tail.poll()
         process['linkModes'] = link_modes
+        process['modCopyModes'] = mod_copy_modes
         worker, problem, events = read_worker_output(run_dir, run_id, nonce, wall, limits['diagnostics'] + 10)
         progress('workerFinished', run=name, exitCode=process.get('exitCode'), killedFor=process.get('killedFor'),
                  seconds=round(time.time() - wall, 1), executionStatus=(worker or {}).get('executionStatus'),

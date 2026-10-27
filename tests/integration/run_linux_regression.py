@@ -2,7 +2,6 @@
 import argparse
 import json
 from pathlib import Path
-import statistics
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -10,6 +9,13 @@ from types import SimpleNamespace
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from tools import codex_workflow as cw, validation_host as vh
+
+
+def loader_order_matches(observed, wanted):
+    if not isinstance(observed, dict) or observed.get('matches') is not True:
+        return False
+    actual = [s.casefold() for s in observed.get('actual', []) if not s.casefold().startswith('ludeon.')]
+    return actual == wanted
 
 
 def main():
@@ -40,13 +46,12 @@ def main():
             baseline_cache=root / 'baseline-cache' if cache else None,
             hash_cache=root / 'hash-cache.json' if cache else None)
         wanted = [m['packageId'].casefold() for m in json.loads(request.read_text())['mods']]
-        actual = [s.casefold() for s in (r.get('modOrder') or []) if not s.casefold().startswith('ludeon.')]
-        ok = r['status'] == 'passed' and actual == wanted
+        ok = r['status'] == 'passed' and loader_order_matches(r.get('modOrder'), wanted)
         results.append({'case': name, 'ok': ok, 'status': r['status'],
             'reasons': [x['code'] for x in r.get('reasons', [])],
             'baselineCached': r.get('diagnostics', {}).get('baselineCached'),
             'timings': r.get('timings'),
-            'copyModes': r.get('process', {}).get('target', {}).get('linkModes')})
+            'copyModes': r.get('process', {}).get('target', {}).get('modCopyModes')})
     summary = {'preparation': json.loads((root / 'preparation-summary.json').read_text()), 'runs': results}
     for label, script in [('event', 'run_event_choice.py'), ('materials', 'run_bill_ingredients.py')]:
         cmd = [sys.executable, str(REPO / 'tests/integration' / script), '--snapshot', str(snapshot),

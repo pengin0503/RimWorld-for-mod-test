@@ -7,9 +7,32 @@ import unittest
 from unittest import mock
 
 from tools import validation_host as vh
+import importlib.util
+
+spec = importlib.util.spec_from_file_location('linux_regression', Path(__file__).parent / 'integration/run_linux_regression.py')
+regression = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(regression)
+event_spec = importlib.util.spec_from_file_location('event_regression', Path(__file__).parent / 'integration/run_event_choice.py')
+event_regression = importlib.util.module_from_spec(event_spec)
+event_spec.loader.exec_module(event_regression)
 
 
 class ModCopyTests(unittest.TestCase):
+    def test_missing_fixture_does_not_accept_worker_failure(self):
+        result = {'status': 'incomplete', 'executionStatus': 'completed',
+                  'stages': {'C': {'status': 'incomplete'}},
+                  'reasons': [{'code': 'eventChoiceObservationIncomplete'}, {'code': 'cNotQualified'}]}
+        self.assertTrue(event_regression.missing_fixture_confirmed(result))
+        self.assertFalse(event_regression.missing_fixture_confirmed(dict(result, executionStatus='incomplete')))
+        self.assertFalse(event_regression.missing_fixture_confirmed(dict(result,
+                         reasons=result['reasons'] + [{'code': 'timeout'}])))
+
+    def test_real_loader_order_contract(self):
+        observed = {'matches': True, 'actual': ['ludeon.rimworld', 'Dependency', 'Target']}
+        self.assertTrue(regression.loader_order_matches(observed, ['dependency', 'target']))
+        self.assertFalse(regression.loader_order_matches(dict(observed, matches=False), ['dependency', 'target']))
+        self.assertFalse(regression.loader_order_matches(observed, ['target', 'dependency']))
+
     def test_copy_modes_preserve_independence_and_detect_changed_input(self):
         for clone in (False, True):
             with self.subTest(clone=clone), tempfile.TemporaryDirectory() as tmp:

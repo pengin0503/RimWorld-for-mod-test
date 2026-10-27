@@ -15,6 +15,15 @@ sys.path.insert(0, str(REPO))
 from tools import validation_host as vh
 
 
+def missing_fixture_confirmed(result):
+    codes = {r['code'] for r in result.get('reasons', [])}
+    return (result['status'] == 'incomplete' and result['executionStatus'] == 'completed'
+            and result.get('stages', {}).get('C', {}).get('status') == 'incomplete'
+            and 'eventChoiceObservationIncomplete' in codes
+            and codes <= {'experimental', 'cNotQualified', 'mapNotQualified',
+                          'eventChoiceObservationIncomplete'})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--snapshot', required=True)
@@ -76,11 +85,7 @@ def main():
     path.write_text(json.dumps(request), encoding='utf-8')
     absent = vh.run_validation(args.snapshot, path, out / 'missing', args.worker,
                                baseline_cache=out / 'baseline-cache')
-    codes = {r['code'] for r in absent.get('reasons', [])}
-    matched = (absent['status'] == 'incomplete'
-               and absent.get('stages', {}).get('C', {}).get('status') == 'incomplete'
-               and 'eventChoiceObservationIncomplete' in codes
-               and not codes.intersection({'newErrors', 'newWarnings', 'baselineIncomplete'}))
+    matched = missing_fixture_confirmed(absent)
     ok = ok and matched
     print('missing fixture', 'incomplete as required' if matched else 'not confirmed')
     return 0 if ok else 1

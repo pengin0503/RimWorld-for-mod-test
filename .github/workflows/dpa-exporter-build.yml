@@ -1,4 +1,5 @@
 name: Build DPA CSV Exporter (RimWorld 1.7)
+# Purpose: produce the installable CSV exporter, not run the optional A preflight.
 
 on:
   push:

@@ -135,7 +135,7 @@ public static class Exporter
         {
             var row = rows[i];
             string?[] fields = {
-                timestamp, VersionControl.CurrentVersionString, category, entryName, filter,
+                timestamp, "1.7", category, entryName, filter,
                 CsvFormat.Number(fps), CsvFormat.Number(tps), CsvFormat.Number(tpsTarget),
                 CsvFormat.Number(rootAverage), CsvFormat.Number(cycles), CsvFormat.Number(i+1),
                 row.Key, row.Label, row.Mod, row.Assembly, row.Type, row.Method,

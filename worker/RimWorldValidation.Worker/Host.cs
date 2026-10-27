@@ -46,6 +46,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
     private Stage? _lateStage;
     private Stage? _mapStage;
     private MapStage? _map;
+    private readonly EventChoice _eventChoice = new();
     private volatile Exception? _mapException;
     private Dictionary<string, object?>? _mapSummary;
 
@@ -356,6 +357,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
                 try
                 {
                     _mapSummary = new MapObservation(bound, _map, mapRequest.MaxListedThings).Write(mapRequest.ObservationPath);
+                    _eventChoice.Observe(request.Expectations, bound, _map.Map);
                 }
                 catch (Exception e) when (e is not OutOfMemoryException)
                 {
@@ -502,7 +504,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
             });
             if (loaded)
             {
-                Guard(json, "checksError", () => checks.WriteExpectations(json, request.Expectations));
+                Guard(json, "checksError", () => checks.WriteExpectations(json, request.Expectations, _eventChoice.Row));
             }
         }
         if (request.Map != null)

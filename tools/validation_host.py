@@ -835,6 +835,20 @@ def _win_job():
     return win_job
 
 
+def _gui_session_lock_fds():
+    """Keep the GUI's advisory lock alive for any detached Linux Worker."""
+    value = os.environ.get('RWMT_GUI_LOCK_FD')
+    if value is None or os.name == 'nt':
+        return ()
+    try:
+        fd = int(value)
+        if not stat.S_ISREG(os.fstat(fd).st_mode) or Path(os.readlink(f'/proc/self/fd/{fd}')).name != '.gui-session.lock':
+            raise ValueError('not the GUI session lock')
+    except (ValueError, OSError) as error:
+        raise RuntimeError('the GUI session lock descriptor is unavailable') from error
+    return (fd,)
+
+
 def supervise(run_dir, limits, environment, *, poll=0.2):
     """Start the Worker in its own process group (Windows: Job Object) and enforce time, memory and log limits."""
     host = run_dir / 'host'
@@ -851,7 +865,7 @@ def supervise(run_dir, limits, environment, *, poll=0.2):
                 process = job.start(command, cwd=host, env=environment, stdout=out, stderr=err)
             else:
                 process = subprocess.Popen(command, cwd=host, env=environment, stdin=subprocess.DEVNULL, stdout=out,
-                                           stderr=err, start_new_session=True)
+                                           stderr=err, start_new_session=True, pass_fds=_gui_session_lock_fds())
     except BaseException:
         if job:
             job.close()

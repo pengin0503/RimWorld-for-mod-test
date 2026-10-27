@@ -106,6 +106,46 @@ public class ResultSummaryTests
     }
 
     [Fact]
+    public void individual_translation_errors_include_counted_and_allowed_items_even_when_counts_match()
+    {
+        using var temp = new TempDir();
+        var summary = ResultSummary.Load(temp.Write("result.json", """
+            {"recordType":"modValidationResult", "status":"failed",
+             "reasons":[{"code":"newTranslationErrors"}],
+             "diagnostics":{"newInTarget":[], "translationErrors":{
+               "targetCount":2, "baselineCount":2, "complete":true,
+               "newInTarget":["Missing key", "Known problem"],
+               "notAllowed":["Missing key"],
+               "allowed":[{"error":"Known problem", "match":"Known", "reason":"accepted for now"}]}}}
+            """));
+        Assert.Equal(2, summary.NewDiagnostics.Count);
+        var unallowed = Assert.Single(summary.NewDiagnostics, d => d.Text == "Missing key");
+        var allowed = Assert.Single(summary.NewDiagnostics, d => d.Text == "Known problem");
+        Assert.True(unallowed.Counted);
+        Assert.False(allowed.Counted);
+        Assert.Equal("accepted for now", allowed.AllowedBy);
+    }
+
+    [Fact]
+    public void bill_observation_error_retains_reason_and_message_without_inventing_an_actual_value()
+    {
+        using var temp = new TempDir();
+        var summary = ResultSummary.Load(temp.Write("result.json", """
+            {"recordType":"modValidationResult", "checks":{"billIngredients":[{
+              "caseId":"bill-ingredient-options.v1",
+              "expected":{"recipe":"MissingRecipe", "thing":"Flour", "visible":true, "allowed":true},
+              "outcome":"error", "reason":"defMissing", "error":"RecipeDef MissingRecipe is not loaded"}]}}
+            """));
+        var bill = Assert.Single(summary.BillChecks);
+        Assert.Equal("error", bill.Outcome);
+        Assert.Null(bill.ActualVisible);
+        Assert.Null(bill.ActualAllowed);
+        Assert.Equal("defMissing", bill.ObservationReason);
+        Assert.Equal("RecipeDef MissingRecipe is not loaded", bill.ObservationError);
+        Assert.Empty(bill.Reasons);
+    }
+
+    [Fact]
     public void other_record_types_are_refused()
     {
         using var temp = new TempDir();

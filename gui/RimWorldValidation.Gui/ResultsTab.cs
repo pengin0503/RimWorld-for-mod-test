@@ -19,7 +19,7 @@ internal sealed class ResultsTab : IGuiTab
 
     private readonly Dictionary<string, Texture2D?> _images = [];
     private Section _section;
-    private Vector2 _reasonsScroll, _listScroll, _detailScroll, _scopeScroll;
+    private Vector2 _reasonsScroll, _listScroll, _detailScroll, _scopeScroll, _billScroll;
     private Diagnostic? _selected;
     private IReadOnlyList<Diagnostic> _diagnostics = [];
     private string? _shownFor;
@@ -42,7 +42,7 @@ internal sealed class ResultsTab : IGuiTab
             _folderError = null;
             _selected = null;
             _section = Section.Errors;
-            _reasonsScroll = _listScroll = _detailScroll = _scopeScroll = Vector2.zero;
+            _reasonsScroll = _listScroll = _detailScroll = _scopeScroll = _billScroll = Vector2.zero;
             // The ones that count toward the verdict first; the annotated ones (engine noise, allowed) after them.
             _diagnostics = GuiState.ShownResult?.NewDiagnostics.OrderBy(d => d.Counted ? 0 : 1).ToList() ?? [];
         }
@@ -239,26 +239,35 @@ internal sealed class ResultsTab : IGuiTab
         }
     }
 
-    private static void DrawBill(Rect rect, ResultSummary result)
+    private void DrawBill(Rect rect, ResultSummary result)
     {
         if (result.BillChecks.Count == 0)
         {
             Widgets.Label(rect, "この検証では製造指示の材料を調べていません（検証内容タブの C）。");
             return;
         }
-        float y = rect.y;
+        var rows = new List<(string Text, float Height, bool Match)>();
         foreach (BillCheck check in result.BillChecks)
         {
             string text = $"レシピ {check.Recipe}・材料 {check.Thing}：{OutcomeLabel(check.Outcome)}（{check.Outcome}）\n"
                 + $"　候補に出る：期待 {YesNo(check.ExpectedVisible)} / 実際 {YesNo(check.ActualVisible)}　"
                 + $"許可：期待 {YesNo(check.ExpectedAllowed)} / 実際 {YesNo(check.ActualAllowed)}"
-                + (check.Reasons.Count > 0 ? "\n　理由：" + string.Join("、", check.Reasons) : "");
-            float height = Text.CalcHeight(text, rect.width);
-            GUI.color = check.Outcome == "match" ? Color.white : ColorLibrary.RedReadable;
-            Widgets.Label(new Rect(rect.x, y, rect.width, height), text);
-            GUI.color = Color.white;
-            y += height + 10f;
+                + (check.Reasons.Count > 0 ? "\n　理由：" + string.Join("、", check.Reasons) : "")
+                + (check.ObservationReason != null ? "\n　観測できなかった理由：" + check.ObservationReason : "")
+                + (check.ObservationError != null ? "\n　詳細：" + check.ObservationError : "");
+            rows.Add((text, Text.CalcHeight(text, rect.width - 16f), check.Outcome == "match"));
         }
+        Rect view = new(0f, 0f, rect.width - 16f, rows.Sum(row => row.Height + 10f));
+        Widgets.BeginScrollView(rect, ref _billScroll, view);
+        float y = 0f;
+        foreach (var row in rows)
+        {
+            GUI.color = row.Match ? Color.white : ColorLibrary.RedReadable;
+            Widgets.Label(new Rect(0f, y, view.width, row.Height), row.Text);
+            GUI.color = Color.white;
+            y += row.Height + 10f;
+        }
+        Widgets.EndScrollView();
     }
 
     private void DrawScope(Rect rect, ResultSummary result)

@@ -41,7 +41,7 @@ internal sealed class SettingsTab : IGuiTab
         bool levelA = true;
         list.CheckboxLabeled("A 読み込み（XML・Def・翻訳のエラー）　常に実行", ref levelA, "必ず実行します。");
         list.CheckboxLabeled("B DLL の読み込みと Harmony パッチの登録", ref GuiState.LevelB,
-            "期待するパッチは右下の「追加の期待値」に expectations.harmony として書けます。");
+            "期待するパッチは右下の「追加の期待値」に expectations.harmonyPatches として書けます。");
         list.Gap();
         if (list.ButtonTextLabeledPct("言語", LanguageLabel(GuiState.Language), 0.4f))
         {

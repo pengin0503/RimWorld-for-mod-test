@@ -13,7 +13,8 @@ public sealed record Diagnostic(string Level, string Category, string Stage, str
 }
 
 public sealed record BillCheck(string Recipe, string Thing, bool? ExpectedVisible, bool? ActualVisible,
-    bool? ExpectedAllowed, bool? ActualAllowed, string Outcome, IReadOnlyList<string> Reasons);
+    bool? ExpectedAllowed, bool? ActualAllowed, string Outcome, IReadOnlyList<string> Reasons,
+    string? ObservationReason, string? ObservationError);
 
 /// <summary>
 /// What the GUI shows of one result.json written by tools/validation_host.py.
@@ -68,7 +69,8 @@ public sealed class ResultSummary
             Reasons = Objects(root["reasons"]).Select(r => new Reason(Str(r["code"]) ?? "unknown", Str(r["detail"]) ?? "")).ToList(),
             TargetPackageIds = targets.Select(m => Str(m["packageId"]) ?? "").ToList(),
             TargetNames = targets.Select(m => LeafName(Str(m["sourcePath"]))).ToList(),
-            NewDiagnostics = Objects(root["diagnostics"]?["newInTarget"]).Select(ReadDiagnostic).ToList(),
+            NewDiagnostics = Objects(root["diagnostics"]?["newInTarget"]).Select(ReadDiagnostic)
+                .Concat(ReadTranslationErrors(root["diagnostics"]?["translationErrors"])).ToList(),
             BillChecks = Objects(root["checks"]?["billIngredients"]).Select(ReadBill).ToList(),
             MapImage = Str(root["map"]?["image"]),
             MapBaselineImage = Str(root["map"]?["baselineImage"]),
@@ -105,8 +107,23 @@ public sealed class ResultSummary
         JsonNode? actual = c["actual"];
         return new BillCheck(Str(expected?["recipe"]) ?? "", Str(expected?["thing"]) ?? "",
             Bool(expected?["visible"]), Bool(actual?["visible"]), Bool(expected?["allowed"]), Bool(actual?["allowed"]),
-            Str(c["outcome"]) ?? "", Strings(actual?["reasons"]));
+            Str(c["outcome"]) ?? "", Strings(actual?["reasons"]), Str(c["reason"]), Str(c["error"]));
     }
+
+    private static IEnumerable<Diagnostic> ReadTranslationErrors(JsonNode? translation)
+    {
+        foreach (string error in Strings(translation?["notAllowed"]))
+        {
+            yield return TranslationDiagnostic(error, null);
+        }
+        foreach (JsonObject item in Objects(translation?["allowed"]))
+        {
+            yield return TranslationDiagnostic(Str(item["error"]) ?? "", Str(item["reason"]) ?? Str(item["match"]) ?? "allow");
+        }
+    }
+
+    private static Diagnostic TranslationDiagnostic(string text, string? allowed) =>
+        new("error", "translation", "loadPlayData", text.Split('\n', 2)[0].TrimEnd('\r'), text, null, allowed);
 
     internal static IEnumerable<JsonObject> Objects(JsonNode? node) =>
         node is JsonArray array ? array.OfType<JsonObject>() : [];

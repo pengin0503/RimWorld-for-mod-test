@@ -122,7 +122,7 @@ python3 tools/gui_host.py launch
 
 `setup` は設定を `%LOCALAPPDATA%\rwmt\gui-settings.json`（Linux は `~/.config/rwmt/gui-settings.json`）に保存します。MOD の候補は、指定がなければゲームの `Mods` と Steam の Workshop フォルダ（`steamapps/workshop/content/294100`）です。同じ packageId が複数あれば先に見つかったほうを使い、残りは理由付きで飛ばします。Windows では `Start-Windows.cmd` が `launch` を実行します。
 
-`launch` は結果フォルダの中に `.gui-session` を作り（スナップショットへのリンク、公式コンテンツだけの `ModsConfig.xml`、`devMode=false` の `Prefs.xml`）、画面を Linux はプロセスグループ、Windows は Job Object の中で動かします。画面を閉じると、画面から始めた検証も止めて `.gui-session` を消します。利用者の本家の設定やセーブは読み書きしません（本家の `ModsConfig.xml` は読み込み順の取り込みに読むだけ）。
+`launch` は結果フォルダの中に `.gui-session` を作り（スナップショットへのリンク、公式コンテンツだけの `ModsConfig.xml`、`devMode=false` の `Prefs.xml`）、画面を Linux は専用のサブリーパーとプロセスグループ、Windows は Job Object の中で動かします。Linux では `/proc` と pidfd を利用できるカーネルが必要です。別セッションの Worker も終了を確認してから `.gui-session` を消します。同じ結果フォルダの多重起動はロックで拒否し、稼働中セッションを消しません。利用者の本家の設定やセーブは読み書きしません（本家の `ModsConfig.xml` は読み込み順の取り込みに読むだけ）。
 
 タブ：
 

@@ -22,8 +22,10 @@ import time
 # By its own package, so tools.gui_host and tools.validation_host share one Blocked class.
 if __package__:
     from . import validation_host as vh
+    from .gui_session_lock import session_lock
 else:
     import validation_host as vh
+    from gui_session_lock import session_lock
 
 GUI_NAME = 'RimWorldValidationGui'
 GUI_SESSION = '.gui-session'
@@ -198,10 +200,16 @@ def gui_environment(run_dir, memory_mib):
     return env
 
 
-def run_gui(run_dir, memory_mib, environment, *, poll=0.5):
+def run_gui(run_dir, memory_mib, environment, *, poll=0.5, lock_fd=None):
     """Run the GUI until it closes. Its whole process tree stops with it, also on Ctrl+C or an error."""
     host = run_dir / 'host'
     command = gui_command(host, run_dir / 'gui-request.json')
+    status_file = run_dir / 'gui-tree-status.json'
+    if os.name != 'nt':
+        environment = dict(environment)
+        if lock_fd is not None:
+            environment['RWMT_GUI_LOCK_FD'] = str(lock_fd)
+        command = [sys.executable, str(REPO / 'tools' / 'gui_linux_supervisor.py'), str(status_file), str(lock_fd if lock_fd is not None else -1), *command]
     limit = memory_mib * 1024 * 1024
     windows = os.name == 'nt'
     job = vh._win_job().Job(limit) if windows else None
@@ -212,7 +220,8 @@ def run_gui(run_dir, memory_mib, environment, *, poll=0.5):
                 process = job.start(command, cwd=host, env=environment, stdout=out, stderr=err)
             else:
                 process = subprocess.Popen(command, cwd=host, env=environment, stdin=subprocess.DEVNULL, stdout=out,
-                                           stderr=err, start_new_session=True)
+                                           stderr=err, start_new_session=True,
+                                           pass_fds=(lock_fd,) if lock_fd is not None else ())
     except BaseException:
         if job:
             job.close()
@@ -222,9 +231,9 @@ def run_gui(run_dir, memory_mib, environment, *, poll=0.5):
         if windows:
             job.terminate()
         else:
-            os.killpg(process.pid, signal.SIGKILL)
+            os.kill(process.pid, signal.SIGTERM)
 
-    killed, peak = None, 0
+    killed, peak, code = None, 0, None
     try:
         while process.poll() is None:
             if windows:
@@ -251,10 +260,11 @@ def run_gui(run_dir, memory_mib, environment, *, poll=0.5):
                 job.terminate()
             job.close()
         else:
-            stray = vh._group_alive(process.pid)
-            if stray:
-                os.killpg(process.pid, signal.SIGKILL)
+            status = json.loads(status_file.read_text()) if status_file.is_file() else {}
+            stray = status.get('strayProcessesKilled', False)
+            code = status.get('exitCode', code)
     return {'exitCode': code, 'killedFor': killed, 'strayProcessesKilled': stray, 'peakBytes': peak,
+            'supervisionFailed': not windows and not status_file.is_file(),
             'seconds': round(time.monotonic() - started, 3)}
 
 
@@ -278,29 +288,33 @@ def launch(settings, *, gui_dir, worker_dir, script=None, keep_run_dir=False, al
     for item in skipped:
         log(f'skipped mod folder {item["path"]}: {item["reason"]}')
     mods_config = settings.get('modsConfig') or default_mods_config(snapshot)
-    run_dir = results / GUI_SESSION
-    if run_dir.exists():
-        # A session that crashed earlier: its links point into the snapshot, so remove them carefully.
-        error = vh.remove_run_host(run_dir / 'host')
-        if error:
-            raise vh.Blocked('guiSessionBusy', f'{run_dir} is in use or cannot be removed: {error}')
-        shutil.rmtree(run_dir)
-    info = build_gui_dir(run_dir, snapshot, Path(gui_dir), mods, results=results, python=sys.executable,
-                         controller=REPO / 'tools' / 'validation_host.py', worker_dir=Path(worker_dir).resolve(),
-                         baseline_cache=results / '.baseline-cache', mods_config=mods_config, script=script)
-    log(f'GUI: {len(mods)} mods from {", ".join(map(str, roots)) or "(no mod folder)"}; results in {results}')
-    memory = int(settings.get('memoryMiB') or DEFAULT_MEMORY_MIB)
-    process = run_gui(run_dir, memory, gui_environment(run_dir, memory))
-    process['linkModes'] = info['linkModes']
-    if keep_run_dir:
-        process['runDir'] = str(run_dir)
-    else:
-        error = vh.remove_run_host(run_dir / 'host')
-        if error:
-            process['cleanupError'] = error
+    with session_lock(results) as lock_fd:
+        run_dir = results / GUI_SESSION
+        if run_dir.exists():
+            # A session that crashed earlier: its links point into the snapshot, so remove them carefully.
+            error = vh.remove_run_host(run_dir / 'host')
+            if error:
+                raise vh.Blocked('guiSessionBusy', f'{run_dir} is in use or cannot be removed: {error}')
+            shutil.rmtree(run_dir)
+        info = build_gui_dir(run_dir, snapshot, Path(gui_dir), mods, results=results, python=sys.executable,
+                             controller=REPO / 'tools' / 'validation_host.py', worker_dir=Path(worker_dir).resolve(),
+                             baseline_cache=results / '.baseline-cache', mods_config=mods_config, script=script)
+        log(f'GUI: {len(mods)} mods from {", ".join(map(str, roots)) or "(no mod folder)"}; results in {results}')
+        memory = int(settings.get('memoryMiB') or DEFAULT_MEMORY_MIB)
+        process = run_gui(run_dir, memory, gui_environment(run_dir, memory), lock_fd=lock_fd if os.name != 'nt' else None)
+        process['linkModes'] = info['linkModes']
+        if process['supervisionFailed']:
+            process['runDir'] = str(run_dir)
+            process['cleanupError'] = 'GUI supervisor stopped unexpectedly; session retained until safe cleanup'
+        elif keep_run_dir:
+            process['runDir'] = str(run_dir)
         else:
-            shutil.rmtree(run_dir, ignore_errors=True)
-    return process
+            error = vh.remove_run_host(run_dir / 'host')
+            if error:
+                process['cleanupError'] = error
+            else:
+                shutil.rmtree(run_dir, ignore_errors=True)
+        return process
 
 
 def main(argv=None):

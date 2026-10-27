@@ -1,0 +1,72 @@
+name: DPA R2 private preflight (A)
+on:
+  push:
+    branches:
+      - feat/dpa-csv-exporter-private-validation-20261027
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dpa-a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      R2_BUCKET: rimworld-17
+      PRIVATE_ROOT: ${{ runner.temp }}/dpa-private
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Validate private connection prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          test -n "$R2_ENDPOINT"
+          aws --version
+      - name: Fetch only indexed Harmony and Dubs loader inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/codex_workflow.py fetch-mods \
+            --private-root "$PRIVATE_ROOT" \
+            --dependency Harmony \
+            --target "Dubs Performance Analyzer" \
+            --language English \
+            --scope validation > "$RUNNER_TEMP/dpa-fetch-result.json"
+          python3 - <<'PY'
+          import json,os
+          with open(os.environ['RUNNER_TEMP']+'/dpa-fetch-result.json',encoding='utf-8') as f: r=json.load(f)
+          print('R2 indexed dependencies resolved:',len(r['fetched']))
+          for m in r['fetched']:
+              print('Selected loader inputs:',m['name'],m['r2']['selected'])
+          PY
+      - name: Prepare official test-only host from private Linux runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/codex_workflow.py prepare --private-root "$PRIVATE_ROOT" > "$RUNNER_TEMP/dpa-prepare-result.json"
+          dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin --nologo
+      - name: Run existing A loader validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/codex_workflow.py validate --private-root "$PRIVATE_ROOT" --run-id dpa-a
+          echo "Scope: Dubs Performance Analyzer dependency loader (A) only; exporter DLL/GUI NOT checked."
+      - name: Always delete private files
+        if: always()
+        shell: bash
+        run: rm -rf -- "$PRIVATE_ROOT" "$RUNNER_TEMP/dpa-fetch-result.json" "$RUNNER_TEMP/dpa-prepare-result.json"

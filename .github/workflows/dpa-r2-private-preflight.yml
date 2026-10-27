@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - feat/dpa-csv-exporter-private-validation-20261027
+    paths:
+      - .github/workflows/dpa-r2-private-preflight.yml
   workflow_dispatch:
 
 permissions:
@@ -66,7 +68,54 @@ jobs:
           set -euo pipefail
           python3 tools/codex_workflow.py validate --private-root "$PRIVATE_ROOT" --run-id dpa-a
           echo "Scope: Dubs Performance Analyzer dependency loader (A) only; exporter DLL/GUI NOT checked."
+      - name: Summarize validation diagnostics without private paths
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          result_path = Path(os.environ["PRIVATE_ROOT"]) / "results/dpa-a/result.json"
+          if not result_path.is_file():
+              print("No validation result file: the job stopped before the A check completed.")
+              raise SystemExit(0)
+
+          report = json.loads(result_path.read_text(encoding="utf-8"))
+          print("A validation status:", report.get("status"))
+          print("Reason codes:", [reason.get("code") for reason in report.get("reasons", [])])
+          events = report.get("diagnostics", {}).get("newInTarget", [])
+          unexcused = [event for event in events
+                       if event.get("level") == "warning"
+                       and not any(key in event for key in ("allowedBy", "knownNoise", "supersededBy"))]
+          print("Unexcused new warnings:", len(unexcused))
+          for event in unexcused[:12]:
+              # Do not publish full game logs, private paths, credentials, or R2 URLs.
+              line = (event.get("message") or "").splitlines()[0]
+              for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "R2_ENDPOINT"):
+                  token = os.environ.get(key)
+                  if token:
+                      line = line.replace(token, "[REDACTED]")
+              line = re.sub(r"https?://\\S+", "[URL]", line)
+              line = re.sub(r"\\b[A-Za-z]:\\\\\\S+", "[PATH]", line)
+              line = re.sub(r"(?<!\\w)/(?:[^\\s/]+/)*[^\\s/:,;]+", "[PATH]", line)
+              line = re.sub(r"[\\x00-\\x1f\\x7f]", " ", line)[:200]
+              print("Warning:", json.dumps({
+                  "stage": str(event.get("stage", ""))[:40],
+                  "category": str(event.get("category", ""))[:80],
+                  "first_line_redacted": line,
+              }, ensure_ascii=True))
+          PY
       - name: Always delete private files
         if: always()
         shell: bash
-        run: rm -rf -- "$PRIVATE_ROOT" "$RUNNER_TEMP/dpa-fetch-result.json" "$RUNNER_TEMP/dpa-prepare-result.json"
+        run: |
+          set -euo pipefail
+          # The qualified test snapshot deliberately makes its directories read-only.
+          # Restore directory write permission before deleting the temporary copy.
+          if [ -d "$PRIVATE_ROOT" ]; then
+            find "$PRIVATE_ROOT" -type d -exec chmod u+w {} +
+          fi
+          rm -rf -- "$PRIVATE_ROOT" "$RUNNER_TEMP/dpa-fetch-result.json" "$RUNNER_TEMP/dpa-prepare-result.json"

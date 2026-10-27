@@ -712,14 +712,37 @@ def _official_package_id(game, folder):
     return _about_package_id(game / 'Data' / folder)
 
 
+def _clone_mod_file(reader, writer):
+    """Linux FICLONE makes a distinct inode; writes never alter the source."""
+    if not sys.platform.startswith('linux'):
+        return False
+    import fcntl
+    fcntl.ioctl(writer.fileno(), 0x40049409, reader.fileno())
+    return True
+
+
 def copy_verified_mod_file(source, destination, expected):
     digest = hashlib.sha256()
-    with open(source, 'rb') as reader, open(destination, 'wb') as writer:
-        while chunk := reader.read(1024 * 1024):
-            digest.update(chunk)
-            writer.write(chunk)
+    with open(source, 'rb') as reader, open(destination, 'w+b') as writer:
+        try:
+            cloned = _clone_mod_file(reader, writer)
+        except OSError:
+            cloned = False  # unsupported filesystem, cross-device, or per-file failure
+        if cloned:
+            writer.flush()
+            writer.seek(0)
+            while chunk := writer.read(1024 * 1024):
+                digest.update(chunk)
+        else:
+            reader.seek(0)
+            writer.seek(0)
+            writer.truncate()
+            while chunk := reader.read(1024 * 1024):
+                digest.update(chunk)
+                writer.write(chunk)
     if digest.hexdigest() != expected:
         raise Blocked('modChanged', f'{source} changed while it was being copied')
+    return 'reflink' if cloned else 'copy'
 
 
 def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expectations, run_id, nonce, deadline):
@@ -770,7 +793,8 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
         destination.mkdir()
         for rel in mod['fileHashes']:
             (destination / rel).parent.mkdir(parents=True, exist_ok=True)
-            copy_verified_mod_file(source / rel, destination / rel, mod['fileHashes'][rel])
+            mode = copy_verified_mod_file(source / rel, destination / rel, mod['fileHashes'][rel])
+            link_modes['mod.' + mode] = link_modes.get('mod.' + mode, 0) + 1
 
     for suffix in ('', '.dll', '.exe'):
         if (worker_dir / (WORKER_NAME + suffix)).is_file():
@@ -1894,3 +1918,4 @@ def main(argv=None):
 
 if __name__ == '__main__':
     sys.exit(main())
+

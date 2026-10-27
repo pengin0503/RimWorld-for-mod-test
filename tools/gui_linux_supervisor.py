@@ -30,6 +30,14 @@ def children_of(pid):
     return list(reversed(ordered))
 
 
+def is_zombie(pid):
+    """An exited process not reaped yet: it holds no resources and needs no signal."""
+    try:
+        return Path(f'/proc/{pid}/stat').read_bytes().rsplit(b')', 1)[1].split()[0] == b'Z'
+    except (OSError, IndexError):
+        return False
+
+
 def signal_owned(pid, owner):
     """A pidfd pins process identity; recheck ancestry before signalling it."""
     try:
@@ -87,7 +95,9 @@ def main(status_path, lock_fd, command):
         if not live:
             break
         for pid in live:
-            if signal_owned(pid, os.getpid()):
+            if is_zombie(pid):
+                pass  # reaped below; only a live process left behind is a stray
+            elif signal_owned(pid, os.getpid()):
                 killed.add(pid)
             if pid != child.pid:
                 try:

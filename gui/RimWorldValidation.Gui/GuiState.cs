@@ -41,6 +41,9 @@ internal static class GuiState
     public static ResultSummary? ShownResult;
     public static string? ShownError;
 
+    /// <summary>Counts OpenResult calls, so the result tab reloads also when the same run is opened again.</summary>
+    public static int ShownVersion;
+
     private static bool _initialized;
 
     public static GuiRequest Request => Boot.Request;
@@ -110,9 +113,22 @@ internal static class GuiState
         }
     }
 
+    // Where a MOD was in the load order, and whether it was under test, when it was taken out:
+    // putting it back returns it there, as a double click back and forth should change nothing.
+    private static readonly Dictionary<string, (int Index, bool Target)> RemovedFrom = [];
+
     public static void Activate(ModMetaData mod)
     {
-        if (!Active.Contains(mod))
+        if (Active.Contains(mod))
+        {
+            return;
+        }
+        if (RemovedFrom.Remove(mod.packageIdLowerCase, out var place))
+        {
+            Active.Insert(Math.Clamp(place.Index, 0, Active.Count), mod);
+            SetTarget(mod, place.Target);
+        }
+        else
         {
             Active.Add(mod);
         }
@@ -120,8 +136,22 @@ internal static class GuiState
 
     public static void Deactivate(ModMetaData mod)
     {
-        Active.Remove(mod);
+        int index = Active.IndexOf(mod);
+        if (index < 0)
+        {
+            return;
+        }
+        RemovedFrom[mod.packageIdLowerCase] = (index, IsTarget(mod));
+        Active.RemoveAt(index);
         Targets.Remove(mod.packageIdLowerCase);
+    }
+
+    /// <summary>Empties the load order; nothing taken out before is put back at its old place any more.</summary>
+    public static void ClearActive()
+    {
+        Active.Clear();
+        Targets.Clear();
+        RemovedFrom.Clear();
     }
 
     public static void Move(int from, int to)
@@ -160,6 +190,7 @@ internal static class GuiState
 
     public static void OpenResult(string runDir)
     {
+        ShownVersion++;
         ShownRunDir = runDir;
         ShownResult = null;
         ShownError = null;
@@ -214,8 +245,7 @@ internal static class GuiState
         }
         Expansions.Clear();
         Expansions.UnionWith(settings.Official.Where(f => !official[f].IsCoreMod));
-        Active.Clear();
-        Targets.Clear();
+        ClearActive();
         foreach (var (mod, target) in mods)
         {
             Activate(mod);
@@ -259,8 +289,7 @@ internal static class GuiState
         }
         var official = OfficialMods.ToDictionary(m => m.packageIdLowerCase, m => m);
         var missing = new List<string>();
-        Active.Clear();
-        Targets.Clear();
+        ClearActive();
         Expansions.Clear();
         foreach (string id in ids)
         {

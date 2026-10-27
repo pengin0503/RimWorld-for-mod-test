@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using RimWorldValidation.Gui.Model;
+using UnityEngine;
 using Verse;
 
 namespace RimWorldValidation.Gui;
@@ -14,8 +15,15 @@ namespace RimWorldValidation.Gui;
 internal static class RunController
 {
     private const int MaxOutputLines = 200;
+    /// <summary>The Controller's own output, kept in the run folder (also for a stopped run).</summary>
+    public const string ControllerLogFile = "controller.log";
+    // The Controller repeats each progress step on stderr for people at a terminal; the GUI reads progress.jsonl instead.
+    private const string ProgressPrefix = "[progress";
     private static Process? _process;
+    private static StreamWriter? _log;
     private static readonly ConcurrentQueue<string> Incoming = new();
+    private static ProgressLogReader? _progressReader;
+    private static float _progressReadAt;
 
     public static string? RunDir { get; private set; }
 
@@ -27,7 +35,11 @@ internal static class RunController
 
     public static string? StartError { get; private set; }
 
+    /// <summary>Output lines that are not progress steps (a Python error, the final summary).</summary>
     public static List<string> Output { get; } = [];
+
+    /// <summary>The run's progress log so far, in Japanese.</summary>
+    public static List<ProgressEntry> Progress { get; } = [];
 
     public static bool Running => _process is { HasExited: false };
 
@@ -43,6 +55,11 @@ internal static class RunController
         if (Busy)
         {
             StartError = "検証が実行中です。";
+            return false;
+        }
+        if (MissingDependenciesText() is string missing)
+        {
+            StartError = missing;
             return false;
         }
         GuiRequest request = GuiState.Request;
@@ -79,11 +96,15 @@ internal static class RunController
         // The Controller prints UTF-8 whatever the console's code page is.
         start.Environment["PYTHONIOENCODING"] = "utf-8";
         Output.Clear();
+        Progress.Clear();
         Incoming.Clear();
         ExitCode = null;
         Cancelled = false;
         RunDir = runDir;
         StartedAt = DateTime.Now;
+        _progressReader = new ProgressLogReader(Path.Combine(ResultDir, ProgressLog.FileName));
+        _progressReadAt = 0f;
+        _log = new StreamWriter(Path.Combine(runDir, ControllerLogFile), append: true) { AutoFlush = true };
         try
         {
             _process = Process.Start(start) ?? throw new InvalidOperationException("the process did not start");
@@ -92,18 +113,63 @@ internal static class RunController
         {
             StartError = $"検証を始められませんでした（{request.Python}）：{e.Message}";
             File.WriteAllText(Path.Combine(runDir, RunHistory.CancelledFile), StartError);
+            WriteLog(StartError);
+            CloseLog();
             _process = null;
             return false;
         }
-        _process.OutputDataReceived += (_, e) => { if (e.Data != null) Incoming.Enqueue(e.Data); };
-        _process.ErrorDataReceived += (_, e) => { if (e.Data != null) Incoming.Enqueue(e.Data); };
+        _process.OutputDataReceived += (_, e) => Received(e.Data);
+        _process.ErrorDataReceived += (_, e) => Received(e.Data);
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();
         Find.WindowStack.Add(new RunProgressWindow());
         return true;
     }
 
-    /// <summary>Called every frame by the progress window: collects output and notices the end.</summary>
+    // On the process's reader threads: every line goes to controller.log at once, so a crash or a stop keeps it.
+    private static void Received(string? line)
+    {
+        if (line == null)
+        {
+            return;
+        }
+        WriteLog(line);
+        if (!line.StartsWith(ProgressPrefix, StringComparison.Ordinal))
+        {
+            Incoming.Enqueue(line);
+        }
+    }
+
+    private static void WriteLog(string line)
+    {
+        lock (Incoming)
+        {
+            _log?.WriteLine(line);
+        }
+    }
+
+    private static void CloseLog()
+    {
+        lock (Incoming)
+        {
+            _log?.Dispose();
+            _log = null;
+        }
+    }
+
+    /// <summary>
+    /// Why the chosen MODs cannot be validated as they are, or null: a MOD whose prerequisite is not
+    /// loaded fails for that reason alone, which says nothing about the MOD under test.
+    /// </summary>
+    public static string? MissingDependenciesText()
+    {
+        var missing = GuiState.MissingDependencies();
+        return missing.Count == 0 ? null
+            : $"前提の MOD が使う一覧にないため、始められません（{missing.Count} 件。MOD タブの赤い欄）："
+              + string.Join("、", missing.Take(3).Select(m => $"{m.Mod.Name} → {m.Missing}")) + (missing.Count > 3 ? " ほか" : "");
+    }
+
+    /// <summary>Called every frame by the progress window: collects output and progress, and notices the end.</summary>
     public static void Update()
     {
         while (Incoming.TryDequeue(out string? line))
@@ -114,10 +180,17 @@ internal static class RunController
                 Output.RemoveAt(0);
             }
         }
+        if (_progressReader != null && Time.realtimeSinceStartup - _progressReadAt > 0.5f)
+        {
+            _progressReadAt = Time.realtimeSinceStartup;
+            Progress.AddRange(_progressReader.ReadNew());
+        }
         if (_process is { HasExited: true } && ExitCode == null)
         {
             _process.WaitForExit();  // drains the redirected output
             ExitCode = _process.ExitCode;
+            Progress.AddRange(_progressReader?.ReadNew() ?? []);
+            CloseLog();
         }
     }
 
@@ -132,6 +205,10 @@ internal static class RunController
         if (File.Exists(Path.Combine(result, "result.json")))
         {
             return "結果を書き終えました";
+        }
+        if (Progress.LastOrDefault(p => p.Kind != "event") is ProgressEntry last)
+        {
+            return last.Text;
         }
         if (Directory.Exists(Path.Combine(result, "target")))
         {
@@ -161,6 +238,7 @@ internal static class RunController
             // Ended on its own meanwhile.
         }
         File.WriteAllText(Path.Combine(RunDir!, RunHistory.CancelledFile), $"stopped from the GUI at {DateTime.Now:O}\n");
+        WriteLog($"[GUI] 中止しました（{DateTime.Now:O}）");
         RemoveRunHosts();
     }
 

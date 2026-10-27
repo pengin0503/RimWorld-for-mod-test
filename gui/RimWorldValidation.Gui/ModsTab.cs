@@ -8,7 +8,9 @@ namespace RimWorldValidation.Gui;
 /// <summary>
 /// Choose the MODs to load and mark the ones under test, laid out like the
 /// game's own MOD list: unused on the left, used in load order on the right
-/// (drag to reorder), details of the selected MOD beside them.
+/// (drag to reorder), details of the selected MOD beside them. A search box
+/// filters both lists; the marks for the MODs under test can be painted by
+/// dragging over them, as the game's checkboxes.
 /// </summary>
 internal sealed class ModsTab : IGuiTab
 {
@@ -17,6 +19,9 @@ internal sealed class ModsTab : IGuiTab
     private int _usedGroup = -1;
     private ModMetaData? _lastClicked;
     private float _lastClickTime;
+    private string _search = "";
+    // Painting the target marks: the value the first click set, applied to every mark the mouse passes over.
+    private bool _painting, _paintValue;
 
     public string Id => "mods";
 
@@ -39,8 +44,7 @@ internal sealed class ModsTab : IGuiTab
             : "本家の ModsConfig.xml が見つかっていません。");
         if (Widgets.ButtonText(new Rect(import.xMax + 8f, y, 160f, 30f), "すべて外す"))
         {
-            GuiState.Active.Clear();
-            GuiState.Targets.Clear();
+            GuiState.ClearActive();
             GuiState.ModsNotice = null;
         }
         if (GuiState.ModsNotice != null)
@@ -51,17 +55,26 @@ internal sealed class ModsTab : IGuiTab
         }
         y += 40f;
 
-        List<ModMetaData> unused = GuiState.CandidateMods.Where(m => !GuiState.Active.Contains(m))
+        if (_painting && (Event.current.rawType == EventType.MouseUp || !Input.GetMouseButton(0)))
+        {
+            _painting = false;
+        }
+        DrawSearch(new Rect(rect.x, y, ListWidth * 2f + Gap, 28f));
+        y += 34f;
+        bool filtering = !_search.NullOrEmpty();
+        List<ModMetaData> unused = GuiState.CandidateMods.Where(m => !GuiState.Active.Contains(m) && Matches(m))
             .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        List<ModMetaData> used = filtering ? GuiState.Active.Where(Matches).ToList() : GuiState.Active;
         Widgets.Label(new Rect(rect.x, y, ListWidth, 26f), $"使わない（{unused.Count}）");
-        Widgets.Label(new Rect(rect.x + ListWidth + Gap, y, ListWidth, 26f),
-            $"使う・読み込み順（{GuiState.Active.Count}、対象 {GuiState.Active.Count(GuiState.IsTarget)}）");
+        Widgets.Label(new Rect(rect.x + ListWidth + Gap, y, ListWidth, 26f), filtering
+            ? $"使う（{used.Count}／{GuiState.Active.Count}。検索中は並べ替えできません）"
+            : $"使う・読み込み順（{GuiState.Active.Count}、対象 {GuiState.Active.Count(GuiState.IsTarget)}）");
         y += 28f;
         float listHeight = rect.yMax - y - 40f;
         Rect unusedRect = new(rect.x, y, ListWidth, listHeight);
         Rect usedRect = new(rect.x + ListWidth + Gap, y, ListWidth, listHeight);
         DrawList(unusedRect, unused, ref _unusedScroll, used: false);
-        DrawList(usedRect, GuiState.Active, ref _usedScroll, used: true);
+        DrawList(usedRect, used, ref _usedScroll, used: true, reorderable: !filtering);
 
         ModMetaData? selected = GuiState.Selected;
         float buttonsY = rect.yMax - 32f;
@@ -76,6 +89,29 @@ internal sealed class ModsTab : IGuiTab
 
         float infoX = usedRect.xMax + Gap * 2f;
         DrawInfo(new Rect(infoX, rect.y + 78f, rect.xMax - infoX, rect.yMax - rect.y - 78f));
+    }
+
+    private void DrawSearch(Rect rect)
+    {
+        Text.Anchor = TextAnchor.MiddleLeft;
+        Widgets.Label(new Rect(rect.x, rect.y, 50f, rect.height), "検索");
+        Text.Anchor = TextAnchor.UpperLeft;
+        Rect field = new(rect.x + 50f, rect.y, rect.width - 50f - (_search.NullOrEmpty() ? 0f : 70f), rect.height);
+        _search = Widgets.TextField(field, _search);
+        TooltipHandler.TipRegion(field, "名前・packageId・作者の一部で、左右の一覧を絞り込みます。");
+        if (!_search.NullOrEmpty() && Widgets.ButtonText(new Rect(field.xMax + 6f, rect.y, 64f, rect.height), "消す"))
+        {
+            _search = "";
+        }
+    }
+
+    private bool Matches(ModMetaData mod)
+    {
+        string text = _search.Trim();
+        return text.Length == 0
+            || mod.Name.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0
+            || mod.PackageIdPlayerFacing.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0
+            || (mod.AuthorsString?.IndexOf(text, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
     }
 
     private static void DrawOfficial(Rect rect)
@@ -105,13 +141,13 @@ internal sealed class ModsTab : IGuiTab
         Text.Anchor = TextAnchor.UpperLeft;
     }
 
-    private void DrawList(Rect outRect, List<ModMetaData> mods, ref Vector2 scroll, bool used)
+    private void DrawList(Rect outRect, List<ModMetaData> mods, ref Vector2 scroll, bool used, bool reorderable = false)
     {
         Widgets.DrawMenuSection(outRect);
         Rect inner = outRect.ContractedBy(2f);
         Rect view = new(0f, 0f, inner.width - 16f, mods.Count * RowHeight);
         Widgets.BeginScrollView(inner, ref scroll, view);
-        if (used && Event.current.type == EventType.Repaint)
+        if (reorderable && Event.current.type == EventType.Repaint)
         {
             // As the game's MOD list: the group is made while painting, from the visible area.
             _usedGroup = ReorderableWidget.NewGroup(GuiState.Move, ReorderableDirection.Vertical, inner);
@@ -120,9 +156,11 @@ internal sealed class ModsTab : IGuiTab
         {
             ModMetaData mod = mods[i];
             Rect row = new(0f, i * RowHeight, view.width, RowHeight);
-            if (used)
+            if (reorderable)
             {
-                ReorderableWidget.Reorderable(_usedGroup, row, useRightButton: false, highlightDragged: true);
+                // The mark on the right is left out, so dragging over the marks paints them instead of moving the row.
+                Rect handle = new(row.x, row.y, row.width - CheckSize - 14f, row.height);
+                ReorderableWidget.Reorderable(_usedGroup, handle, useRightButton: false, highlightDragged: true);
             }
             if (row.yMax < scroll.y || row.y > scroll.y + inner.height)
             {
@@ -154,13 +192,20 @@ internal sealed class ModsTab : IGuiTab
         {
             Rect check = new(row.xMax - CheckSize - 6f, row.y + 1f, CheckSize, CheckSize);
             bool target = GuiState.IsTarget(mod);
-            // An event-based button: inside the reorderable list, Widgets.Checkbox's frame-based toggle
-            // missed real clicks (checked with xdotool), while buttons in the same rows work.
             Widgets.CheckboxDraw(check.x, check.y, target, disabled: false, CheckSize);
-            if (Widgets.ButtonInvisible(check))
+            if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && Mouse.IsOver(check))
             {
-                GuiState.SetTarget(mod, !target);
-                (target ? SoundDefOf.Checkbox_TurnedOff : SoundDefOf.Checkbox_TurnedOn).PlayOneShotOnCamera();
+                // Event-based: inside the reorderable list, Widgets.Checkbox's frame-based toggle
+                // missed real clicks (checked with xdotool). Pressing starts painting, as the game's
+                // paintable checkboxes: every mark the mouse passes over while held gets the same value.
+                _painting = true;
+                _paintValue = !target;
+                SetTarget(mod, _paintValue);
+                Event.current.Use();
+            }
+            else if (_painting && target != _paintValue && Mouse.IsOver(check))
+            {
+                SetTarget(mod, _paintValue);
             }
             TooltipHandler.TipRegion(check, "検証の対象。印のない MOD は前提として読み込むだけです。");
         }
@@ -185,13 +230,19 @@ internal sealed class ModsTab : IGuiTab
         }
     }
 
+    private static void SetTarget(ModMetaData mod, bool target)
+    {
+        GuiState.SetTarget(mod, target);
+        (target ? SoundDefOf.Checkbox_TurnedOn : SoundDefOf.Checkbox_TurnedOff).PlayOneShotOnCamera();
+    }
+
     private void DrawInfo(Rect rect)
     {
         IReadOnlyList<(ModMetaData Mod, string Missing)> missing = GuiState.MissingDependencies();
         float warningHeight = 0f;
         if (missing.Count > 0)
         {
-            string text = "前提の MOD が使う一覧にありません：\n" + string.Join("\n",
+            string text = "前提の MOD が使う一覧にありません。このままでは検証を始められません：\n" + string.Join("\n",
                 missing.Take(6).Select(m => $"・{m.Mod.Name} → {m.Missing}")) + (missing.Count > 6 ? $"\nほか {missing.Count - 6} 件" : "");
             warningHeight = Text.CalcHeight(text, rect.width - 16f) + 16f;
             Rect box = new(rect.x, rect.yMax - warningHeight, rect.width, warningHeight);

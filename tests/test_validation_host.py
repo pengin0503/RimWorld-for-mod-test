@@ -7,6 +7,7 @@ tests/integration/run_fixture_matrix.py.
 """
 from pathlib import Path
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -632,6 +633,39 @@ class RunTests(TempCase):
         self.assertEqual(vh.load_snapshot(self.fx.snapshot, full=True)['fileCount'],
                          json.loads((Path(self.fx.snapshot) / 'snapshot.json').read_text(encoding='utf-8'))['fileCount'])
 
+    def test_progress_log_records_each_step_while_it_runs(self):
+        self.fx.mod('dep')
+        self.fx.mod('bad')
+        stream = io.StringIO()
+        out = self.root / 'out-progress'
+        result = vh.run_validation(self.fx.snapshot, self.fx.request(['dep', '*bad']), out, self.fx.worker,
+                                   adapters=self.fx.adapters, platform=self.fx.platform, progress_stream=stream)
+        self.assertEqual(result['status'], 'failed')
+        entries = [json.loads(line) for line in (out / vh.PROGRESS_FILE).read_text(encoding='utf-8').splitlines()]
+        kinds = [e['kind'] for e in entries]
+        self.assertEqual(kinds[0], 'started')
+        self.assertEqual(kinds[-1], 'finished')
+        self.assertEqual(entries[-1]['status'], 'failed')
+        inspected = next(e for e in entries if e['kind'] == 'modsInspected')
+        self.assertEqual(inspected['count'], 2)
+        self.assertGreater(inspected['bytes'], 0)
+        for name in ('baseline', 'target'):
+            run = [e['kind'] for e in entries if e.get('run') == name]
+            self.assertEqual([k for k in run if k != 'event' and k != 'workerStage'],
+                             ['runPreparing', 'runPrepared', 'workerStarted', 'workerFinished'], name)
+        errors = [e for e in entries if e['kind'] == 'event' and e['run'] == 'target' and e['level'] == 'error']
+        self.assertTrue(any('RWMT_Missing' in e['message'] for e in errors), errors)
+        self.assertTrue(all(e['t'] >= 0 for e in entries))
+        # The command line shows the same steps as they happen.
+        self.assertEqual(len(stream.getvalue().splitlines()), len(entries))
+
+    def test_blocked_run_still_ends_its_progress_log(self):
+        result, out = self.fx.run(['missing-mod'])
+        self.assertEqual(result['status'], 'blocked')
+        entries = [json.loads(line) for line in (out / vh.PROGRESS_FILE).read_text(encoding='utf-8').splitlines()]
+        self.assertEqual([e['kind'] for e in entries], ['started', 'finished'])
+        self.assertEqual(entries[-1]['status'], 'blocked')
+
     def test_new_error_from_target_fails(self):
         self.fx.mod('bad')
         result, _ = self.fx.run(['*bad'])
@@ -887,6 +921,29 @@ class RunTests(TempCase):
         self.assertEqual(result['reasons'][0]['code'], 'outputNotEmpty')
         self.assertEqual((out / 'inputs' / 'evidence.txt').read_text(encoding='utf-8'), 'y')
         self.assertEqual((out / 'result.json').read_text(encoding='utf-8'), '{"old": true}')
+
+
+class EventTailTests(TempCase):
+    def test_engine_noise_is_counted_not_copied_and_partial_lines_wait(self):
+        events = self.root / 'events.jsonl'
+        entries = []
+        tail = vh.EventTail(events, 'target', lambda kind, **fields: entries.append({'kind': kind, **fields}))
+        tail.poll()  # no file yet
+        noise = {'level': 'warning', 'category': 'NativeAllocationRuntime', 'stage': 'checks',
+                 'message': 'Persistent allocation 0x7F00 (24 bytes, align 8) was not freed before shutdown.'}
+        lines = [{'level': 'info', 'stage': 'globalInit', 'message': 'hello'},
+                 {'level': 'error', 'stage': 'loadPlayData', 'message': 'Bad def\nstack'}, noise, noise]
+        text = ''.join(json.dumps(e) + '\n' for e in lines)
+        events.write_text(text + '{"level": "warn', encoding='utf-8')
+        tail.poll()
+        self.assertEqual([e['kind'] for e in entries], ['workerStage', 'workerStage', 'event', 'workerStage'])
+        self.assertEqual(entries[2]['message'], 'Bad def')
+        with open(events, 'a', encoding='utf-8') as stream:
+            stream.write('ing", "stage": "checks", "message": "late"}\n')
+        tail.poll()
+        self.assertEqual(entries[-1], {'kind': 'event', 'run': 'target', 'level': 'warning', 'stage': 'checks',
+                                       'message': 'late'})
+        self.assertEqual(tail.noise, 2)
 
 
 class MapRequestTests(TempCase):

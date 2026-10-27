@@ -386,3 +386,44 @@ public class GuiRequestTests
         Assert.Throws<InvalidDataException>(() => GuiRequest.Load(temp.Write("g.json", """{"recordType": "x", "schemaVersion": 1}""")));
     }
 }
+
+public class ProgressLogTests
+{
+    [Fact]
+    public void reader_returns_only_new_complete_lines()
+    {
+        using var temp = new TempDir();
+        string path = System.IO.Path.Combine(temp.Path, "progress.jsonl");
+        var reader = new ProgressLogReader(path);
+        Assert.Empty(reader.ReadNew());  // not written yet
+        File.WriteAllText(path, """
+            {"t": 0.0, "kind": "started"}
+            {"t": 1.5, "kind": "modsInspected", "count": 2, "targets": 1, "files": 9, "bytes": 1572864, "seconds": 1.2}
+            {"t": 2.0, "kind": "runPrep
+            """.Replace("\r", ""));
+        Assert.Equal(["started", "modsInspected"], reader.ReadNew().Select(e => e.Kind));
+        File.AppendAllText(path, "aring\", \"run\": \"target\", \"mods\": 2, \"bytes\": 10}\n");
+        var next = Assert.Single(reader.ReadNew());
+        Assert.Equal(("runPreparing", "target"), (next.Kind, next.Run));
+        Assert.Empty(reader.ReadNew());
+    }
+
+    [Fact]
+    public void entries_are_described_in_japanese()
+    {
+        ProgressEntry Describe(string json) => ProgressLog.Describe(JsonNode.Parse(json)!.AsObject());
+        Assert.Contains("MOD 2 件（対象 1）", Describe("""{"t": 1, "kind": "modsInspected", "count": 2, "targets": 1, "files": 9, "bytes": 1572864, "seconds": 1.2}""").Text);
+        Assert.Contains("1.5 MB", Describe("""{"t": 1, "kind": "modsInspected", "count": 2, "targets": 1, "files": 9, "bytes": 1572864, "seconds": 1.2}""").Text);
+        ProgressEntry error = Describe("""{"t": 5, "kind": "event", "run": "target", "level": "error", "stage": "loadPlayData", "message": "Could not resolve X"}""");
+        Assert.Equal("error", error.Level);
+        Assert.Contains("対象あり", error.Text);
+        Assert.Contains("Could not resolve X", error.Text);
+        Assert.Contains("不合格", Describe("""{"t": 9, "kind": "finished", "status": "failed", "executionStatus": "completed", "seconds": 9}""").Text);
+        Assert.Contains("時間切れ", Describe("""{"t": 9, "kind": "workerFinished", "run": "baseline", "exitCode": -9, "killedFor": "timeout", "seconds": 180}""").Text);
+        Assert.Contains("112 件", Describe("""{"t": 9, "kind": "workerFinished", "run": "target", "exitCode": 0, "killedFor": null, "seconds": 30, "noiseSkipped": 112}""").Text);
+        Assert.Equal("someNewKind", Describe("""{"t": 1, "kind": "someNewKind"}""").Text);
+    }
+
+    [Fact]
+    public void read_all_of_a_missing_log_is_empty() => Assert.Empty(ProgressLog.ReadAll("/does/not/exist/progress.jsonl"));
+}

@@ -86,3 +86,17 @@ for _ in range(100):
             result = gui_host.run_gui(run, 40, gui_host.gui_environment(run, 40), poll=.1)
             self.assertEqual(result['killedFor'], 'memoryLimit')
             self.assertNotEqual(result['exitCode'], 0)
+
+    def test_exited_processes_left_behind_are_not_reported_as_strays(self):
+        # A Worker whose Controller was stopped from the GUI exits too, but is reaped only by the
+        # supervisor: an exited (zombie) process is not a stray that had to be killed.
+        with tempfile.TemporaryDirectory() as t:
+            run = Path(t)
+            (run / 'host').mkdir()
+            (run / 'gui-request.json').write_text('{}')
+            exe = run / 'host' / gui_host.GUI_NAME
+            exe.write_text("#!/usr/bin/env python3\nimport os, time\nif os.fork() == 0:\n    os._exit(0)\ntime.sleep(1)\n")
+            exe.chmod(0o700)
+            result = gui_host.run_gui(run, 512, gui_host.gui_environment(run, 512), poll=.05)
+            self.assertEqual(result['exitCode'], 0)
+            self.assertFalse(result['strayProcessesKilled'])

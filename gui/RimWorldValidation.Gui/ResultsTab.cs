@@ -7,22 +7,29 @@ namespace RimWorldValidation.Gui;
 
 /// <summary>
 /// One result.json as the Controller wrote it: the verdict and its reasons on
-/// top, then new errors, the map, the crafting check and the checked scope.
-/// The GUI shows the verdict; it never changes it.
+/// top, then new errors, the map, the crafting check, the checked scope and
+/// the progress log. A run without a result (stopped, or ended early) shows
+/// why and its progress log. The GUI shows the verdict; it never changes it.
 /// </summary>
 internal sealed class ResultsTab : IGuiTab
 {
-    private enum Section { Errors, Map, Bill, Scope }
+    private enum Section { Errors, Map, Bill, Scope, Log }
 
     private static readonly (Section Section, string Label)[] Sections =
-        [(Section.Errors, "新しいエラー・警告"), (Section.Map, "マップ"), (Section.Bill, "製造指示の材料"), (Section.Scope, "確認した範囲")];
+    [
+        (Section.Errors, "新しいエラー・警告"), (Section.Map, "マップ"), (Section.Bill, "製造指示の材料"),
+        (Section.Scope, "確認した範囲"), (Section.Log, "経過ログ"),
+    ];
 
     private readonly Dictionary<string, Texture2D?> _images = [];
     private Section _section;
-    private Vector2 _reasonsScroll, _listScroll, _detailScroll, _scopeScroll, _billScroll;
+    private Vector2 _reasonsScroll, _listScroll, _detailScroll, _scopeScroll, _billScroll, _logScroll, _controllerScroll;
+    private IReadOnlyList<ProgressEntry> _log = [];
+    private string _controllerLog = "";
+    private int _logShown;
     private Diagnostic? _selected;
     private IReadOnlyList<Diagnostic> _diagnostics = [];
-    private string? _shownFor;
+    private int _shownVersion = -1;
     private string? _folderError;
 
     public string Id => "results";
@@ -36,13 +43,16 @@ internal sealed class ResultsTab : IGuiTab
             Widgets.Label(rect, "まだ結果を開いていません。検証を始めるか、履歴から選んでください。");
             return;
         }
-        if (_shownFor != GuiState.ShownRunDir)
+        if (_shownVersion != GuiState.ShownVersion)
         {
-            _shownFor = GuiState.ShownRunDir;
+            _shownVersion = GuiState.ShownVersion;
             _folderError = null;
             _selected = null;
             _section = Section.Errors;
-            _reasonsScroll = _listScroll = _detailScroll = _scopeScroll = _billScroll = Vector2.zero;
+            _reasonsScroll = _listScroll = _detailScroll = _scopeScroll = _billScroll = _logScroll = _controllerScroll = Vector2.zero;
+            _log = ProgressLog.ReadAll(Path.Combine(GuiState.ShownRunDir, RunHistory.ResultFolder, ProgressLog.FileName));
+            _logShown = 0;
+            _controllerLog = ReadTail(Path.Combine(GuiState.ShownRunDir, RunController.ControllerLogFile));
             // The ones that count toward the verdict first; the annotated ones (engine noise, allowed) after them.
             _diagnostics = GuiState.ShownResult?.NewDiagnostics.OrderBy(d => d.Counted ? 0 : 1).ToList() ?? [];
         }
@@ -50,7 +60,10 @@ internal sealed class ResultsTab : IGuiTab
         Rect body = new(rect.x, rect.y + 36f, rect.width, rect.height - 36f);
         if (GuiState.ShownResult is not ResultSummary result)
         {
-            Widgets.Label(body, GuiState.ShownError ?? "");
+            Widgets.Label(new Rect(body.x, body.y, body.width, 30f), GuiState.ShownError ?? "");
+            Rect logArea = new(body.x, body.y + 36f, body.width, body.height - 36f);
+            Widgets.Label(new Rect(logArea.x, logArea.y, logArea.width, 26f), "経過ログ（止まるまでに記録されたもの）");
+            DrawLog(new Rect(logArea.x, logArea.y + 28f, logArea.width, logArea.height - 28f));
             return;
         }
         float headerHeight = DrawVerdict(new Rect(body.x, body.y, body.width, body.height * 0.4f), result);
@@ -87,15 +100,51 @@ internal sealed class ResultsTab : IGuiTab
             case Section.Scope:
                 DrawScope(content, result);
                 break;
+            case Section.Log:
+                DrawLog(content);
+                break;
         }
     }
 
-    private static string Count(ResultSummary result, Section section) => section switch
+    /// <summary>The progress log and, below it, what the Controller printed besides its steps (a Python error, say).</summary>
+    private void DrawLog(Rect rect)
+    {
+        float controllerHeight = _controllerLog.Length == 0 ? 0f : Mathf.Min(160f, rect.height * 0.3f);
+        ProgressLogView.Draw(new Rect(rect.x, rect.y, rect.width, rect.height - controllerHeight), _log, ref _logScroll, ref _logShown,
+            "経過ログがありません（この検証は経過ログを書く前の版で実行したか、始まる前に止まりました）。");
+        if (controllerHeight > 0f)
+        {
+            Rect box = new(rect.x, rect.yMax - controllerHeight + 4f, rect.width, controllerHeight - 4f);
+            Widgets.DrawMenuSection(box);
+            Rect inner = box.ContractedBy(6f);
+            Rect view = new(0f, 0f, inner.width - 16f, Text.CalcHeight(_controllerLog, inner.width - 16f));
+            Widgets.BeginScrollView(inner, ref _controllerScroll, view);
+            Widgets.Label(view, _controllerLog);
+            Widgets.EndScrollView();
+        }
+    }
+
+    // controller.log without the progress lines (shown above) and only its end: a summary or an error is short.
+    private static string ReadTail(string path)
+    {
+        try
+        {
+            var lines = File.ReadAllLines(path).Where(l => !l.StartsWith("[progress", StringComparison.Ordinal)).ToList();
+            return string.Join("\n", lines.Skip(Math.Max(0, lines.Count - 60))).Trim();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return "";
+        }
+    }
+
+    private string Count(ResultSummary result, Section section) => section switch
     {
         Section.Errors => result.NewDiagnostics.Count == 0 ? "（0）"
             : $"（判定 {result.NewDiagnostics.Count(d => d.Counted)}／除外 {result.NewDiagnostics.Count(d => !d.Counted)}）",
         Section.Bill => $"（{result.BillChecks.Count}）",
         Section.Map => result.MapImage == null ? "（なし）" : "",
+        Section.Log => _log.Count == 0 ? "（なし）" : $"（{_log.Count}）",
         _ => "",
     };
 

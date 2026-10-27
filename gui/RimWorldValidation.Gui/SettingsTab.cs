@@ -114,14 +114,15 @@ internal sealed class SettingsTab : IGuiTab
         string summary = $"MOD {settings.Mods.Count} 件（対象 {targets}）、公式：{string.Join("・", settings.Official)}、言語：{LanguageLabel(settings.Language)}";
         Text.Anchor = TextAnchor.MiddleLeft;
         Widgets.Label(new Rect(rect.x, rect.y, rect.width - 260f, 28f), summary);
-        if (RunController.StartError != null)
+        string? blocked = RunController.MissingDependenciesText();
+        if ((blocked ?? RunController.StartError) is string problem)
         {
             GUI.color = ColorLibrary.RedReadable;
-            Widgets.Label(new Rect(rect.x, rect.y + 28f, rect.width - 260f, 30f), RunController.StartError);
+            Widgets.Label(new Rect(rect.x, rect.y + 28f, rect.width - 260f, 30f), problem.Truncate(rect.width - 260f));
             GUI.color = Color.white;
         }
         Text.Anchor = TextAnchor.UpperLeft;
-        if (Widgets.ButtonText(new Rect(rect.xMax - 240f, rect.y + 6f, 240f, 48f), "検証を始める", active: !RunController.Busy))
+        if (Widgets.ButtonText(new Rect(rect.xMax - 240f, rect.y + 6f, 240f, 48f), "検証を始める", active: !RunController.Busy && blocked == null))
         {
             RunController.Start(settings);
         }

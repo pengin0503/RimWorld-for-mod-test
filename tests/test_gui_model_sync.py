@@ -28,5 +28,15 @@ class ReasonCatalogSyncTests(unittest.TestCase):
             self.assertIn(f"'{code}'", source)
 
 
+class ProgressLogSyncTests(unittest.TestCase):
+    def test_gui_describes_every_progress_kind(self):
+        source = (ROOT / 'tools' / 'validation_host.py').read_text(encoding='utf-8')
+        kinds = set(re.findall(r"progress\('([a-zA-Z]+)'", source))
+        log = (ROOT / 'gui' / 'RimWorldValidation.Gui.Model' / 'ProgressLog.cs').read_text(encoding='utf-8')
+        described = set(re.findall(r'"([a-zA-Z]+)" =>', log))
+        self.assertGreater(len(kinds), 10)
+        self.assertEqual(sorted(kinds - described), [])
+
+
 if __name__ == '__main__':
     unittest.main()

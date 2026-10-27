@@ -35,6 +35,10 @@ except ImportError:  # imported as tools.validation_host
 TOOL_VERSION = '0.1.0'
 WORKER_NAME = 'RimWorldValidationWorker'
 MAP_OBSERVATION = 'map-observation.json'
+# Written into the output directory while a run goes, one JSON object per line, so a person
+# (or the GUI) can follow it and a stopped run keeps what happened until then.
+PROGRESS_FILE = 'progress.jsonl'
+MAX_PROGRESS_EVENTS = 500  # Worker errors and warnings copied into the progress log, per run
 EXIT_CODES = {'passed': 0, 'failed': 1, 'blocked': 2, 'incomplete': 3}
 LEVELS = ('A', 'B', 'C')
 OFFICIAL_ORDER = ('Core', 'Royalty', 'Ideology', 'Biotech', 'Anomaly', 'Odyssey')
@@ -849,7 +853,7 @@ def _gui_session_lock_fds():
     return (fd,)
 
 
-def supervise(run_dir, limits, environment, *, poll=0.2):
+def supervise(run_dir, limits, environment, *, poll=0.2, on_poll=None):
     """Start the Worker in its own process group (Windows: Job Object) and enforce time, memory and log limits."""
     host = run_dir / 'host'
     command = worker_command(host, run_dir / 'worker-request.json')
@@ -903,6 +907,8 @@ def supervise(run_dir, limits, environment, *, poll=0.2):
                 kill_all()
                 return_code = process.wait()
                 break
+            if on_poll is not None:
+                on_poll()
             time.sleep(poll)
     finally:
         # Also on Ctrl+C or any error: the Worker runs in its own session and would not see
@@ -1400,11 +1406,77 @@ def evaluate_map(request, mods, target_run, baseline_run, out_dir, *, qualified=
 # ---------------------------------------------------------------------------
 # run
 
+class Progress:
+    """Appends each step of a run to PROGRESS_FILE (flushed at once) and, if given, to a text stream."""
+
+    def __init__(self, stream=None):
+        self.path, self.stream, self.started = None, stream, time.monotonic()
+
+    def __call__(self, kind, **fields):
+        entry = {'t': round(time.monotonic() - self.started, 1), 'kind': kind, **fields}
+        if self.path is not None:
+            with open(self.path, 'a', encoding='utf-8') as log:
+                log.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        if self.stream is not None:
+            print(f'[progress {entry["t"]:7.1f}s] {_progress_text(entry)}', file=self.stream, flush=True)
+
+
+def _progress_text(entry):
+    fields = ' '.join(f'{k}={v}' for k, v in entry.items() if k not in ('t', 'kind', 'run', 'message'))
+    run = f'{entry["run"]}: ' if 'run' in entry else ''
+    message = f' {entry["message"]}' if 'message' in entry else ''
+    return f'{run}{entry["kind"]} {fields}{message}'.rstrip()
+
+
+class EventTail:
+    """Follows a Worker's events.jsonl while it runs: stage changes, and errors and warnings up to a cap.
+
+    Known engine noise (KNOWN_NOISE) is only counted: it never counts toward the verdict and would bury the rest."""
+
+    def __init__(self, path, run, progress):
+        self.path, self.run, self.progress = path, run, progress
+        self.offset, self.pending, self.stage, self.copied, self.capped, self.noise = 0, b'', None, 0, False, 0
+
+    def poll(self):
+        try:
+            with open(self.path, 'rb') as events:
+                events.seek(self.offset)
+                data = events.read()
+        except OSError:
+            return  # not written yet
+        self.offset += len(data)
+        lines = (self.pending + data).split(b'\n')
+        self.pending = lines.pop()  # an incomplete last line is read again next time
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if event.get('stage') and event['stage'] != self.stage:
+                self.stage = event['stage']
+                self.progress('workerStage', run=self.run, stage=self.stage)
+            if event.get('level') not in ('error', 'warning'):
+                continue
+            if known_noise(event):
+                self.noise += 1
+                continue
+            if self.copied >= MAX_PROGRESS_EVENTS:
+                if not self.capped:
+                    self.capped = True
+                    self.progress('eventsCapped', run=self.run, limit=MAX_PROGRESS_EVENTS)
+                continue
+            self.copied += 1
+            self.progress('event', run=self.run, level=event['level'], stage=event.get('stage'),
+                          message=_first_line(event)[:500])
+
+
 def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='waylith', baseline_cache=None,
-                   allow_unknown_build=False, verify_full=False, keep_run_dirs=False, adapters=None, platform=None):
+                   allow_unknown_build=False, verify_full=False, keep_run_dirs=False, adapters=None, platform=None,
+                   progress_stream=None):
     started_wall = time.time()
     started = time.monotonic()
     out_dir = Path(out_dir).resolve()
+    progress = Progress(progress_stream)
     timings = {}
     result = {
         'recordType': 'modValidationResult', 'schemaVersion': 1,
@@ -1419,6 +1491,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         return _finish(result, None, started, timings)
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
+        progress.path = out_dir / PROGRESS_FILE
+        progress('started', request=str(Path(request_path).resolve()))
         try:
             request = load_request(request_path)
         except (OSError, RequestError) as error:
@@ -1464,8 +1538,12 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         result['qualificationEvidence'] = qualification['evidence'] if qualification and fidelity == 'qualified' else None
 
         mark = time.monotonic()
+        progress('modsInspecting', count=len(request['mods']))
         mods = inspect_mods(request, out_dir / 'inputs')
         timings['inspectModsSeconds'] = round(time.monotonic() - mark, 3)
+        progress('modsInspected', count=len(mods), targets=sum(1 for m in mods if m['target']),
+                 bytes=sum(m['bytes'] for m in mods), files=sum(m['files'] for m in mods),
+                 seconds=timings['inspectModsSeconds'])
         result['mods'] = [{k: v for k, v in m.items() if k != 'fileHashes'} for m in mods]
         if 'B' in request['levels'] and request['expectations']['harmonyPatches'] and not any(m['harmonyAssemblies'] for m in mods):
             raise Blocked('harmonyMissing', 'level B expects Harmony patches but no mod in the list ships 0Harmony.dll '
@@ -1473,7 +1551,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
     except Blocked as blocked:
         result.update({'status': 'blocked', 'executionStatus': 'notStarted',
                        'reasons': [{'code': blocked.code, 'detail': blocked.detail}]})
-        return _finish(result, out_dir, started, timings, keep_run_dirs)
+        return _finish(result, out_dir, started, timings, keep_run_dirs, progress)
 
     limits = request['limits']
     timeout = limits['timeoutSeconds']
@@ -1497,14 +1575,22 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         run_id = f'{result["runId"]}-{name}'
         nonce = secrets.token_hex(16)
         mark = time.monotonic()
+        progress('runPreparing', run=name, mods=len(run_mods), bytes=sum(m['bytes'] for m in run_mods))
         order, link_modes = build_run_dir(run_dir, snapshot, request, run_mods, worker_dir, runtime,
                                           expectations=run_expectations, run_id=run_id, nonce=nonce,
                                           deadline=deadline)
         prepared = time.monotonic() - mark
+        progress('runPrepared', run=name, seconds=round(prepared, 1))
         wall = time.time()
-        process = supervise(run_dir, limits, worker_environment(run_dir, limits, runtime))
+        tail = EventTail(run_dir / 'events.jsonl', name, progress)
+        progress('workerStarted', run=name, timeoutSeconds=timeout)
+        process = supervise(run_dir, limits, worker_environment(run_dir, limits, runtime), on_poll=tail.poll)
+        tail.poll()
         process['linkModes'] = link_modes
         worker, problem, events = read_worker_output(run_dir, run_id, nonce, wall, limits['diagnostics'] + 10)
+        progress('workerFinished', run=name, exitCode=process.get('exitCode'), killedFor=process.get('killedFor'),
+                 seconds=round(time.time() - wall, 1), executionStatus=(worker or {}).get('executionStatus'),
+                 problem=problem, noiseSkipped=tail.noise)
         if not keep_run_dirs:
             cleanup_error = remove_run_host(run_dir / 'host')
             if cleanup_error:
@@ -1530,6 +1616,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
     if cache_file and cache_file.is_file():
         baseline_run = json.loads(cache_file.read_text(encoding='utf-8'))
         baseline_run['cached'] = True
+        progress('baselineCached', run='baseline')
         map_completed = ((baseline_run.get('worker') or {}).get('map') or {}).get('status') == 'completed'
         if request['map'] and map_completed and not Path(baseline_run.get('mapObservationPath') or map_cache_file).is_file():
             baseline_run = None  # the cached map observation is gone: run the baseline again
@@ -1593,7 +1680,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         result['map'] = map_evaluation['section']
     timings['baselinePrepareSeconds'] = baseline_run['prepareSeconds']
     timings['targetPrepareSeconds'] = target_run['prepareSeconds']
-    return _finish(result, out_dir, started, timings, keep_run_dirs)
+    return _finish(result, out_dir, started, timings, keep_run_dirs, progress)
 
 
 def _scope(request, stages):
@@ -1620,7 +1707,7 @@ def _scope(request, stages):
     return {'checked': checked, 'notChecked': not_checked}
 
 
-def _finish(result, out_dir, started, timings, keep_inputs=False):
+def _finish(result, out_dir, started, timings, keep_inputs=False, progress=None):
     """Record timings and write result.json; out_dir None means the result is only returned."""
     timings['totalSeconds'] = round(time.monotonic() - started, 3)
     result['timings'] = timings
@@ -1630,6 +1717,9 @@ def _finish(result, out_dir, started, timings, keep_inputs=False):
             shutil.rmtree(out_dir / 'inputs', ignore_errors=True)
         out_dir.mkdir(parents=True, exist_ok=True)
         _write_json(out_dir / 'result.json', result)
+    if progress is not None:
+        progress('finished', status=result['status'], executionStatus=result['executionStatus'],
+                 seconds=timings['totalSeconds'])
     return result
 
 
@@ -1690,7 +1780,8 @@ def main(argv=None):
         return 0
     result = run_validation(args.snapshot, args.request, args.out, args.worker, runtime=args.runtime,
                             baseline_cache=args.baseline_cache, allow_unknown_build=args.allow_unknown_build,
-                            verify_full=args.verify_full, keep_run_dirs=args.keep_run_dirs)
+                            verify_full=args.verify_full, keep_run_dirs=args.keep_run_dirs,
+                            progress_stream=sys.stderr)
     print(_summary(result))
     if any(r['code'] == 'outputNotEmpty' for r in result.get('reasons', [])):
         print('result: not written (the output directory was not empty)')

@@ -110,6 +110,8 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 
 ## 5. 画面（W2）
 
+> **2026-10-27：Windows 版（W1 の Worker 実行・W2 の画面）の作業はユーザーの決定で中止・凍結しました。** 目標は AI がクラウドの Linux で使う検証ホストの完成です。Windows のコードには新しい機能を足さず、既存のテストと CI が通る状態だけを保ちます。W2 の実機確認は 1 回目のみ（起動・MOD 一覧の操作は動作、検証の完了は未確認）。
+
 ゲーム自身の描画と UI 部品で作った検証用の画面です（[設計](superpowers/specs/2026-10-26-windows-gui-w2-design.md)）。MOD と検証内容を選び、上の `run` を実行し、`result.json` を表示します。画面は判定しません。メインメニュー・ゲーム開始・開発者モード・Steam はなく、遊ぶことはできません。
 
 確認済みなのはクラウドの Linux（ソフトウェア描画）だけです。Windows の実機ではまだ動かしていません。

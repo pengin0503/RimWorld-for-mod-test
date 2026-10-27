@@ -1341,8 +1341,11 @@ def evaluate_event_choice(request, checks):
              and isinstance(actual, dict) and actual.get('context') == 'freshGeneratedMap'
              and actual.get('rendered') is False
              and all(type(actual.get(k)) is bool for k in ('eventOccurred', 'choicePresented', 'choiceExecuted'))
-             and isinstance(actual.get('rewardThing'), str) and type(actual.get('rewardCount')) is int
-             and actual.get('rewardCount') >= 0)
+             and actual.get('rewardSource') == 'mapItemStackDelta'
+             and actual.get('mapDeltaUnambiguous') is True
+             and (actual.get('rewardThing') is None or isinstance(actual.get('rewardThing'), str))
+             and type(actual.get('rewardCount')) is int and actual.get('rewardCount') >= 0
+             and (actual.get('rewardThing') is None) == (actual.get('rewardCount') == 0))
     if not valid or not all(actual[k] for k in ('eventOccurred', 'choicePresented', 'choiceExecuted')):
         incomplete.append({'code': 'eventChoiceObservationIncomplete', 'detail': 'event or choice execution evidence is missing'})
         return stage, incomplete, []

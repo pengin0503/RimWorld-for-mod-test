@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The GUI's game-independent part: reading results, describing reason codes,
+    building requests and listing past runs. It references no game file, so
+    public CI builds and tests it; the GUI itself (RimWorldValidation.Gui)
+    references the game and is built only where the game is installed.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>RimWorldValidation.Gui.Model</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+</Project>

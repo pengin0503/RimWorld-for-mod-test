@@ -11,6 +11,8 @@
 
 **ワークフロー:** 非公開索引を探す → 正しいID/依存MODを決める → R2の当該prefixの必要ファイルを段階取得 → 必要時のみ既存検証ホストで実処理を確認 → 修正・再検証・PR。取得元をGitHub、一般Webや別の未検証ファイルへ黙って置き換えない。既存依存MODとゲームバージョン・ロード順を確認する。
 
+> **2026-10-27：Windows 版（W1 の Worker 実行・W2 の画面）の作業はユーザーの決定で中止・凍結しました。** 目標は AI がクラウドの Linux で使う検証ホストの完成です。Windows のコードには新しい機能を足さず、既存のテストと CI が通る状態だけを保ちます。W2 の実機確認は 1 回目のみ（起動・MOD 一覧の操作は動作、検証の完了は未確認）。
+
 ## 最初に参照
 
 1. README.md と docs/superpowers/specs/2026-10-25-test-only-host-design.md（現行方針）
@@ -21,7 +23,7 @@
 ## 実装範囲と禁止事項
 
 - 適格化済み：Linux x86_64 + RimWorld **1.7.4985 rev1269** + 同梱 WaylithClr の A（実ローダー）、B（DLL/Harmony）、マップ生成。資格は OS・ゲームビルド・CLR・Adapter の組に限定。
-- C はユーザー承認済みの `bill-ingredient-options.v1` のみ実装（Linux 非描画・experimental、適格化未完了）。新規 Bill の材料表示候補/許可状態だけを扱い、実画面や MOD 全体の合格と呼ばない。D（tick）、イベント/クエストの C ケース、Windows の実ゲーム処理・GUI は未実装。ユーザーの明示的な指示なしに範囲を広げない。
+- C はユーザー承認済みの `bill-ingredient-options.v1` のみ実装（Linux 非描画・experimental、適格化未完了）。新規 Bill の材料表示候補/許可状態だけを扱い、実画面や MOD 全体の合格と呼ばない。D（tick）、イベント/クエストの C ケース、Windows の描画（W3）は未実装。W2 の画面（`gui/RimWorldValidation.Gui`）はゲームの DLL を参照するので公開 CI ではビルドしない（CI はゲームを参照しない `gui/RimWorldValidation.Gui.Model` だけをテスト）。画面は判定せず、遊べる状態（メインメニュー・Game の作成・devMode・Steam）にしない。ユーザーの明示的な指示なしに範囲を広げない。
 - passed は依頼された検証範囲だけの合格。failed、blocked、incomplete を区別。静的検査や単なるロード成功を実ゲームの全機能検証と呼ばない。
 - ゲームとして遊べる機能・無期限 tick を作らない。公式 -headless -quicktest は適格化の**開発用比較**に限り使用してよい。
 

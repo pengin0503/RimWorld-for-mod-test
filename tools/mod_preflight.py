@@ -294,6 +294,8 @@ def check_profile(profile):
 
 PLAY_REMOVED = ('the play command was removed: this is a test-only tool and never starts the game. '
                 'Start RimWorld yourself; for real game-code validation use tools/validation_host.py run.')
+DESKTOP_REMOVED = ('the desktop command was removed: the Windows screen is now the validation GUI drawn by the game. '
+                   'Run Start-Windows.cmd or tools/gui_host.py launch.')
 
 
 def write_json(path, data, profile, profile_path=None):
@@ -330,23 +332,17 @@ def main(argv=None):
     # Removed: this tool is test-only and never starts the game. Kept as a command
     # only so old scripts get an explicit migration error instead of a usage error.
     commands.add_parser('play', help='removed; this tool never starts the game')
-    desktop = commands.add_parser('desktop', help='open local desktop interface')
-    desktop.add_argument('--profile', type=Path)
+    commands.add_parser('desktop', help='removed; use tools/gui_host.py launch')
     args, unknown = parser.parse_known_args(argv)
-    if unknown and args.command != 'play':
+    if unknown and args.command not in ('play', 'desktop'):
         parser.error('unrecognized arguments: ' + ' '.join(unknown))
-    if args.command == 'play':
+    if args.command in ('play', 'desktop'):
         print(json.dumps({'recordType': 'modPreflight', 'schemaVersion': 1, 'auditStatus': 'failed',
-                          'gameVerification': 'notRun', 'error': PLAY_REMOVED}, ensure_ascii=True, indent=2))
+                          'gameVerification': 'notRun',
+                          'error': PLAY_REMOVED if args.command == 'play' else DESKTOP_REMOVED},
+                         ensure_ascii=True, indent=2))
         return 1
     try:
-        if args.command == 'desktop':
-            try:
-                from .preflight_gui import run_gui
-            except ImportError:
-                from preflight_gui import run_gui
-            run_gui(args.profile)
-            return 0
         profile = load_profile(args.profile)
         if args.command == 'check':
             report = check_profile(profile)

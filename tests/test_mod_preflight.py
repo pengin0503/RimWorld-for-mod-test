@@ -246,26 +246,11 @@ class PreflightTests(unittest.TestCase):
             write_json(link/'input.xml', {'x':1}, self.profile)
         self.assertEqual(data.read_text(), '<original/>')
 
-    def test_desktop_result_distinguishes_preflight_from_game_verification(self):
-        from tools.preflight_gui import format_result
-        text = format_result(check_profile(self.profile))
-        self.assertIn('事前検査：通過', text)
-        self.assertIn('ゲーム実行検証：未実施', text)
-
-    @unittest.skipUnless(sys.platform == 'win32', 'native Windows Tk window smoke test')
-    def test_windows_desktop_window_can_be_created(self):
-        from tools.preflight_gui import create_window
-        window = create_window()
-        try:
-            window.update_idletasks()
-            self.assertTrue(window.winfo_children())
-        finally:
-            window.destroy()
-
-    def test_desktop_has_no_game_launch_path(self):
-        source = Path('tools/preflight_gui.py').read_text(encoding='utf-8')
-        for forbidden in ('subprocess', 'launch', 'Popen', 'startfile', 'ゲームを起動する'):
-            self.assertNotIn(forbidden, source)
+    def test_removed_desktop_command_points_to_the_validation_gui(self):
+        out = self.cli('desktop', '--profile', self.save_profile())
+        self.assertEqual(out.returncode, 1)
+        self.assertIn('gui_host.py launch', json.loads(out.stdout)['error'])
+        self.assertFalse((Path(__file__).resolve().parents[1] / 'tools' / 'preflight_gui.py').exists())
 
 
 if __name__ == '__main__':

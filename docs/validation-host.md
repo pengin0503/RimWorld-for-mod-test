@@ -84,7 +84,9 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
   --baseline-cache /private/results/baseline-cache
 ```
 
-終了コード：0 passed、1 failed、2 blocked、3 incomplete。`--out` に `result.json` と、ベースライン・対象それぞれの `events.jsonl`、Worker の結果、ゲームのログが残ります。これらには私有パスが含まれるため、公開する場合は内容を確認してください。
+終了コード：0 passed、1 failed、2 blocked、3 incomplete。`--out` に `result.json` と、ベースライン・対象それぞれの `events.jsonl`、Worker の結果、ゲームのログが残ります。
+
+実行中の経過は `--out/progress.jsonl` に 1 行 1 件の JSON で追記し、同じ内容を標準エラーに `[progress …]` の行で出します。記録するのは、MOD の確認（件数・容量・秒数）、ベースラインと対象それぞれの準備（MOD のコピー）、ゲームの処理の開始・段階・終了、ゲームが出したエラーと警告（1 行目。1 回の実行につき 500 件まで。既知のエンジンのメッセージは件数だけ）、最後の判定です。途中で止めた実行にも、止まるまでの経過が残ります。これらには私有パスが含まれるため、公開する場合は内容を確認してください。
 
 | オプション | 用途 |
 |---|---|
@@ -105,6 +107,39 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 - `map`：マップ生成の結果（画像のパス、凡例、対象 MOD が置いた物と位置、`mapThings` の結果）。
 
 `passed` は「要求した範囲で、対応環境の実物の処理で問題が見つからなかった」という意味です。プレイ中の挙動や Windows 固有の動作は保証しません。
+
+## 5. 画面（W2）
+
+> **2026-10-27：Windows 版（W1 の Worker 実行・W2 の画面）の作業はユーザーの決定で中止・凍結しました。** 目標は AI がクラウドの Linux で使う検証ホストの完成です。Windows のコードには新しい機能を足さず、既存のテストと CI が通る状態だけを保ちます。W2 の実機確認は 1 回目のみ（起動・MOD 一覧の操作は動作、検証の完了は未確認）。
+
+ゲーム自身の描画と UI 部品で作った検証用の画面です（[設計](superpowers/specs/2026-10-26-windows-gui-w2-design.md)）。MOD と検証内容を選び、上の `run` を実行し、`result.json` を表示します。画面は判定しません。メインメニュー・ゲーム開始・開発者モード・Steam はなく、遊ぶことはできません。
+
+確認済みなのはクラウドの Linux（ソフトウェア描画）だけです。Windows の実機ではまだ動かしていません。
+
+画面はゲームの DLL を参照してビルドするので、ゲームのある PC でだけビルドします（公開 CI ではビルドしません）。`GameDir` にはスナップショットの `game` フォルダを渡します。
+
+```bash
+dotnet build gui/RimWorldValidation.Gui -c Release -o gui/bin -p:GameDir=/private/rw-snapshot/game
+python3 tools/gui_host.py setup --snapshot /private/rw-snapshot --results /private/gui-results
+python3 tools/gui_host.py launch
+```
+
+`setup` は設定を `%LOCALAPPDATA%\rwmt\gui-settings.json`（Linux は `~/.config/rwmt/gui-settings.json`）に保存します。MOD の候補は、指定がなければゲームの `Mods` と Steam の Workshop フォルダ（`steamapps/workshop/content/294100`）です。同じ packageId が複数あれば先に見つかったほうを使い、残りは理由付きで飛ばします。Windows では `Start-Windows.cmd` が `launch` を実行します。
+
+`launch` は結果フォルダの中に `.gui-session` を作り（スナップショットへのリンク、公式コンテンツだけの `ModsConfig.xml`、`devMode=false` の `Prefs.xml`）、画面を Linux は専用のサブリーパーとプロセスグループ、Windows は Job Object の中で動かします。Linux では `/proc` と pidfd を利用できるカーネルが必要です。別セッションの Worker も終了を確認してから `.gui-session` を消します。同じ結果フォルダの多重起動はロックで拒否し、稼働中セッションを消しません。利用者の本家の設定やセーブは読み書きしません（本家の `ModsConfig.xml` は読み込み順の取り込みに読むだけ）。
+
+タブ：
+
+- **MOD**：上で公式コンテンツ（Core と DLC）を選び、左の「使わない」一覧から右の「使う」一覧へ MOD を移します（ダブルクリックか矢印のボタン）。使う一覧から外した MOD を戻すと、外す前の位置と対象の印に戻ります。右の一覧は読み込み順で、ドラッグで並べ替えます。行の右の印が検証の対象で、押したままなぞると続けて切り替わります（本家のチェックボックスと同じ）。「検索」は名前・packageId・作者の一部で左右の一覧を絞り込みます（絞り込み中は並べ替えできません）。選んだ MOD の画像・説明・packageId を出し、使う一覧に足りない前提 MOD があれば警告します。前提 MOD が足りないままでは検証を始められません。「本家の読み込み順を取り込む」は本家の `ModsConfig.xml` を読むだけで、書き換えません。取り込むと本家で有効な MOD がすべて入り、検証ではそのすべてを 2 回（比較用と対象あり）読み込むので、MOD が多いほど時間がかかります。
+- **検証内容**：A（常に）、B、言語、マップ（種とバイオーム）、製造指示の材料（C・実験。レシピと材料の defName は「候補」から公式の Def を選べます）、追加の期待値（JSON）。「検証を始める」で結果フォルダに `<日時>/request.json` を書き、`run` を起動します。実行中の窓には、経過時間と、`progress.jsonl` の経過（準備・ゲームの段階・エラーは赤、警告は黄）を順に出します。「中止」で検証のプロセスを全部止めて、その実行を履歴に「中止」として残します。Controller の出力は `<日時>/controller.log` に残ります。
+- **結果**：判定と理由、実行の情報、実験扱いの注意。下の切り替えで、新しいエラー・警告（判定に入るものが上、判定から外したもの（既知のエンジンのメッセージ・要求の allow）は灰色で下。選ぶと全文と外した理由）、マップ（対象ありと比較用を並べる）、製造指示の材料（期待と実際）、確認した範囲・確認していない範囲、経過ログ。「結果フォルダを開く」でエクスプローラーを開きます。結果のない実行（中止・途中で終了）を開くと、その理由と、止まるまでの経過ログを出します。
+- **履歴**：結果フォルダの実行の一覧（新しい順）。選ぶと結果タブで開きます。
+
+Windows のタスクマネージャーの「プロセス」タブでは、画面から始めた検証のプロセス（Python・`RimWorldValidationWorker`）も「RimWorldValidationGui」の下にまとめて表示されます。個別の名前は「詳細」タブで見られます。
+
+画面の終了コード：0 閉じた、2 起動方法か `gui-request.json` が不正、3 遊べる状態になりかけた（Game の作成やシーン切り替え。その場で終了）、4 このゲームのビルドに画面が使う非公開メンバーがない、5 試験用の手順（`--script`）が失敗。
+
+`launch --script <JSON>` は開発者の画面確認用です。JSON は操作の配列で、使える操作は `{"tab": "mods"|"settings"|"results"|"history"}`、`{"apply": <検証内容>}`、`{"importModsConfig": true}`、`{"selectMod": "<packageId>"}`、`{"openResult": "<実行のフォルダ>"}`、`{"run": true}`（始めるだけ）、`{"waitRun": true}`、`{"waitSeconds": <秒>}`、`{"screenshot": "<PNG のパス>"}`、`{"quit": true}` です。画面写真にはゲームの素材が写るので、公開リポジトリに入れないでください。
 
 ## AI に任せる流れ（iPad から）
 

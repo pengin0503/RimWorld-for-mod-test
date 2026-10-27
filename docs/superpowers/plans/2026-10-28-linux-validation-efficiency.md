@@ -18,3 +18,8 @@ Review focus: fallback safety, MOD write isolation, credential removal before ex
 - Existing PR22 comment records successful real-map Steel +10 observation; the earlier summary missed that comment.
 - New copy tests failed before implementation (missing clone helper and missing mode return), then all 3 passed.
 - Local filesystem does not support reflink: 128 MiB copies fell back successfully. No local speedup claimed.
+- One independent branch reviewer found three important defects in the initial regression harness/metrics; all corrected. Loader-order and worker-failure guards have RED→GREEN tests; the original link-count regression is green again.
+- Initial private preparation failed with missingDependencies. Investigation found optional loadAfter/loadBefore entries were being recursively selected as required MODs. Required dependency closure now precedes optional ordering; selected-MOD cycles still block. Synthetic regression reproduced the missing optional-MOD failure and is green after the fix.
+- Preparation now resolves MOD inputs before downloading the runtime, and publishes only stage/type/reason code on failure. The missingDependencies failure now stops in seconds without a game download.
+- Latest public suite includes 261 tests. The private real-game matrix is kept distinct from public checks and from independent C qualification.
+- The earlier local full-suite run had environment/process-monitor failures (documented in PR23) plus the corrected link-count failure; the Linux/Windows CI matrix passes those tests. No claim that this sandbox's local full suite passed.

@@ -41,6 +41,8 @@ public static class ReasonCatalog
         ["newTranslationErrors"] = "対象の MOD を入れたときだけ、新しい翻訳のエラーが出ました。",
         ["mapExpectationMismatch"] = "マップに期待した物の数が合いませんでした。",
         ["mapGenerationFailed"] = "マップの生成に失敗しました。",
+        ["eventChoiceMismatch"] = "イベントの選択後の報酬が期待と違いました。",
+        ["eventChoiceObservationIncomplete"] = "イベントまたは選択肢の動作を確認できませんでした。",
         ["billIngredientMismatch"] = "製造指示の材料の表示が期待と違いました。",
         // incomplete: the run could not prove a result
         ["experimental"] = "この OS・実行環境・ビルドは、まだ公式との比較で確かめていません。結果は参考です。",

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs><IncidentDef><defName>RWMT_ChoiceEvent</defName><workerClass>RWMT.EventChoice.ChoiceIncident</workerClass><category>Misc</category><targetTags><li>Map_PlayerHome</li></targetTags><baseChance>0</baseChance></IncidentDef></Defs>

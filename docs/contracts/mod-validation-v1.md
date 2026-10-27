@@ -38,7 +38,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 | 項目 | 規則 |
 |---|---|
 | 未知のフィールド | 全階層で拒否（`blocked` / `invalidRequest`） |
-| `levels` | `A` 必須。`B`（DLL・Harmony）と `C`（指定動作）は A の完了が前提。`C` は固定ケース `bill-ingredient-options.v1` のみ実装（非描画・experimental）。その他は要求不正で `blocked` |
+| `levels` | `A` 必須。`B`（DLL・Harmony）と `C`（指定動作）は A の完了が前提。`C` は固定ケース `bill-ingredient-options.v1` または自作 fixture 限定の `event-choice.v1` を実装（非描画・experimental）。その他は要求不正で `blocked` |
 | `official` | 既定 `["Core"]`。先頭は Core。Royalty/Ideology/Biotech/Odyssey から選ぶ。Anomaly は対象外（スナップショットにないため `officialContentMissing`） |
 | `mods` | 読み込み順。公式コンテンツの後に並ぶ。`path` は要求ファイルからの相対パス可。`packageId` は任意で、指定時は About.xml と一致必須。`target: true` を 1 個以上。`path` が `.zip` で終わる場合は ZIP を `--out` の下へ展開して使う（下記）。`expectedLoadFolders` は任意で、入力を限定取得したときに計画したロードフォルダ（優先順、MOD root からの相対パス、root は空文字）。指定時は対象実行の `runningMods[].loadFolders` と完全一致を要求する |
 | `target` | 検証対象。ベースライン（同じ構成から対象だけ外した実行）との差分で、対象が持ち込んだ診断を判定する |
@@ -135,7 +135,7 @@ Linux は画面を描画しません。固定ケース `bill-ingredient-options.
 - Controller は期待値の同一性・件数・必須真偽値・成分整合性、`context=freshGameNewBill` / `rendered=false`、理由と成分の整合性を確認し、実際の `visible` / `allowed` を再比較します。Worker の `outcome=match` だけでは信用しません。結果は `stages.C.checks` にも記録します。C の期待値は対象 run だけに送ります。対象専用レシピがない baseline には送らず、既存のロード診断比較を維持します。
 - `stages.C` は観測完了なら `completed`、不一致なら `failed`、未観測・不正文脈・例外なら `incomplete`。必要 API がないときは `blocked` / `billIngredientApiUnavailable`。この場合は A のロードが既に走ったので、全体 `status=blocked` でも `executionStatus=completed` を維持します（起動前 blocked との違い）。
 - **ケース適格化は未完了**。`stages.C.fidelity=experimental`、全体 `fidelity=experimental` / `status=incomplete`、`cNotQualified`。不一致は `billIngredientMismatch` として併記しますが、全体の合格・不合格を確定しません。API 不足の blocked が優先。A/B の既存資格を C に流用しません。
-- 画面上の存在・ラベル・見切れ・配置・クリックを保証しません。描画コールバックだけで項目を消す MOD は取り逃がし得ます。Windows 描画、既存 Bill 移行、実際の材料探索・クラフト完了、イベント、クエスト、tick は対象外です。
+- 画面上の存在・ラベル・見切れ・配置・クリックを保証しません。描画コールバックだけで項目を消す MOD は取り逃がし得ます。Windows 描画、既存 Bill 移行、実際の材料探索・クラフト完了、任意の MOD のイベント、クエスト、tick はこのケースの対象外です。
 
 自作 fixture での実ゲーム観測は [C の実装記録](../research/2026-10-26-bill-ingredient-options.md)。小麦粉 MOD 本体での検証や独立した参照経路との適格化は別に必要です。
 
@@ -160,3 +160,7 @@ Linux は画面を描画しません。固定ケース `bill-ingredient-options.
 | 対象なし | blocked（`invalidRequest`） | `RunTests`、`RequestTests` |
 | B 未要求 | `stages.B=notRequested` | `EvaluationTests` |
 | MOD 順序の変化 | incomplete（`modOrderMismatch`） | `RunTests` |
+
+### C：自作 fixture のイベント選択肢（非描画・experimental）
+
+`tests: ["event-choice.v1"]`、生成マップの `map`、`expectations.eventChoices` に `{ "event": "RWMT_ChoiceEvent", "choice": "accept", "rewardThing": "Steel", "rewardCount": 10 }` を1件指定する。事件と選択肢は自作 fixture に固定し、別々の任意ゲーム API を呼び出す機能は提供しない。Worker は生成マップ上で事件の実行、選択肢の提示と実行、生成された報酬を観測する。観測不足や実行例外は `incomplete`、観測済みの値の不一致は C 段階を `failed` とする。独立した適格化までは観測が一致しても全体を `incomplete` とする。MOD 一般のイベント・クエストの合格、実画面の動作、時間経過を保証しない。

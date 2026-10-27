@@ -77,7 +77,7 @@ public sealed class Checks(GameApi api)
             .Select(m => ((string)Reflect.Member(m, "PackageId")!).ToLowerInvariant()).ToList();
     }
 
-    public void WriteExpectations(Utf8JsonWriter json, JsonElement expectations)
+    public void WriteExpectations(Utf8JsonWriter json, JsonElement expectations, Dictionary<string, object?>? eventChoice = null)
     {
         json.WriteStartObject("checks");
         json.WriteStartArray("defs");
@@ -100,6 +100,11 @@ public sealed class Checks(GameApi api)
         json.WriteEndArray();
         new HarmonyInspector().Write(json, Items(expectations, "harmonyPatches").ToList());
         BillIngredientOptions.Write(json, expectations);
+        if (eventChoice != null)
+        {
+            json.WritePropertyName("eventChoices");
+            JsonSerializer.Serialize(json, new[] { eventChoice });
+        }
         json.WriteEndObject();
     }
 

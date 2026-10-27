@@ -311,6 +311,7 @@ EXPECTATION_KEYS = {
                         'kind', 'patchType', 'patchMethod'}, {'genericArity'}),
     'mapThings': ({'type', 'defName'}, {'minCount', 'maxCount'}),
     'billIngredients': ({'recipe', 'thing', 'visible', 'allowed'}, set()),
+    'eventChoices': ({'event', 'choice', 'rewardThing', 'rewardCount'}, set()),
 }
 # Judged by the Controller from the map observation; the Worker never sees them.
 CONTROLLER_EXPECTATIONS = {'mapThings'}
@@ -407,10 +408,14 @@ def validate_request(request, base):
                     _require(isinstance(value, int) and not isinstance(value, bool) and value >= 0, f'{where}.genericArity must be >= 0')
                 elif key == 'targetParameters':
                     _strings(value, f'{where}.targetParameters', allow_empty=True)
-                elif key in ('minCount', 'maxCount'):
+                elif key in ('minCount', 'maxCount', 'rewardCount'):
                     _require(isinstance(value, int) and not isinstance(value, bool) and value >= 0, f'{where}.{key} must be >= 0')
                 else:
                     _require(isinstance(value, str) and value, f'{where}.{key} must be a nonempty string')
+            if kind == 'eventChoices':
+                _require(all(DEF_NAME.fullmatch(item[k]) for k in ('event', 'choice', 'rewardThing')),
+                         f'{where} event, choice and rewardThing must be safe identifiers')
+                _require(item['rewardCount'] <= 100000, f'{where}.rewardCount must be <= 100000')
             if kind == 'billIngredients':
                 _require(all(DEF_NAME.fullmatch(item[k]) for k in ('recipe', 'thing')),
                          f'{where} recipe and thing must be Def names (1–128 ASCII characters)')
@@ -451,14 +456,22 @@ def validate_request(request, base):
     tests = request.get('tests', [])
     _require(isinstance(tests, list), 'tests must be an array')
     if 'C' in levels:
-        _require(tests == ['bill-ingredient-options.v1'], 'C requires exactly bill-ingredient-options.v1')
+        _require(tests in (['bill-ingredient-options.v1'], ['event-choice.v1']), 'C requires exactly one supported case')
         ingredients = expectations.get('billIngredients', [])
-        _require(1 <= len(ingredients) <= 128, 'C requires 1–128 billIngredients expectations')
-        pairs = [(i['recipe'], i['thing']) for i in ingredients]
-        _require(len(set(pairs)) == len(pairs), 'billIngredients recipe/thing pairs must be distinct')
+        choices = expectations.get('eventChoices', [])
+        if tests == ['bill-ingredient-options.v1']:
+            _require(1 <= len(ingredients) <= 128 and not choices, 'C requires 1–128 billIngredients expectations only')
+            pairs = [(i['recipe'], i['thing']) for i in ingredients]
+            _require(len(set(pairs)) == len(pairs), 'billIngredients recipe/thing pairs must be distinct')
+        else:
+            _require(map_request is not None, 'event choice needs a generated map')
+            _require(len(choices) == 1 and not ingredients, 'event choice requires exactly one eventChoices expectation')
+            _require(choices[0]['event'] == 'RWMT_ChoiceEvent' and choices[0]['choice'] == 'accept',
+                     'event choice supports only the controlled RWMT fixture')
     else:
         _require(not tests, 'tests need level C')
         _require(not expectations.get('billIngredients'), 'billIngredients need level C')
+        _require(not expectations.get('eventChoices'), 'eventChoices need level C')
 
     limits = dict(DEFAULT_LIMITS)
     given = request.get('limits', {})
@@ -1214,7 +1227,8 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
                 stage_b['unexpectedPatches'] = len(harmony['unexpected'])
         stages['B'] = stage_b
     if 'C' in levels:
-        c_stage, c_incomplete, c_failed = evaluate_bill_ingredients(request, checks or {})
+        evaluator = evaluate_event_choice if request['tests'] == ['event-choice.v1'] else evaluate_bill_ingredients
+        c_stage, c_incomplete, c_failed = evaluator(request, checks or {})
         stages['C'] = c_stage
         incomplete.extend(c_incomplete)
         failed.extend(c_failed)
@@ -1253,6 +1267,30 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         if stages[level]['status'] == 'completed' and status == 'incomplete':
             stages[level]['note'] = 'stage observations completed, but the run as a whole is incomplete'
     return status, execution, incomplete + failed, stages, fresh
+
+
+def evaluate_event_choice(request, checks):
+    case = 'event-choice.v1'
+    expected = request['expectations']['eventChoices'][0]
+    stage = {'status': 'incomplete', 'caseId': case, 'fidelity': 'experimental',
+             'qualificationEvidence': None, 'checks': [], 'rendered': False}
+    incomplete = [{'code': 'cNotQualified', 'detail': 'event choice has not been independently qualified'}]
+    rows = checks.get('eventChoices')
+    row = rows[0] if isinstance(rows, list) and len(rows) == 1 else None
+    actual = row.get('actual') if isinstance(row, dict) else None
+    valid = (isinstance(row, dict) and row.get('caseId') == case and row.get('expected') == expected
+             and isinstance(actual, dict) and actual.get('context') == 'freshGeneratedMap'
+             and actual.get('rendered') is False
+             and all(type(actual.get(k)) is bool for k in ('eventOccurred', 'choicePresented', 'choiceExecuted'))
+             and isinstance(actual.get('rewardThing'), str) and type(actual.get('rewardCount')) is int
+             and actual.get('rewardCount') >= 0)
+    if not valid or not all(actual[k] for k in ('eventOccurred', 'choicePresented', 'choiceExecuted')):
+        incomplete.append({'code': 'eventChoiceObservationIncomplete', 'detail': 'event or choice execution evidence is missing'})
+        return stage, incomplete, []
+    match = actual['rewardThing'] == expected['rewardThing'] and actual['rewardCount'] == expected['rewardCount']
+    stage['checks'].append({'expected': expected, 'actual': actual, 'outcome': 'match' if match else 'mismatch'})
+    stage['status'] = 'completed' if match else 'failed'
+    return stage, incomplete, [] if match else [{'code': 'eventChoiceMismatch', 'detail': 'observed reward differs from the expected reward'}]
 
 
 BILL_CASE = 'bill-ingredient-options.v1'

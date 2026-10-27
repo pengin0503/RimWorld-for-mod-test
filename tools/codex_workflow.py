@@ -277,6 +277,7 @@ def resolve_mod_graph(index, roots, read_metadata, *, official=None, local=None)
                       'ludeon.rimworld.ideology': 'Ideology', 'ludeon.rimworld.biotech': 'Biotech',
                       'ludeon.rimworld.odyssey': 'Odyssey'}
     nodes, edges, queue = {}, {}, list(roots)
+    ordering = []
     def by_package(package):
         if local and local["packageId"].casefold() == package.casefold():
             return local
@@ -320,12 +321,12 @@ def resolve_mod_graph(index, roots, read_metadata, *, official=None, local=None)
                     value = (item.text or '').strip().casefold()
                     if item.tag != 'li' or not re.fullmatch(r'[a-z0-9_.]+', value):
                         raise WorkflowError(f'invalid {tag} entry', 'invalidDependencies')
-                    if value not in official:
-                        queue.append(value)
-                        if reverse:
-                            edges.setdefault(value, set()).add(package)
-                        else:
-                            edges[package].add(value)
+                    ordering.append((value, package) if reverse else (package, value))
+    # loadAfter/loadBefore only order MODs already selected by the user or
+    # required dependency closure. They do not require installing other MODs.
+    for after, before in ordering:
+        if after in nodes and before in nodes:
+            edges.setdefault(after, set()).add(before)
     ordered = []
     while nodes:
         ready = [key for key in nodes if not (edges.get(key, set()) & nodes.keys())]
@@ -529,3 +530,4 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

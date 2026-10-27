@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>DPA CSV Exporter</name>
+  <author>pengin0503</author>
+  <packageId>pengin0503.dpa.csvexporter</packageId>
+  <modVersion>1.0.0</modVersion>
+  <supportedVersions><li>1.7</li></supportedVersions>
+  <modDependencies>
+    <li><packageId>brrainz.harmony</packageId><displayName>Harmony</displayName></li>
+    <li><packageId>Dubwise.DubsPerformanceAnalyzer.steam</packageId><displayName>Dubs Performance Analyzer</displayName></li>
+  </modDependencies>
+  <loadAfter><li>brrainz.harmony</li><li>Dubwise.DubsPerformanceAnalyzer.steam</li></loadAfter>
+  <description>Exports every measured row of the currently selected Dubs Performance Analyzer profiler entry to CSV for external analysis. No extra timers.</description>
+</ModMetaData>

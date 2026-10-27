@@ -26,10 +26,20 @@ def main():
     a = p.parse_args()
     root = cw._safe_private(Path(a.root))
     if a.phase == 'prepare':
-        prepared = cw.prepare(SimpleNamespace(private_root=root, refresh=False, aws='aws'))
-        selected = cw.fetch_mods(SimpleNamespace(private_root=root, refresh=False, aws='aws',
-            index_zip=None, target='Vanilla Psycasts Expanded', local_target=None,
-            dependency=[], official=['Core', 'Royalty'], language='English', scope='validation'))
+        stage = 'modMetadataAndPayload'
+        try:
+            # Fail on unavailable/ambiguous MOD inputs before expensive runtime acquisition.
+            selected = cw.fetch_mods(SimpleNamespace(private_root=root, refresh=False, aws='aws',
+                index_zip=None, target='Vanilla Psycasts Expanded', local_target=None,
+                dependency=[], official=['Core', 'Royalty'], language='English', scope='validation'))
+            stage = 'gameRuntimeAndSnapshot'
+            prepared = cw.prepare(SimpleNamespace(private_root=root, refresh=False, aws='aws'))
+        except Exception as error:
+            code = getattr(error, 'code', 'preparationError')
+            # Codes are selected by our tools, never copy exception messages or paths.
+            (root / 'safe-summary.json').write_text(json.dumps({
+                'ok': False, 'stage': stage, 'errorType': type(error).__name__, 'code': code}))
+            raise
         (root / 'preparation-summary.json').write_text(json.dumps({
             'gameFiles': prepared.get('files'), 'gameR2': prepared.get('r2'),
             'modCount': len(selected['fetched']),

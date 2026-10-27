@@ -3,6 +3,7 @@ name: Private Linux validation regression
 on:
   push:
     branches: [feat/linux-validation-efficiency-20261028]
+    paths: ['tools/**', 'tests/integration/**', '.github/workflows/linux-private-regression.yml']
 
 permissions:
   contents: read

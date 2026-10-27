@@ -57,11 +57,11 @@ ZIPに同梱された index_mods.py も私有領域で利用できる。正確�
       --official Core Royalty \
       --language English
 
---dependency の順序をそのまま MOD のロード順に使う。**依存の自動解決は未実装**であり、索引とAbout.xmlを調べて不足・順序を検証する必要がある。重複、不明、曖昧なIDを拒否する。MODの取得は Workshop/<ID>/ の prefix に限定し、最初に About の XML/TXT を取得して PackageId を索引と照合する。不一致なら DLL 等を取得せず停止する。
+対象と明示した依存の About.xml から依存・1.7 の依存・loadAfter/loadBefore を辿り、索引で正確に特定して読み込み順を決める。曖昧・索引になし・循環は blocked とする。重複、不明、曖昧なIDを拒否する。MODの取得は Workshop/<ID>/ の prefix に限定し、最初に About の XML/TXT を取得して PackageId を索引と照合する。不一致なら DLL 等を取得せず停止する。
 
 既定の `--scope validation` は、列挙結果と実ゲームに合わせて解釈した `LoadFolders.xml` から有効フォルダを確定する。現在版のフォルダがなければゲームと同じ版選択を行い、root・Common・1.7 に固定しない。`IfModActive` / `IfModActiveAll` / `IfModNotActive` は要求内の全 MOD と `--official` の DLC で評価する。その配下の Defs/Patches XML、Assemblies DLL、指定言語と英語フォールバックの XML/TXT に加え、実測で A のロード時にも必要と分かった Textures 画像・Sounds 音声を取得する。非選択版、ソース、デバッグ情報、無関係な言語は省く。`--scope all` は明示した場合だけ使用する。
 
-全 MOD の About と LoadFolders を先に照合し、1.7 の依存定義で上書きされたものも含めて依存不足を検出する。自動追加はしない。例えば VPE の要求には `--official Core Royalty` が必要。未知条件、不正 XML、有効フォルダが空、列挙にない指定先、計画外の古いキャッシュがあれば理由コード付き `blocked` となり、payload の取得や要求生成へ黙って進まない。必要なら新しい私有作業先を使い、既存ファイルを自動削除しない。[ゲーム側規則の要約](research/2026-10-26-load-folder-rules.md)を参照。
+全 MOD の About と LoadFolders を先に照合し、必要な依存を自動追加する。例えば VPE の要求には `--official Core Royalty` が必要。未知条件、不正 XML、有効フォルダが空、列挙にない指定先、計画外の古いキャッシュがあれば理由コード付き `blocked` となり、payload の取得や要求生成へ黙って進まない。必要なら新しい私有作業先を使い、既存ファイルを自動削除しない。[ゲーム側規則の要約](research/2026-10-26-load-folder-rules.md)を参照。
 
 結果の $RWMT_PRIVATE/request.json は現時点では **A / Core / English / 期待値なし**を既定とする。実際のB検証には要求JSONの levelsと完全指定のHarmony期待値、対象DLCを明示する。マップテストも明示する。生成済み request.json は誤上書きを防ぐため再生成しない。別run用に新しい私有ディレクトリを使うか、既存要求を保管してから実行する。
 
@@ -99,7 +99,7 @@ prepare はゲーム本体を新たな私有スナップショットへコピー
 
 既定キー修正後は `--index-zip` なしの索引取得・検索も実R2で別途確認した。上記の A 実行は取得済み ZIP を明示して行ったもので、修正後の既定取得から A までを1コマンドで再実行したという主張ではない。[取得量と検証範囲の記録](research/2026-10-26-codex-cloud-a-validation.md)を参照。
 
-以降の MOD 作業も、索引を再利用して対象を照合し、About → 必要ファイルの順に取得する。ゲームスナップショットは再利用し、不足資材が判明した場合だけ追加する。依存の自動解決や任意の MOD の限定取得の完全性は未保証。C/D・Windows の追加実装は別途明示した依頼が必要。
+以降の MOD 作業も、索引を再利用して対象を照合し、About → 必要ファイルの順に取得する。ゲームスナップショットは再利用し、不足資材が判明した場合だけ追加する。依存の自動解決は About.xml と索引に記述された範囲に限られ、任意の MOD の限定取得の完全性は未保証。C/D・Windows の追加実装は別途明示した依頼が必要。
 
 ## 制限・既知の課題
 

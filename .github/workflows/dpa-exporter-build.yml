@@ -1,0 +1,85 @@
+name: Build DPA CSV Exporter (RimWorld 1.7)
+
+on:
+  push:
+    branches:
+      - feat/dpa-csv-exporter-private-validation-20261027
+    paths:
+      - .github/workflows/dpa-exporter-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download three private RimWorld compile references ONLY
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: rimworld-17
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          test -n "$R2_ENDPOINT"
+          mkdir -p "$RUNNER_TEMP/dpa-refs"
+          for dll in Assembly-CSharp.dll UnityStubs.dll Waylith.dll; do
+            python3 tools/r2_assets.py file --key "Game-Linux/$dll" --dest "$RUNNER_TEMP/dpa-refs" > /dev/null
+          done
+          test -s "$RUNNER_TEMP/dpa-refs/Game-Linux/Assembly-CSharp.dll"
+          test -s "$RUNNER_TEMP/dpa-refs/Game-Linux/UnityStubs.dll"
+          test -s "$RUNNER_TEMP/dpa-refs/Game-Linux/Waylith.dll"
+          echo "Reference DLLs fetched: 3 (private, not uploaded)"
+      - name: Run CSV tests and compile addon
+        env:
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          R2_ENDPOINT: ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="addons/DPA-CSV-Exporter"
+          dotnet run --project "$root/Tests/CsvSmokeTest.csproj" -c Release
+          dotnet build "$root/Source/DPA.CsvExporter.csproj" -c Release --nologo \
+            -p:RimWorldRefs="$RUNNER_TEMP/dpa-refs/Game-Linux"
+          test -s "$root/1.7/Assemblies/DPA.CsvExporter.dll"
+      - name: Package installable addon (no game or third-party binaries)
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="addons/DPA-CSV-Exporter"
+          mkdir -p "$RUNNER_TEMP/dpa-release/DPA-CSV-Exporter/About"
+          mkdir -p "$RUNNER_TEMP/dpa-release/DPA-CSV-Exporter/1.7/Assemblies"
+          cp "$base/About/About.xml" "$RUNNER_TEMP/dpa-release/DPA-CSV-Exporter/About/"
+          cp "$base/1.7/Assemblies/DPA.CsvExporter.dll" "$RUNNER_TEMP/dpa-release/DPA-CSV-Exporter/1.7/Assemblies/"
+          cp "$base/README.md" "$RUNNER_TEMP/dpa-release/DPA-CSV-Exporter/"
+          cd "$RUNNER_TEMP/dpa-release"
+          zip -q -r "$GITHUB_WORKSPACE/DPA-CSV-Exporter-1.0.0-RW1.7.zip" DPA-CSV-Exporter
+          unzip -l "$GITHUB_WORKSPACE/DPA-CSV-Exporter-1.0.0-RW1.7.zip"
+          ! unzip -Z1 "$GITHUB_WORKSPACE/DPA-CSV-Exporter-1.0.0-RW1.7.zip" | grep -E 'Assembly-CSharp|UnityStubs|Waylith|0Harmony|PerformanceAnalyzer'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DPA-CSV-Exporter-1.0.0-RW1.7
+          path: DPA-CSV-Exporter-1.0.0-RW1.7.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove private references
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/dpa-refs"

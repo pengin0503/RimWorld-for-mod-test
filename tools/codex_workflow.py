@@ -270,6 +270,72 @@ def local_mod_plan(root: Path, active: set) -> dict:
     return {"path": str(raw), "packageId": package_id, "loadFolders": folders}
 
 
+def resolve_mod_graph(index, roots, read_metadata, *, official=None, local=None):
+    """Resolve metadata recursively and return a deterministic dependency order."""
+    official = set(official or {'ludeon.rimworld'})
+    official_names = {'ludeon.rimworld': 'Core', 'ludeon.rimworld.royalty': 'Royalty',
+                      'ludeon.rimworld.ideology': 'Ideology', 'ludeon.rimworld.biotech': 'Biotech',
+                      'ludeon.rimworld.odyssey': 'Odyssey'}
+    nodes, edges, queue = {}, {}, list(roots)
+    def by_package(package):
+        if local and local["packageId"].casefold() == package.casefold():
+            return local
+        found = [m for m in index.get('mods', []) if isinstance(m.get('package_id'), str)
+                 and m['package_id'].casefold() == package.casefold()]
+        if not found:
+            raise WorkflowError(f'dependency package {package} missing from private index', 'missingDependencies')
+        if len(found) != 1:
+            raise WorkflowError(f'dependency package {package} ambiguous in private index', 'dependencyUnresolved')
+        return resolve(index, found[0]['workshop_id'])
+    while queue:
+        package = queue.pop(0).casefold()
+        if package in nodes or package in official:
+            continue
+        if package in official_names:
+            raise WorkflowError(f'official content required: add {official_names[package]} to --official', 'officialContentMissing')
+        if len(nodes) >= 1000:
+            raise WorkflowError('dependency graph exceeds 1000 MODs', 'dependencyLimit')
+        mod = by_package(package)
+        meta = read_metadata(mod)
+        actual = (meta.findtext('packageId') or '').strip().casefold()
+        if actual != package:
+            raise WorkflowError('private index and MOD metadata disagree on packageId', 'packageIdMismatch')
+        try:
+            required = mod_load_plan.missing_dependencies(meta, set())
+        except mod_load_plan.LoadPlanError as error:
+            raise WorkflowError(str(error), error.code) from error
+        nodes[package] = mod
+        edges.setdefault(package, set())
+        for dep in required:
+            dep = dep.casefold()
+            if dep not in official:
+                queue.append(dep)
+                edges[package].add(dep)
+        for tag, reverse in (('loadAfter', False), ('loadBefore', True)):
+            sections = meta.findall(tag)
+            if len(sections) > 1:
+                raise WorkflowError(f'duplicate {tag}', 'invalidDependencies')
+            for section in sections:
+                for item in section:
+                    value = (item.text or '').strip().casefold()
+                    if item.tag != 'li' or not re.fullmatch(r'[a-z0-9_.]+', value):
+                        raise WorkflowError(f'invalid {tag} entry', 'invalidDependencies')
+                    if value not in official:
+                        queue.append(value)
+                        if reverse:
+                            edges.setdefault(value, set()).add(package)
+                        else:
+                            edges[package].add(value)
+    ordered = []
+    while nodes:
+        ready = [key for key in nodes if not (edges.get(key, set()) & nodes.keys())]
+        if not ready:
+            raise WorkflowError('dependency order has a cycle', 'dependencyCycle')
+        for key in ready:
+            ordered.append(nodes.pop(key))
+    return ordered
+
+
 def fetch_mods(args) -> dict:
     root = _safe_private(args.private_root)
     local_target = getattr(args, "local_target", None)
@@ -291,39 +357,48 @@ def fetch_mods(args) -> dict:
     allowed = {"Core", "Royalty", "Ideology", "Biotech", "Odyssey"}
     if not official or official[0] != "Core" or len(set(official)) != len(official) or set(official)-allowed:
         raise WorkflowError("official must begin with Core and contain supported unique DLCs", "invalidOfficialContent")
-    active = {m["packageId"].casefold() for m in selected}
-    if local_id:
-        active.add(local_id.casefold())
-    active.update("ludeon.rimworld" if n == "Core" else "ludeon.rimworld."+n.casefold() for n in official)
-    fetched = []
+    official_ids = {"ludeon.rimworld" if n == "Core" else "ludeon.rimworld." + n.casefold() for n in official}
+    target_package = selected[-1]["packageId"].casefold() if not local_target else local_id.casefold()
     r2 = r2_client(args.aws)
-    prepared = []
-    # Every MOD is identified and dependency-checked before any MOD payload is fetched.
-    for mod in selected:
+    fetched = []
+    prepared_by_id = {}
+    def read_metadata(mod):
+        if mod["workshopId"] is None:
+            return _local_metadata(local_target)[3]
         destination = root / "mods" / mod["workshopId"]
         prefix = f"Workshop/{mod['workshopId']}/"
         listed = r2.list_prefix(prefix)
         metadata = [item for item in listed if item["key"][len(prefix):].casefold() in {"about/about.xml", "loadfolders.xml"}]
         abouts = [item for item in metadata if item["key"][len(prefix):].casefold() == "about/about.xml"]
         configs = [item for item in metadata if item["key"][len(prefix):].casefold() == "loadfolders.xml"]
-        if len(abouts) != 1 or len(configs)>1:
+        if len(abouts) != 1 or len(configs) > 1:
             raise WorkflowError("Missing or ambiguous MOD metadata", "invalidModMetadata")
         if any(item["size"] > 4*1024*1024 for item in metadata):
             raise WorkflowError("MOD metadata exceeds 4 MiB", "metadataTooLarge")
-        metadata_counts = _download(r2, prefix, destination, metadata, refresh=args.refresh)
+        counts = _download(r2, prefix, destination, metadata, refresh=args.refresh)
         try:
             meta = mod_load_plan.parse_xml((destination / abouts[0]["key"][len(prefix):]).read_bytes())
-            package_id = (meta.findtext("packageId") or "").strip()
-            if package_id.casefold() != mod["packageId"].casefold():
-                raise WorkflowError("private index and downloaded MOD disagree on packageId", "packageIdMismatch")
-            missing = mod_load_plan.missing_dependencies(meta, active)
-            if missing:
-                raise WorkflowError("Missing required dependencies: "+", ".join(missing), "missingDependencies")
+        except mod_load_plan.LoadPlanError as exc:
+            raise WorkflowError(str(exc), exc.code) from exc
+        prepared_by_id[mod["workshopId"]] = (mod, destination, prefix, listed, metadata, counts, configs)
+        return meta
+    roots = [m["packageId"] for m in selected]
+    local_node = None
+    if local_target:
+        local_node = {"packageId": local_id, "workshopId": None, "name": "local target"}
+        roots.append(local_id)
+    graph = resolve_mod_graph(index, roots, read_metadata, official=official_ids, local=local_node)
+    selected = [m for m in graph if m["workshopId"] is not None]
+    active = {m["packageId"].casefold() for m in graph} | official_ids
+    prepared = []
+    for mod in selected:
+        mod, destination, prefix, listed, metadata, counts, configs = prepared_by_id[mod["workshopId"]]
+        try:
             config = (destination / configs[0]["key"][len(prefix):]).read_bytes() if configs else None
             folders = mod_load_plan.load_folders([i["key"][len(prefix):] for i in listed], config, active)
         except mod_load_plan.LoadPlanError as exc:
             raise WorkflowError(str(exc), exc.code) from exc
-        prepared.append((mod, destination, prefix, listed, metadata, metadata_counts, folders))
+        prepared.append((mod, destination, prefix, listed, metadata, counts, folders))
     local = local_mod_plan(local_target, active) if local_target else None
     for mod, destination, prefix, listed, metadata, counts, folders in prepared:
         metadata_keys = {i["key"] for i in metadata}
@@ -342,12 +417,15 @@ def fetch_mods(args) -> dict:
                         "r2": summary, "scope": args.scope, "loadFolders": folders})
     # The Controller compares these with the folders the game actually loaded.
     planned = {item["workshopId"]: item["loadFolders"] for item in fetched}
-    mods = [{"path": str((root / "mods" / m["workshopId"]).absolute()),
-             "packageId": m["packageId"], "target": local is None and m is selected[-1],
-             "expectedLoadFolders": planned[m["workshopId"]]} for m in selected]
-    if local:
-        mods.append({"path": local["path"], "packageId": local["packageId"], "target": True,
-                     "expectedLoadFolders": local["loadFolders"]})
+    mods = []
+    for m in graph:
+        if m["workshopId"] is None:
+            mods.append({"path": local["path"], "packageId": local["packageId"], "target": True,
+                         "expectedLoadFolders": local["loadFolders"]})
+        else:
+            mods.append({"path": str((root / "mods" / m["workshopId"]).absolute()),
+                         "packageId": m["packageId"], "target": local is None and m["packageId"].casefold() == target_package,
+                         "expectedLoadFolders": planned[m["workshopId"]]})
     request = {"recordType": "modValidationRequest", "schemaVersion": 1,
                "levels": ["A"], "official": official, "language": args.language,
                "mods": mods, "expectations": {}}

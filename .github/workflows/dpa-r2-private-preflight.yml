@@ -98,10 +98,10 @@ jobs:
                   token = os.environ.get(key)
                   if token:
                       line = line.replace(token, "[REDACTED]")
-              line = re.sub(r"https?://\\S+", "[URL]", line)
-              line = re.sub(r"\\b[A-Za-z]:\\\\\\S+", "[PATH]", line)
-              line = re.sub(r"(?<!\\w)/(?:[^\\s/]+/)*[^\\s/:,;]+", "[PATH]", line)
-              line = re.sub(r"[\\x00-\\x1f\\x7f]", " ", line)[:200]
+              line = re.sub(r"https?://\S+", "[URL]", line)
+              line = re.sub(r"\b[A-Za-z]:\\\S+", "[PATH]", line)
+              line = re.sub(r"(?<!\w)/(?:[^\s/]+/)*[^\s/:,;]+", "[PATH]", line)
+              line = re.sub(r"[\x00-\x1f\x7f]", " ", line)[:200]
               print("Warning:", json.dumps({
                   "stage": str(event.get("stage", ""))[:40],
                   "category": str(event.get("category", ""))[:80],

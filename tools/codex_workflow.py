@@ -6,7 +6,7 @@ The Controller/Worker remain the authority for validation semantics.
 from __future__ import annotations
 import argparse
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
 import os
 from pathlib import Path
@@ -140,16 +140,35 @@ def _download(r2: r2_assets.R2, prefix: str, dest: Path, items: list[dict], *, r
     counts = {"downloaded": 0, "cached": 0}
     if not items:
         return counts
-    # AWS CLI get-object is one subprocess per object; bounded parallelism avoids
-    # a multi-hour sequential download while keeping R2 requests scoped.
-    with ThreadPoolExecutor(max_workers=min(4, len(items))) as pool:
-        jobs = []
-        for item in items:
+    # Do not queue the entire selection: a failed request must not trigger
+    # thousands of unnecessary GETs while the executor shuts down.
+    workers = min(4, len(items))
+    remaining = iter(items)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        pending = set()
+
+        def submit(item):
             relative = item["key"][len(prefix):]
             dest_file = r2_assets.ensure_safe_destination(dest, relative)
-            jobs.append(pool.submit(r2.get, item["key"], dest_file, item["size"], refresh=refresh))
-        for job in as_completed(jobs):
-            counts[job.result()] += 1
+            pending.add(pool.submit(r2.get, item["key"], dest_file, item["size"], refresh=refresh))
+
+        try:
+            for _ in range(workers):
+                submit(next(remaining))
+            while pending:
+                completed, pending = wait(pending, return_when=FIRST_COMPLETED)
+                # Check all completed results before starting replacement work.
+                for job in completed:
+                    counts[job.result()] += 1
+                for _ in completed:
+                    item = next(remaining, None)
+                    if item is None:
+                        break
+                    submit(item)
+        except BaseException:
+            for job in pending:
+                job.cancel()  # Running requests finish before the executor exits.
+            raise
     return counts
 
 

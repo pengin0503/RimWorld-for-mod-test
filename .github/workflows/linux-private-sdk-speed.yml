@@ -1,0 +1,55 @@
+name: Private R2 SDK speed and A validation
+
+on:
+  push:
+    branches: [feat/measure-initial-preparation-20261028]
+    paths:
+      - .github/workflows/linux-private-sdk-speed.yml
+      - tests/integration/benchmark_r2_transport.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-sdk-speed
+  cancel-in-progress: false
+
+jobs:
+  sdk-speed:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install optional SDK and build without cloud credentials
+        run: |
+          python -m pip install -r requirements-r2-sdk.txt
+          aws --version
+          dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+      - name: Compare bounded objects then prepare one SDK runtime
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: rimworld-17
+          AWS_DEFAULT_REGION: auto
+          RWMT_R2_TRANSPORT: sdk
+        run: |
+          python tests/integration/benchmark_r2_transport.py run --root "$RUNNER_TEMP/r2-comparison" > "$RUNNER_TEMP/private-benchmark.log" 2>&1 || { echo 'Transport comparison failed; raw logs are private'; exit 1; }
+          python tests/integration/run_preparation_measurement.py prepare --root "$RUNNER_TEMP/sdk-runtime" > "$RUNNER_TEMP/private-prepare.log" 2>&1 || { echo 'SDK preparation failed; raw logs are private'; exit 1; }
+      - name: Validate A only without cloud credentials
+        run: |
+          python tests/integration/run_preparation_measurement.py run --root "$RUNNER_TEMP/sdk-runtime" > "$RUNNER_TEMP/private-validation.log" 2>&1 || { echo 'Private A validation failed'; exit 1; }
+      - name: Publish rebuilt summaries only
+        if: always()
+        run: |
+          python tests/integration/benchmark_r2_transport.py publish --root "$RUNNER_TEMP/r2-comparison"
+          python tests/integration/run_preparation_measurement.py publish --root "$RUNNER_TEMP/sdk-runtime"

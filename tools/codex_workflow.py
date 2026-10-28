@@ -114,6 +114,17 @@ def r2_client(aws: str) -> r2_assets.R2:
                         bucket=os.environ.get("R2_BUCKET", "rimworld-17"), aws=aws)
 
 
+@contextmanager
+def r2_session(aws):
+    client = r2_client(aws)
+    try:
+        yield client
+    finally:
+        close = getattr(client, 'close', None)
+        if close is not None:
+            close()
+
+
 def _fetch(r2: r2_assets.R2, prefix: str, dest: Path, *, runtime=False,
            include=None, refresh=False) -> dict:
     listed = r2.list_prefix(prefix)
@@ -209,7 +220,8 @@ def prepare(args) -> dict:
         raise WorkflowError("game source cannot be a symlink")
     game.mkdir(mode=0o700, exist_ok=True)
     started = time.monotonic()
-    counts = _fetch(r2_client(args.aws), "Game-Linux/", game, runtime=True, refresh=args.refresh)
+    with r2_session(args.aws) as client:
+        counts = _fetch(client, "Game-Linux/", game, runtime=True, refresh=args.refresh)
     fetched = time.monotonic()
     if not (game / "Version.txt").is_file():
         raise WorkflowError("game Version.txt missing after R2 download")
@@ -230,7 +242,8 @@ def private_index(args, root: Path) -> Path:
     if args.index_zip:
         return Path(args.index_zip).expanduser().absolute()
     archive = root / "private-index" / Path(PRIVATE_MOD_INDEX_OBJECT).name
-    r2_client(args.aws).get(PRIVATE_MOD_INDEX_OBJECT, archive, expected_size=None, refresh=args.refresh)
+    with r2_session(args.aws) as client:
+        client.get(PRIVATE_MOD_INDEX_OBJECT, archive, expected_size=None, refresh=args.refresh)
     return archive
 
 
@@ -368,83 +381,83 @@ def fetch_mods(args) -> dict:
         raise WorkflowError("official must begin with Core and contain supported unique DLCs", "invalidOfficialContent")
     official_ids = {"ludeon.rimworld" if n == "Core" else "ludeon.rimworld." + n.casefold() for n in official}
     target_package = selected[-1]["packageId"].casefold() if not local_target else local_id.casefold()
-    r2 = r2_client(args.aws)
-    fetched = []
-    prepared_by_id = {}
-    def read_metadata(mod):
-        if mod["workshopId"] is None:
-            return _local_metadata(local_target)[3]
-        destination = root / "mods" / mod["workshopId"]
-        prefix = f"Workshop/{mod['workshopId']}/"
-        listed = r2.list_prefix(prefix)
-        metadata = [item for item in listed if item["key"][len(prefix):].casefold() in {"about/about.xml", "loadfolders.xml"}]
-        abouts = [item for item in metadata if item["key"][len(prefix):].casefold() == "about/about.xml"]
-        configs = [item for item in metadata if item["key"][len(prefix):].casefold() == "loadfolders.xml"]
-        if len(abouts) != 1 or len(configs) > 1:
-            raise WorkflowError("Missing or ambiguous MOD metadata", "invalidModMetadata")
-        if any(item["size"] > 4*1024*1024 for item in metadata):
-            raise WorkflowError("MOD metadata exceeds 4 MiB", "metadataTooLarge")
-        counts = _download(r2, prefix, destination, metadata, refresh=args.refresh)
-        try:
-            meta = mod_load_plan.parse_xml((destination / abouts[0]["key"][len(prefix):]).read_bytes())
-        except mod_load_plan.LoadPlanError as exc:
-            raise WorkflowError(str(exc), exc.code) from exc
-        prepared_by_id[mod["workshopId"]] = (mod, destination, prefix, listed, metadata, counts, configs)
-        return meta
-    roots = [m["packageId"] for m in selected]
-    local_node = None
-    if local_target:
-        local_node = {"packageId": local_id, "workshopId": None, "name": "local target"}
-        roots.append(local_id)
-    graph = resolve_mod_graph(index, roots, read_metadata, official=official_ids, local=local_node)
-    selected = [m for m in graph if m["workshopId"] is not None]
-    active = {m["packageId"].casefold() for m in graph} | official_ids
-    prepared = []
-    for mod in selected:
-        mod, destination, prefix, listed, metadata, counts, configs = prepared_by_id[mod["workshopId"]]
-        try:
-            config = (destination / configs[0]["key"][len(prefix):]).read_bytes() if configs else None
-            folders = mod_load_plan.load_folders([i["key"][len(prefix):] for i in listed], config, active)
-        except mod_load_plan.LoadPlanError as exc:
-            raise WorkflowError(str(exc), exc.code) from exc
-        prepared.append((mod, destination, prefix, listed, metadata, counts, folders))
-    local = local_mod_plan(local_target, active) if local_target else None
-    for mod, destination, prefix, listed, metadata, counts, folders in prepared:
-        metadata_keys = {i["key"] for i in metadata}
-        items = [i for i in listed if args.scope == "all" or i["key"] in metadata_keys or
-                 mod_validation_asset(i["key"], folders=folders, language=args.language)]
-        summary = _selection_counts(listed, items)
-        _check_cached_inputs(destination, items, prefix, folders)
-        summary.update(counts)
-        # Retain chosen directories even if no loader file survives filtering.
-        for folder in folders:
-            r2_assets.ensure_safe_destination(destination, folder).mkdir(parents=True, exist_ok=True)
-        payload = [i for i in items if i["key"] not in metadata_keys]
-        for outcome, count in _download(r2, prefix, destination, payload, refresh=args.refresh).items():
-            summary[outcome] += count
-        fetched.append({"workshopId": mod["workshopId"], "name": mod["name"],
-                        "r2": summary, "scope": args.scope, "loadFolders": folders})
-    # The Controller compares these with the folders the game actually loaded.
-    planned = {item["workshopId"]: item["loadFolders"] for item in fetched}
-    mods = []
-    for m in graph:
-        if m["workshopId"] is None:
-            mods.append({"path": local["path"], "packageId": local["packageId"], "target": True,
-                         "expectedLoadFolders": local["loadFolders"]})
-        else:
-            mods.append({"path": str((root / "mods" / m["workshopId"]).absolute()),
-                         "packageId": m["packageId"], "target": local is None and m["packageId"].casefold() == target_package,
-                         "expectedLoadFolders": planned[m["workshopId"]]})
-    request = {"recordType": "modValidationRequest", "schemaVersion": 1,
-               "levels": ["A"], "official": official, "language": args.language,
-               "mods": mods, "expectations": {}}
-    req_path = root / "request.json"
-    req_path.write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.chmod(req_path, 0o600)
-    return {"status": "modsReady", "fetched": fetched, "local": local, "request": str(req_path),
-            "validationLevel": "A",
-            "note": "Load folders and required dependencies checked against the complete request; "
-                    "resources outside loader inputs still require explicit retrieval"}
+    with r2_session(args.aws) as r2:
+        fetched = []
+        prepared_by_id = {}
+        def read_metadata(mod):
+            if mod["workshopId"] is None:
+                return _local_metadata(local_target)[3]
+            destination = root / "mods" / mod["workshopId"]
+            prefix = f"Workshop/{mod['workshopId']}/"
+            listed = r2.list_prefix(prefix)
+            metadata = [item for item in listed if item["key"][len(prefix):].casefold() in {"about/about.xml", "loadfolders.xml"}]
+            abouts = [item for item in metadata if item["key"][len(prefix):].casefold() == "about/about.xml"]
+            configs = [item for item in metadata if item["key"][len(prefix):].casefold() == "loadfolders.xml"]
+            if len(abouts) != 1 or len(configs) > 1:
+                raise WorkflowError("Missing or ambiguous MOD metadata", "invalidModMetadata")
+            if any(item["size"] > 4*1024*1024 for item in metadata):
+                raise WorkflowError("MOD metadata exceeds 4 MiB", "metadataTooLarge")
+            counts = _download(r2, prefix, destination, metadata, refresh=args.refresh)
+            try:
+                meta = mod_load_plan.parse_xml((destination / abouts[0]["key"][len(prefix):]).read_bytes())
+            except mod_load_plan.LoadPlanError as exc:
+                raise WorkflowError(str(exc), exc.code) from exc
+            prepared_by_id[mod["workshopId"]] = (mod, destination, prefix, listed, metadata, counts, configs)
+            return meta
+        roots = [m["packageId"] for m in selected]
+        local_node = None
+        if local_target:
+            local_node = {"packageId": local_id, "workshopId": None, "name": "local target"}
+            roots.append(local_id)
+        graph = resolve_mod_graph(index, roots, read_metadata, official=official_ids, local=local_node)
+        selected = [m for m in graph if m["workshopId"] is not None]
+        active = {m["packageId"].casefold() for m in graph} | official_ids
+        prepared = []
+        for mod in selected:
+            mod, destination, prefix, listed, metadata, counts, configs = prepared_by_id[mod["workshopId"]]
+            try:
+                config = (destination / configs[0]["key"][len(prefix):]).read_bytes() if configs else None
+                folders = mod_load_plan.load_folders([i["key"][len(prefix):] for i in listed], config, active)
+            except mod_load_plan.LoadPlanError as exc:
+                raise WorkflowError(str(exc), exc.code) from exc
+            prepared.append((mod, destination, prefix, listed, metadata, counts, folders))
+        local = local_mod_plan(local_target, active) if local_target else None
+        for mod, destination, prefix, listed, metadata, counts, folders in prepared:
+            metadata_keys = {i["key"] for i in metadata}
+            items = [i for i in listed if args.scope == "all" or i["key"] in metadata_keys or
+                     mod_validation_asset(i["key"], folders=folders, language=args.language)]
+            summary = _selection_counts(listed, items)
+            _check_cached_inputs(destination, items, prefix, folders)
+            summary.update(counts)
+            # Retain chosen directories even if no loader file survives filtering.
+            for folder in folders:
+                r2_assets.ensure_safe_destination(destination, folder).mkdir(parents=True, exist_ok=True)
+            payload = [i for i in items if i["key"] not in metadata_keys]
+            for outcome, count in _download(r2, prefix, destination, payload, refresh=args.refresh).items():
+                summary[outcome] += count
+            fetched.append({"workshopId": mod["workshopId"], "name": mod["name"],
+                            "r2": summary, "scope": args.scope, "loadFolders": folders})
+        # The Controller compares these with the folders the game actually loaded.
+        planned = {item["workshopId"]: item["loadFolders"] for item in fetched}
+        mods = []
+        for m in graph:
+            if m["workshopId"] is None:
+                mods.append({"path": local["path"], "packageId": local["packageId"], "target": True,
+                             "expectedLoadFolders": local["loadFolders"]})
+            else:
+                mods.append({"path": str((root / "mods" / m["workshopId"]).absolute()),
+                             "packageId": m["packageId"], "target": local is None and m["packageId"].casefold() == target_package,
+                             "expectedLoadFolders": planned[m["workshopId"]]})
+        request = {"recordType": "modValidationRequest", "schemaVersion": 1,
+                   "levels": ["A"], "official": official, "language": args.language,
+                   "mods": mods, "expectations": {}}
+        req_path = root / "request.json"
+        req_path.write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.chmod(req_path, 0o600)
+        return {"status": "modsReady", "fetched": fetched, "local": local, "request": str(req_path),
+                "validationLevel": "A",
+                "note": "Load folders and required dependencies checked against the complete request; "
+                        "resources outside loader inputs still require explicit retrieval"}
 
 
 @contextmanager

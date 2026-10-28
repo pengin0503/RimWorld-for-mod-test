@@ -1,6 +1,6 @@
 """Fetch explicitly selected private RimWorld assets from Cloudflare R2.
 
-Requires AWS CLI v2 and a bucket-scoped, read-only R2 S3 credential.
+Requires AWS CLI v2 (default) or the optional SDK, plus read-only R2 credentials.
 This tool never uploads, deletes, executes, or publishes game/mod files.
 """
 from __future__ import annotations
@@ -56,7 +56,7 @@ def ensure_safe_destination(root: Path, relative: str) -> Path:
 
 
 class R2:
-    def __init__(self, *, endpoint: str, bucket: str, aws: str = "aws"):
+    def __init__(self, *, endpoint: str, bucket: str, aws: str = "aws", transport: str | None = None):
         parsed = urlsplit(endpoint)
         host = parsed.hostname or ""
         if (parsed.scheme != "https" or parsed.username or parsed.password or parsed.port
@@ -66,6 +66,32 @@ class R2:
         if not bucket or "/" in bucket:
             raise AssetError("invalid R2_BUCKET")
         self.endpoint, self.bucket, self.aws = endpoint, bucket, aws
+        self._sdk = None
+        transport = os.environ.get('RWMT_R2_TRANSPORT', 'cli') if transport is None else transport
+        if transport not in ('cli', 'sdk'):
+            raise AssetError('R2 transport must be cli or sdk')
+        if transport == 'sdk':
+            try:
+                if __package__:
+                    from .r2_sdk import SDKTransport, TransportError
+                else:
+                    from r2_sdk import SDKTransport, TransportError
+            except ImportError:
+                raise AssetError('SDK transport requires requirements-r2-sdk.txt') from None
+            try:
+                self._sdk = SDKTransport(endpoint, bucket)
+            except TransportError as error:
+                raise AssetError(str(error)) from None
+
+    def close(self):
+        if self._sdk is not None:
+            self._sdk.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *error):
+        self.close()
 
     def call(self, *args: str) -> dict:
         cmd = [self.aws, "--endpoint-url", self.endpoint, "--region", "auto", "--no-cli-pager", "s3api", *args, "--output", "json"]
@@ -87,13 +113,21 @@ class R2:
             raise AssetError("AWS CLI returned invalid JSON") from exc
 
     def list_prefix(self, prefix: str) -> list[dict]:
+        if prefix != 'Game-Linux/' and not re.fullmatch(r'Workshop/[0-9]{1,20}/', prefix):
+            raise AssetError('listing requires an exact approved game or MOD prefix')
         entries = []
         token = None
         while True:
             args = ["list-objects-v2", "--bucket", self.bucket, "--prefix", prefix, "--max-keys", "1000", "--no-paginate"]
             if token:
                 args += ["--continuation-token", token]
-            page = self.call(*args)
+            if self._sdk is None:
+                page = self.call(*args)
+            else:
+                try:
+                    page = self._sdk.list_page(prefix, token)
+                except Exception:
+                    raise AssetError('SDK object listing failed') from None
             for item in page.get("Contents", []):
                 key = item["Key"]
                 if not key.startswith(prefix):
@@ -119,7 +153,13 @@ class R2:
             os.chmod(temp.name, 0o600)
             temporary = Path(temp.name)
         try:
-            metadata = self.call("get-object", "--bucket", self.bucket, "--key", key, str(temporary))
+            if self._sdk is None:
+                metadata = self.call("get-object", "--bucket", self.bucket, "--key", key, str(temporary))
+            else:
+                try:
+                    metadata = self._sdk.get_object(key, temporary)
+                except Exception:
+                    raise AssetError('SDK object download failed') from None
             actual = temporary.stat().st_size
             known_size = expected_size if expected_size is not None else metadata.get("ContentLength")
             if known_size is not None and actual != int(known_size):
@@ -149,7 +189,11 @@ def selection(scope: str, items: list[dict]) -> list[dict]:
 def run(args) -> dict:
     endpoint = args.endpoint or os.environ.get("R2_ENDPOINT", "")
     bucket = args.bucket or os.environ.get("R2_BUCKET", "rimworld-17")
-    r2 = R2(endpoint=endpoint, bucket=bucket, aws=args.aws)
+    with R2(endpoint=endpoint, bucket=bucket, aws=args.aws) as r2:
+        return _run(args, r2)
+
+
+def _run(args, r2) -> dict:
     dest = Path(args.dest).expanduser().absolute()
     if args.action == "file":
         key = validate_key(args.key)

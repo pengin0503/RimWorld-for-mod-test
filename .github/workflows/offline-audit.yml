@@ -26,6 +26,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Check Python syntax
         run: python -m compileall -q tools tests experiments
+      - name: Install optional R2 SDK for synthetic coverage
+        run: python -m pip install -r requirements-r2-sdk.txt
       - name: Test synthetic inputs only
         run: python -m unittest discover -s tests -v
 

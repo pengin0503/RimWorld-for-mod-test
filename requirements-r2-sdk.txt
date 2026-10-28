@@ -1,0 +1,2 @@
+# Optional pooled R2 transport; CLI remains dependency-free.
+botocore==1.43.120

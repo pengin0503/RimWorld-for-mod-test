@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -23,6 +24,50 @@ def sample_index(path, schema_version=1):
 
 
 class CodexWorkflowTests(unittest.TestCase):
+    def test_download_processes_multiple_batches_and_counts_results(self):
+        class FakeR2:
+            def get(self, key, dest, size, *, refresh=False):
+                if not refresh or dest.name != key.rsplit("/", 1)[-1]:
+                    raise AssertionError("incorrect download arguments")
+                dest.write_text(key, encoding="utf-8")
+                number = int(dest.stem)
+                return "cached" if number % 3 == 0 else "downloaded"
+
+        items = [{"key": f"Game-Linux/{number}.txt", "size": 1}
+                 for number in range(17)]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = cw._download(FakeR2(), "Game-Linux/", root, items, refresh=True)
+            self.assertEqual(result, {"downloaded": 11, "cached": 6})
+            self.assertEqual(len(list(root.iterdir())), 17)
+            self.assertEqual((root / "16.txt").read_text(encoding="utf-8"),
+                             "Game-Linux/16.txt")
+
+    def test_download_stops_queuing_after_failed_batch(self):
+        # Catch the regression where every queued object is fetched after the
+        # first failure. The barrier forces four simultaneous failed requests.
+        class FailingR2:
+            def __init__(self):
+                self.started = 0
+                self.lock = threading.Lock()
+                self.first_batch = threading.Barrier(4)
+
+            def get(self, key, dest, size, *, refresh=False):
+                with self.lock:
+                    self.started += 1
+                    number = self.started
+                if number <= 4:
+                    self.first_batch.wait(timeout=10)
+                raise cw.r2_assets.AssetError("synthetic failure")
+
+        fake = FailingR2()
+        items = [{"key": f"Game-Linux/{number}.txt", "size": 1}
+                 for number in range(100)]
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(cw.r2_assets.AssetError):
+                cw._download(fake, "Game-Linux/", Path(directory), items)
+        self.assertEqual(fake.started, 4)
+
     def test_default_index_download_uses_actual_R2_object(self):
         from subprocess import CompletedProcess
         with tempfile.TemporaryDirectory() as directory:

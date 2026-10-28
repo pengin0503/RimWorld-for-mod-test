@@ -83,6 +83,8 @@ Game-Linux/ の必要資材を取得する。英語・日本語以外の Languag
 
 prepare はゲーム本体を新たな私有スナップショットへコピーしSHAを記録する。スナップショットが既存ならチェックして再利用する。--refresh は**既存の不変スナップショットを改変しない**。更新ビルドは新しい --private-root を使用し、適格化の有効性を確認する。
 
+新規準備の結果には、秒単位の `timings` が含まれる。`fetchSeconds` は R2 の一覧取得・選択・ダウンロード、`snapshotCopySeconds` はコピー、`snapshotHashSeconds` はコピー後のファイル列挙と SHA-256、`snapshotTotalSeconds` はコピー開始から書き込み保護・情報収集まで（メタデータ保存を除く）、`totalSeconds` は R2 取得開始からスナップショット作成完了までを示す。既存スナップショットを再利用した場合は、新規準備の時間を報告しない。私有 Linux 回帰の安全な要約にも同じ数値を含める。
+
 ## 4. Worker をビルドして検証
 
     dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin

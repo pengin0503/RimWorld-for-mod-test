@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
 
@@ -207,7 +208,9 @@ def prepare(args) -> dict:
     if game.is_symlink():
         raise WorkflowError("game source cannot be a symlink")
     game.mkdir(mode=0o700, exist_ok=True)
+    started = time.monotonic()
     counts = _fetch(r2_client(args.aws), "Game-Linux/", game, runtime=True, refresh=args.refresh)
+    fetched = time.monotonic()
     if not (game / "Version.txt").is_file():
         raise WorkflowError("game Version.txt missing after R2 download")
     try:
@@ -215,7 +218,12 @@ def prepare(args) -> dict:
     except validation_host.Blocked as exc:
         raise WorkflowError(f"game snapshot blocked: {exc.code}") from exc
     return {"status": "prepared", "version": info["version"], "adapter": info["adapter"],
-            "files": info["fileCount"], "r2": counts}
+            "files": info["fileCount"], "r2": counts,
+            "timings": {"fetchSeconds": round(fetched - started, 3),
+                        "snapshotCopySeconds": info["timings"]["copySeconds"],
+                        "snapshotHashSeconds": info["timings"]["hashSeconds"],
+                        "snapshotTotalSeconds": info["timings"]["totalSeconds"],
+                        "totalSeconds": round(time.monotonic() - started, 3)}}
 
 
 def private_index(args, root: Path) -> Path:

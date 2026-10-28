@@ -85,6 +85,8 @@ prepare はゲーム本体を新たな私有スナップショットへコピー
 
 新規準備の結果には、秒単位の `timings` が含まれる。`fetchSeconds` は R2 の一覧取得・選択・ダウンロード、`snapshotCopySeconds` はコピー、`snapshotHashSeconds` はコピー後のファイル列挙と SHA-256、`snapshotTotalSeconds` はコピー開始から書き込み保護・情報収集まで（メタデータ保存を除く）、`totalSeconds` は R2 取得開始からスナップショット作成完了までを示す。既存スナップショットを再利用した場合は、新規準備の時間を報告しない。私有 Linux 回帰の安全な要約にも同じ数値を含める。
 
+2026-10-28 の[実 R2 計測](research/2026-10-28-initial-preparation-measurement.md)では、ランタイム初回準備707.831秒のうち取得が706.566秒。同じスナップショットの再利用と Harmony の A / Core / English の `passed / completed / qualified` を確認した。１回の実測であり、高速化率の実績ではない。
+
 ## 4. Worker をビルドして検証
 
     dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin

@@ -15,6 +15,15 @@ sys.path.insert(0, str(REPO))
 from tools import validation_host as vh
 
 
+def missing_fixture_confirmed(result):
+    codes = {r['code'] for r in result.get('reasons', [])}
+    return (result['status'] == 'incomplete' and result['executionStatus'] == 'completed'
+            and result.get('stages', {}).get('C', {}).get('status') == 'incomplete'
+            and 'eventChoiceObservationIncomplete' in codes
+            and codes <= {'experimental', 'cNotQualified', 'mapNotQualified',
+                          'eventChoiceObservationIncomplete'})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--snapshot', required=True)
@@ -45,7 +54,8 @@ def main():
                    {'event': 'RWMT_ChoiceEvent', 'choice': 'accept', 'rewardThing': 'Steel', 'rewardCount': 10}]}}
     path = out / 'request.json'
     path.write_text(json.dumps(request), encoding='utf-8')
-    result = vh.run_validation(args.snapshot, path, out / 'result', args.worker)
+    result = vh.run_validation(args.snapshot, path, out / 'result', args.worker,
+                               baseline_cache=out / 'baseline-cache')
     reasons = {reason['code'] for reason in result['reasons']}
     stage = result.get('stages', {}).get('C', {})
     ok = (result['status'] == 'incomplete' and result['executionStatus'] == 'completed'
@@ -54,8 +64,33 @@ def main():
                                        'eventChoiceMismatch', 'baselineIncomplete'}))
     print('fixture observations:', 'matched' if ok else 'not confirmed',
           '; overall:', result['status'], '; C:', stage.get('status'))
+    # Mutate expectations only: the actual game must still generate Steel 10.
+    for name, item, count in [('wrong-count', 'Steel', 11), ('wrong-item', 'WoodLog', 10)]:
+        request['expectations']['eventChoices'][0].update(rewardThing=item, rewardCount=count)
+        path.write_text(json.dumps(request), encoding='utf-8')
+        negative = vh.run_validation(args.snapshot, path, out / name, args.worker,
+                                     baseline_cache=out / 'baseline-cache')
+        codes = {r['code'] for r in negative.get('reasons', [])}
+        matched = (negative['status'] == 'incomplete' and negative['executionStatus'] == 'completed'
+                   and negative.get('stages', {}).get('C', {}).get('status') == 'failed'
+                   and 'eventChoiceMismatch' in codes
+                   and not codes.intersection({'newErrors', 'newWarnings', 'baselineIncomplete',
+                                               'eventChoiceObservationIncomplete'}))
+        ok = ok and matched
+        print(name, 'detected' if matched else 'not confirmed')
+    missing = out / 'missing-fixture'
+    shutil.copytree(REPO / 'tests/fixtures/validation-mods/okxml', missing)
+    request['mods'] = [{'path': str(missing), 'target': True}]
+    request['expectations']['eventChoices'][0].update(rewardThing='Steel', rewardCount=10)
+    path.write_text(json.dumps(request), encoding='utf-8')
+    absent = vh.run_validation(args.snapshot, path, out / 'missing', args.worker,
+                               baseline_cache=out / 'baseline-cache')
+    matched = missing_fixture_confirmed(absent)
+    ok = ok and matched
+    print('missing fixture', 'incomplete as required' if matched else 'not confirmed')
     return 0 if ok else 1
 
 
 if __name__ == '__main__':
     sys.exit(main())
+

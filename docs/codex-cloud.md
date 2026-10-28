@@ -57,7 +57,7 @@ ZIPに同梱された index_mods.py も私有領域で利用できる。正確�
       --official Core Royalty \
       --language English
 
-対象と明示した依存の About.xml から依存・1.7 の依存・loadAfter/loadBefore を辿り、索引で正確に特定して読み込み順を決める。曖昧・索引になし・循環は blocked とする。重複、不明、曖昧なIDを拒否する。MODの取得は Workshop/<ID>/ の prefix に限定し、最初に About の XML/TXT を取得して PackageId を索引と照合する。不一致なら DLL 等を取得せず停止する。
+対象と明示した依存の About.xml から必須依存（1.7の版別指定を含む）だけを辿り、索引で正確に特定する。`loadAfter/loadBefore` は、選択済みMODと必須依存の間の順序にのみ適用し、それだけを理由に別MODを追加取得しない。必須依存が曖昧・索引になし、または選択済みMOD間の順序が循環する場合は blocked とする。重複、不明、曖昧なIDを拒否する。MODの取得は Workshop/<ID>/ の prefix に限定し、最初に About の XML/TXT を取得して PackageId を索引と照合する。不一致なら DLL 等を取得せず停止する。
 
 既定の `--scope validation` は、列挙結果と実ゲームに合わせて解釈した `LoadFolders.xml` から有効フォルダを確定する。現在版のフォルダがなければゲームと同じ版選択を行い、root・Common・1.7 に固定しない。`IfModActive` / `IfModActiveAll` / `IfModNotActive` は要求内の全 MOD と `--official` の DLC で評価する。その配下の Defs/Patches XML、Assemblies DLL、指定言語と英語フォールバックの XML/TXT に加え、実測で A のロード時にも必要と分かった Textures 画像・Sounds 音声を取得する。非選択版、ソース、デバッグ情報、無関係な言語は省く。`--scope all` は明示した場合だけ使用する。
 
@@ -107,3 +107,4 @@ prepare はゲーム本体を新たな私有スナップショットへコピー
 - 既存の r2_assets.R2.get のキャッシュは同サイズ更新を見逃すことがある。既知更新時は --refresh または新しい作業ディレクトリを使う。より強い ETag/ハッシュ照合は今後の課題。
 - 対象MODのDLLは任意コードを含み得る。私有キーや個人ファイルを持つ環境で未信頼MODを実行する場合はリスクを明示し、権限を分離すること。
 - 検証ホストの合格は「そのOS/CLR/ビルド/要求された範囲」の合格であり、Windowsでの長時間ゲーム動作の保証ではない。
+

@@ -173,3 +173,6 @@ python3 experiments/official-comparison/compare_official.py --map --snapshot /pr
 MOD のサイズをハッシュ計算前に確認し、合計が上限を超える場合は `modTooLarge` で停止します。`run --hash-cache <私有ファイル>` で変更されていないファイルのハッシュを再利用できます。キャッシュには私有パスが含まれるため公開しないでください。内容がサイズと更新日時を保ったまま変わった場合も、コピー時のハッシュ照合で `modChanged` として停止します。baseline と target の MOD は Worker による変更の混入を防ぐため別々にコピーします。
 
 MOD が多い場合は要求の `limits.timeoutSeconds` と `limits.memoryMiB` を明示して調整する運用を推奨します。既定値は変更していません。上限に達した実行は成功ではなく `incomplete` として扱います。
+
+LinuxではMODの準備時にコピーオンライト複製を試し、利用できなければ通常コピーへ戻ります。どちらもコピー後の内容をSHA-256で照合し、baseline・target・入力MODは別のファイルとして扱います。MODにハードリンクは使いません。`process.baseline.modCopyModes` と `process.target.modCopyModes` の `reflink` / `copy` に件数を記録します。既存の `linkModes` はゲームスナップショットへのリンク方式のみです。非対応FSでの高速化は保証しません。
+

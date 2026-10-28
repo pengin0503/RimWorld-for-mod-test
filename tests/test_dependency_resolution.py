@@ -23,7 +23,7 @@ class DependencyResolutionTests(unittest.TestCase):
         data = {'a': metadata('a', '<loadAfter><li>b</li></loadAfter>'),
                 'b': metadata('b', '<loadAfter><li>a</li></loadAfter>')}
         with self.assertRaises(cw.WorkflowError) as caught:
-            cw.resolve_mod_graph(index, ['a'], lambda mod: data[mod['packageId']])
+            cw.resolve_mod_graph(index, ['a', 'b'], lambda mod: data[mod['packageId']])
         self.assertEqual(caught.exception.code, 'dependencyCycle')
 
     def test_fetch_mods_follows_metadata_before_payload(self):
@@ -63,9 +63,9 @@ class DependencyResolutionTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'officialContentMissing')
         self.assertIn('Biotech', str(caught.exception))
 
-    def test_missing_index_dependency_blocks(self):
+    def test_missing_index_required_dependency_blocks(self):
         index = {'mods': [{'workshop_id': '1', 'package_id': 'a', 'name': 'A'}]}
-        meta = metadata('a', '<loadAfter><li>unknown.mod</li></loadAfter>')
+        meta = metadata('a', '<modDependencies><li><packageId>unknown.mod</packageId></li></modDependencies>')
         with self.assertRaises(cw.WorkflowError) as caught:
             cw.resolve_mod_graph(index, ['a'], lambda _: meta)
         self.assertEqual(caught.exception.code, 'missingDependencies')
@@ -74,8 +74,27 @@ class DependencyResolutionTests(unittest.TestCase):
         index = {'mods': [{'workshop_id': '1', 'package_id': 'dep', 'name': 'Dep'}]}
         local = {'packageId': 'local.target', 'workshopId': None, 'name': 'local'}
         data = {'local.target': metadata('local.target', '<loadBefore><li>dep</li></loadBefore>'), 'dep': metadata('dep')}
-        order = cw.resolve_mod_graph(index, ['local.target'], lambda mod: data[mod['packageId']], local=local)
+        order = cw.resolve_mod_graph(index, ['dep', 'local.target'], lambda mod: data[mod['packageId']], local=local)
         self.assertEqual([m['packageId'] for m in order], ['local.target', 'dep'])
+
+    def test_optional_ordering_does_not_select_or_fetch_other_mods(self):
+        index = {'mods': [{'workshop_id': '1', 'package_id': 'a', 'name': 'A'},
+                          {'workshop_id': '2', 'package_id': 'b', 'name': 'B'}]}
+        read = []
+        def metadata_for(mod):
+            read.append(mod['packageId'])
+            return metadata(mod['packageId'], '<loadAfter><li>b</li><li>unknown.mod</li></loadAfter>' if mod['packageId'] == 'a' else '')
+        order = cw.resolve_mod_graph(index, ['a'], metadata_for)
+        self.assertEqual([m['packageId'] for m in order], ['a'])
+        self.assertEqual(read, ['a'])
+
+    def test_optional_ordering_applies_to_required_closure(self):
+        index = {'mods': [{'workshop_id': str(i), 'package_id': name, 'name': name}
+                          for i, name in enumerate(('a', 'b', 'c'), 1)]}
+        data = {'a': metadata('a', '<modDependencies><li><packageId>b</packageId></li><li><packageId>c</packageId></li></modDependencies>'),
+                'b': metadata('b', '<loadAfter><li>c</li></loadAfter>'), 'c': metadata('c')}
+        self.assertEqual([m['packageId'] for m in cw.resolve_mod_graph(index, ['a'], lambda m: data[m['packageId']])],
+                         ['c', 'b', 'a'])
 
     def test_versioned_dependencies_override_generic_for_game_version(self):
         index = {'mods': [{'workshop_id': '1', 'package_id': 'a', 'name': 'A'},
@@ -91,3 +110,4 @@ class DependencyResolutionTests(unittest.TestCase):
         with self.assertRaises(cw.WorkflowError) as caught:
             cw.resolve_mod_graph(index, ['a'], lambda _: metadata('a'))
         self.assertEqual(caught.exception.code, 'dependencyUnresolved')
+

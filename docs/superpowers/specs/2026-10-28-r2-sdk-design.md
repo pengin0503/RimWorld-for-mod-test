@@ -1,0 +1,7 @@
+# R2 persistent SDK acquisition
+
+The user requested implementation through measured acceleration, following the 706.566-second R2 baseline. Keep the CLI default and add explicit `RWMT_R2_TRANSPORT=sdk` using optional, pinned botocore 1.43.120. A shared client reuses HTTP connections across the existing maximum four concurrent downloads. Merely raising concurrency retains process/TLS overhead; recursive `s3 sync` changes selection and atomicity, so neither is chosen.
+
+The shared R2 layer retains approved key/prefix restrictions, caps, cache behavior, size checks, mode-0600 temporary files, atomic replacement, and cleanup. SDK downloads stream bounded chunks and always close response bodies. Session configuration ignores inherited AWS profiles/config files without mutating parent environment; only explicitly supplied environment credentials are used. SDK failures produce fixed messages without raw exceptions, endpoints or paths. Explicit close runs on success and failure.
+
+Measure a fixed, byte-capped set of 32 small approved game objects with both transports, three alternating pairs, fresh destinations, four workers and SHA-256 equality. Then prepare one full runtime with SDK, reuse its immutable snapshot, and validate index-resolved Harmony at A/Core/English without cloud credentials. No full CLI runtime redownload; compare the SDK initial time with the recorded baseline as a cross-run observation, not a controlled universal speedup. No C/D, Windows feature, R2 writes, private artifacts, or merge.

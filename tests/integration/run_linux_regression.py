@@ -42,6 +42,7 @@ def main():
             raise
         (root / 'preparation-summary.json').write_text(json.dumps({
             'gameFiles': prepared.get('files'), 'gameR2': prepared.get('r2'),
+            'gameTimings': prepared.get('timings'),
             'modCount': len(selected['fetched']),
             'modSelectedBytes': sum(x['r2']['listedBytes'] for x in selected['fetched']),
             'modSelectedFiles': sum(x['r2']['selected'] for x in selected['fetched'])}))

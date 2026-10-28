@@ -77,11 +77,19 @@ ZIPに同梱された index_mods.py も私有領域で利用できる。正確�
 
 ## 3. 実ゲーム処理検証が必要な時だけ、ゲーム資材とスナップショットを準備
 
+大量ファイルの取得には、`python3 -m pip install -r requirements-r2-sdk.txt` の後、`RWMT_R2_TRANSPORT=sdk` を指定して接続を再利用できる。未指定時は従来の CLI。詳細は [R2 の SDK 経路](r2-on-demand.md#認証)。どちらも必要な対象だけを取得し、既存スナップショットを再利用する。
+
+[実 SDK 計測](research/2026-10-28-r2-sdk-speed.md)では同じ32ファイルの取得中央値が10.99秒から2.89秒へ短縮。別実行の初回ランタイム準備は707.831秒から217.389秒となり、SDK取得後も Harmony の A / Core / English が `passed / completed / qualified`。試料・実行条件ごとの観測であり、全構成への短縮率の保証ではない。
+
     python3 tools/codex_workflow.py prepare --private-root "$RWMT_PRIVATE"
 
 Game-Linux/ の必要資材を取得する。英語・日本語以外の Languages/*.tar と *.debug を除外する。**初回でも約900MB級のダウンロードが発生し得る**。これは既存の validation_host.py が正しいCLR/ゲームDLL/Data/Assetsを必要とするためで、MODメタデータ照会だけの時には実施しない。
 
 prepare はゲーム本体を新たな私有スナップショットへコピーしSHAを記録する。スナップショットが既存ならチェックして再利用する。--refresh は**既存の不変スナップショットを改変しない**。更新ビルドは新しい --private-root を使用し、適格化の有効性を確認する。
+
+新規準備の結果には、秒単位の `timings` が含まれる。`fetchSeconds` は R2 の一覧取得・選択・ダウンロード、`snapshotCopySeconds` はコピー、`snapshotHashSeconds` はコピー後のファイル列挙と SHA-256、`snapshotTotalSeconds` はコピー開始から書き込み保護・情報収集まで（メタデータ保存を除く）、`totalSeconds` は R2 取得開始からスナップショット作成完了までを示す。既存スナップショットを再利用した場合は、新規準備の時間を報告しない。私有 Linux 回帰の安全な要約にも同じ数値を含める。
+
+2026-10-28 の[実 R2 計測](research/2026-10-28-initial-preparation-measurement.md)では、ランタイム初回準備707.831秒のうち取得が706.566秒。同じスナップショットの再利用と Harmony の A / Core / English の `passed / completed / qualified` を確認した。１回の実測であり、高速化率の実績ではない。
 
 ## 4. Worker をビルドして検証
 

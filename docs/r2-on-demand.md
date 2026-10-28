@@ -14,6 +14,17 @@
 
 ## 認証
 
+Linux の大量ファイル取得には、接続を再利用する SDK 経路を明示して利用できる。
+
+```bash
+python3 -m pip install -r requirements-r2-sdk.txt
+export RWMT_R2_TRANSPORT=sdk
+```
+
+この設定は `r2_assets.py` と `codex_workflow.py` の両方に適用される。未指定または `RWMT_R2_TRANSPORT=cli` は従来の AWS CLI。SDK は明示的な `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`（必要なら `AWS_SESSION_TOKEN`）だけを使い、親の AWS_PROFILE や設定ファイルを変更・参照しない。必要な SDK がなければ取得を開始せずエラーになる。取得の選択・容量上限・一時ファイル・サイズ照合・キャッシュ方式は共通で、既存の同サイズ更新を見逃し得る制限も共通。
+
+速度と実 A 検証の結果は [SDK の計測記録](research/2026-10-28-r2-sdk-speed.md)を参照。同じ32ファイルで約74%の時間短縮を観測した。
+
 Cloudflare で **対象バケットのみ Object Read only** のトークンを作成し、Linux 環境に AWS CLI v2 と Python 3.12+ をインストールする。環境変数の形式：
 
 ```bash

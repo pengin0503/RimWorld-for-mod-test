@@ -1,0 +1,51 @@
+name: Private Linux initial preparation measurement
+
+on:
+  push:
+    branches: [feat/measure-initial-preparation-20261028]
+    paths:
+      - .github/workflows/linux-private-preparation.yml
+      - tests/integration/run_preparation_measurement.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-initial-preparation
+  cancel-in-progress: false
+
+jobs:
+  preparation-measurement:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Check tools and build without cloud credentials
+        run: |
+          aws --version
+          dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+      - name: Prepare one private runtime and index-resolved Harmony
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: rimworld-17
+          AWS_DEFAULT_REGION: auto
+        run: |
+          python tests/integration/run_preparation_measurement.py prepare --root "$RUNNER_TEMP/rwmt-private" > "$RUNNER_TEMP/private-prepare.log" 2>&1 || { echo 'Private preparation failed; raw logs are not published'; exit 1; }
+      - name: Validate A only without cloud credentials
+        run: |
+          python tests/integration/run_preparation_measurement.py run --root "$RUNNER_TEMP/rwmt-private" > "$RUNNER_TEMP/private-validation.log" 2>&1 || { echo 'Private A validation failed; inspect the safe summary'; exit 1; }
+      - name: Publish rebuilt numeric and enum summary only
+        if: always()
+        run: |
+          python tests/integration/run_preparation_measurement.py publish --root "$RUNNER_TEMP/rwmt-private"

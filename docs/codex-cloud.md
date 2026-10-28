@@ -79,6 +79,8 @@ ZIPに同梱された index_mods.py も私有領域で利用できる。正確�
 
 大量ファイルの取得には、`python3 -m pip install -r requirements-r2-sdk.txt` の後、`RWMT_R2_TRANSPORT=sdk` を指定して接続を再利用できる。未指定時は従来の CLI。詳細は [R2 の SDK 経路](r2-on-demand.md#認証)。どちらも必要な対象だけを取得し、既存スナップショットを再利用する。
 
+[実 SDK 計測](research/2026-10-28-r2-sdk-speed.md)では同じ32ファイルの取得中央値が10.99秒から2.89秒へ短縮。別実行の初回ランタイム準備は707.831秒から217.389秒となり、SDK取得後も Harmony の A / Core / English が `passed / completed / qualified`。試料・実行条件ごとの観測であり、全構成への短縮率の保証ではない。
+
     python3 tools/codex_workflow.py prepare --private-root "$RWMT_PRIVATE"
 
 Game-Linux/ の必要資材を取得する。英語・日本語以外の Languages/*.tar と *.debug を除外する。**初回でも約900MB級のダウンロードが発生し得る**。これは既存の validation_host.py が正しいCLR/ゲームDLL/Data/Assetsを必要とするためで、MODメタデータ照会だけの時には実施しない。

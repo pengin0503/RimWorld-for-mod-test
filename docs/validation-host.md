@@ -166,7 +166,7 @@ python3 experiments/official-comparison/compare_official.py --map --snapshot /pr
 
 ### 自作 fixture のイベント選択肢
 
-`event-choice.v1` は自作 fixture の事件・選択肢・Steel の報酬を非描画で観測する実験ケースです。要求形式は [C の契約](contracts/mod-validation-v1.md#c自作-fixture-のイベント選択肢非描画experimental)を参照してください。ゲーム API と選択肢の前提が揃わなければ `incomplete` です。実 MOD のイベントやクエストの動作は確認しません。
+`event-choice.v1` は自作 fixture の事件・選択肢・Steel の報酬を非描画で観測する実験ケースです。要求形式は [C の契約](contracts/mod-validation-v1.md#c自作-fixture-のイベント選択肢非描画experimental)を参照してください。選択肢の実行前後で生成マップの実アイテムスタックを数え、増分を報酬として記録します（`rewardSource=mapItemStackDelta`）。fixture の自己申告する報酬カウンターは合否に使いません。アイテム種が複数増える・既存のアイテムが減る等で増分が一意に解釈できない場合や、必要なゲーム API が使えない場合は `incomplete` です。観測できたのに期待のアイテムが増えなかった場合は C の `mismatch` とし、独立適格化までは全体 `incomplete` です。実 MOD のイベントやクエストの動作は確認しません。
 
 ### 大量 MOD の検証
 

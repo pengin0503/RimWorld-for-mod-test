@@ -163,4 +163,4 @@ Linux は画面を描画しません。固定ケース `bill-ingredient-options.
 
 ### C：自作 fixture のイベント選択肢（非描画・experimental）
 
-`tests: ["event-choice.v1"]`、生成マップの `map`、`expectations.eventChoices` に `{ "event": "RWMT_ChoiceEvent", "choice": "accept", "rewardThing": "Steel", "rewardCount": 10 }` を1件指定する。事件と選択肢は自作 fixture に固定し、別々の任意ゲーム API を呼び出す機能は提供しない。Worker は生成マップ上で事件の実行、選択肢の提示と実行、生成された報酬を観測する。観測不足や実行例外は `incomplete`、観測済みの値の不一致は C 段階を `failed` とする。独立した適格化までは観測が一致しても全体を `incomplete` とする。MOD 一般のイベント・クエストの合格、実画面の動作、時間経過を保証しない。
+`tests: ["event-choice.v1"]`、生成マップの `map`、`expectations.eventChoices` に `{ "event": "RWMT_ChoiceEvent", "choice": "accept", "rewardThing": "Steel", "rewardCount": 10 }` を1件指定する。事件と選択肢は自作 fixture に固定し、別々の任意ゲーム API を呼び出す機能は提供しない。Worker は生成マップ上で事件の実行、選択肢の提示と実行、**選択肢の直前と直後のマップ上のアイテム数量の差**を観測する。`actual.rewardSource=mapItemStackDelta` と `mapDeltaUnambiguous=true` が必要で、fixture 内の報酬カウンターは合否判定に使用しない。複数アイテムの増加、アイテムの減少、数量取得失敗は観測不能として `incomplete`。観測不足や実行例外は `incomplete`、観測済みの値の不一致は C 段階を `failed` とする。独立した適格化までは観測が一致しても全体を `incomplete` とする。MOD 一般のイベント・クエストの合格、実画面の動作、時間経過を保証しない。

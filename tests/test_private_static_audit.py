@@ -164,6 +164,35 @@ class AuditTests(unittest.TestCase):
             (a.session_path(root) / 'input/sample.dll').write_bytes(b'changed')
             with self.assertRaises(ValueError): a.load_session(root)
 
+    def test_unrecognized_type_atoms_are_never_published(self):
+        identity = a.pv.current_identity(ENV)
+        overload = {'token': 100663297, 'return': {'kind': 'named', 'name': 'PRIVATE.Secret'},
+                    'parameters': [], 'genericCount': 0, 'static': False, 'visibility': 'Public', 'calls': []}
+        raw = {**identity, 'verified': True, 'types': [{'id': 'game', 'found': True,
+              'methods': [{'name': 'InitNewGame', 'overloads': [overload]}]}]}
+        result = a.public_summary(raw, identity)
+        self.assertNotIn('PRIVATE', json.dumps(result))
+        self.assertEqual(result['staticAuditStatus'], 'incomplete')
+        self.assertFalse(result['c0Passed'])
+
+    def test_known_signature_is_rebuilt_from_fixed_atoms(self):
+        signature = {'kind': 'byref', 'element': {'kind': 'array', 'rank': 1,
+                    'element': {'kind': 'primitive', 'name': 'Int32'}}}
+        self.assertEqual(a.normalized_type(signature), 'System.Int32[]&')
+        with self.assertRaises(ValueError): a.normalized_type({'kind': 'named', 'name': 'System.PRIVATE'})
+
+    def test_public_summary_rebuilds_known_signature_without_unknown_fields(self):
+        identity = a.pv.current_identity(ENV)
+        methods = [{'name': name, 'overloads': []} for name in a.TARGETS['game']]
+        methods[0]['overloads'] = [{'token': 100663297, 'return': {'kind': 'primitive', 'name': 'Void'},
+            'parameters': [{'kind': 'primitive', 'name': 'Int32'}], 'genericCount': 0, 'static': False,
+            'visibility': 'Public', 'calls': [], 'private': 'PRIVATE'}]
+        raw = {**identity, 'verified': True, 'types': [{'id': 'game', 'found': True, 'methods': methods}]}
+        result = a.public_summary(raw, identity)
+        self.assertEqual(result['types'][0]['methods'][0]['signatures'][0], 'instance public System.Void (System.Int32)')
+        self.assertNotIn('PRIVATE', json.dumps(result))
+        self.assertEqual(result['staticAuditStatus'], 'incomplete')
+
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):
             with self.assertRaises(ValueError): a.prepare(Path(d))

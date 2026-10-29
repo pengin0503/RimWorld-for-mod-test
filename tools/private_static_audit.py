@@ -129,8 +129,90 @@ def load_session(root):
     return manifest
 
 
+PRIMITIVES = frozenset(('Void', 'Boolean', 'Char', 'SByte', 'Byte', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Single', 'Double', 'String', 'Object', 'IntPtr', 'UIntPtr'))
+TYPE_ATOMS = frozenset(('System.Action', 'System.Collections.Generic.List`1', 'System.Collections.Generic.IEnumerable`1',
+    'Verse.Game', 'Verse.MapGenerator', 'Verse.LongEventHandler', 'RimWorld.Dialog_BillConfig', 'Verse.ThingFilterUI',
+    'Verse.Listing_TreeThingFilter', 'RimWorld.BillUtility', 'RimWorld.IncidentWorker', 'Verse.DiaOption',
+    'Verse.ThingFilter', 'Verse.ThingDef', 'Verse.SpecialThingFilterDef', 'Verse.TreeNode_ThingCategory',
+    'Verse.RecipeDef', 'Verse.IntVec3', 'Verse.Map', 'Verse.MapGeneratorDef', 'Verse.GenStepWithParams',
+    'RimWorld.QuickSearchFilter', 'RimWorld.Precept_ThingStyle', 'RimWorld.Planet.MapParent', 'UnityEngine.Rect', 'UnityEngine.Vector2'))
+
+
+def normalized_type(node, depth=0):
+    if depth >= 8 or not isinstance(node, dict): raise ValueError('unsupported type')
+    kind = node.get('kind')
+    if kind == 'primitive' and node.get('name') in PRIMITIVES: return 'System.' + node['name']
+    if kind == 'named' and node.get('name') in TYPE_ATOMS: return node['name']
+    if kind in ('methodParameter', 'typeParameter') and type(node.get('index')) is int and 0 <= node['index'] < 32:
+        return ('!!' if kind == 'methodParameter' else '!') + str(node['index'])
+    if kind in ('byref', 'pointer'):
+        return normalized_type(node.get('element'), depth+1) + ('&' if kind == 'byref' else '*')
+    if kind == 'array' and type(node.get('rank')) is int and 1 <= node['rank'] <= 32:
+        return normalized_type(node.get('element'), depth+1) + '[' + ',' * (node['rank']-1) + ']'
+    if kind == 'generic' and isinstance(node.get('arguments'), list) and 1 <= len(node['arguments']) <= 32:
+        return normalized_type(node.get('element'), depth+1) + '<' + ','.join(normalized_type(x, depth+1) for x in node['arguments']) + '>'
+    raise ValueError('unsupported type')
+
+
+TARGETS = {'game': ('InitNewGame', 'FinalizeInit'), 'map-generator': ('GenerateMap',),
+           'long-events': ('ExecuteWhenFinished', 'QueueLongEvent'),
+           'bill-dialog': ('DoIngredientConfigPane', 'get_HiddenSpecialThingFilters'),
+           'filter-ui': ('DoThingFilterConfigWindow',), 'filter-listing': ('.ctor', 'Visible'),
+           'bill-factory': ('MakeNewBill',), 'incident': ('TryExecute',), 'dialog-choice': ('Activate',)}
+TARGET_NAMES = {'game': 'Verse.Game', 'map-generator': 'Verse.MapGenerator', 'long-events': 'Verse.LongEventHandler',
+                'bill-dialog': 'RimWorld.Dialog_BillConfig', 'filter-ui': 'Verse.ThingFilterUI',
+                'filter-listing': 'Verse.Listing_TreeThingFilter', 'bill-factory': 'RimWorld.BillUtility',
+                'incident': 'RimWorld.IncidentWorker', 'dialog-choice': 'Verse.DiaOption'}
+VISIBILITY = {'Public': 'public', 'Private': 'private', 'Family': 'family', 'Assembly': 'assembly',
+              'FamANDAssem': 'family-and-assembly', 'FamORAssem': 'family-or-assembly', 'PrivateScope': 'private-scope'}
+
+
 def public_summary(raw, identity):
     raw = raw if isinstance(raw, dict) else {}
     bound = all(raw.get(k) == v for k, v in identity.items())
-    return {**identity, 'verified': bound and raw.get('verified') is True,
-            'staticAuditStatus': 'incomplete', 'c0Passed': False, 'types': []}
+    binary = bound and raw.get('verified') is True
+    source = raw.get('types') if binary and isinstance(raw.get('types'), list) else []
+    rows = []
+    complete = binary and len(source) == len(TARGETS)
+    allowed_edges = {TARGET_NAMES[k] + '.' + n: (k, n) for k, values in TARGETS.items() for n in values}
+    for target_id, names in TARGETS.items():
+        matches = [x for x in source if isinstance(x, dict) and x.get('id') == target_id]
+        if len(matches) != 1: complete = False; continue
+        target = matches[0]
+        if type(target.get('found')) is not bool or not isinstance(target.get('methods'), list):
+            complete = False; continue
+        methods = []
+        for name in names:
+            entries = [x for x in target['methods'] if isinstance(x, dict) and x.get('name') == name]
+            if len(entries) != 1 or not isinstance(entries[0].get('overloads'), list) or len(entries[0]['overloads']) > 16:
+                complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
+            signatures = []; edges = []; unreadable = False
+            for item in entries[0]['overloads']:
+                try:
+                    if not isinstance(item, dict) or type(item.get('static')) is not bool or item.get('visibility') not in VISIBILITY:
+                        raise ValueError('invalid method')
+                    params = item.get('parameters'); generics = item.get('genericCount')
+                    if not isinstance(params, list) or len(params) > 64 or type(generics) is not int or not 0 <= generics <= 32:
+                        raise ValueError('invalid signature')
+                    result = normalized_type(item.get('return'))
+                    signature = ('static' if item['static'] else 'instance') + ' ' + VISIBILITY[item['visibility']] + ' ' + result
+                    if generics: signature += '<' + str(generics) + '>'
+                    signature += ' (' + ', '.join(normalized_type(x) for x in params) + ')'
+                    if len(signature) > 2048: raise ValueError('signature too long')
+                    callsites = item.get('calls')
+                    if not isinstance(callsites, list) or len(callsites) > 4096: raise ValueError('invalid calls')
+                    safe_edges = []
+                    for call in callsites:
+                        if not isinstance(call, dict) or type(call.get('offset')) is not int or not 0 <= call['offset'] < 65536 or call.get('kind') not in ('call', 'callvirt', 'newobj'):
+                            raise ValueError('invalid call')
+                        edge = allowed_edges.get(call.get('target'))
+                        if edge: safe_edges.append({'typeId': edge[0], 'methodId': edge[1], 'kind': call['kind'], 'offset': call['offset']})
+                    signatures.append(signature); edges.extend(safe_edges)
+                except (ValueError, TypeError): unreadable = True
+            if unreadable: complete = False
+            methods.append({'name': name, 'status': 'unreadable' if unreadable else 'found' if signatures else 'missing',
+                            'signatures': signatures, 'calls': edges})
+        if len(target['methods']) != len(names): complete = False
+        rows.append({'id': target_id, 'status': 'found' if target['found'] else 'missing', 'methods': methods})
+    return {**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269', 'binaryVerified': binary,
+            'verified': binary, 'staticAuditStatus': 'completed' if complete else 'incomplete', 'c0Passed': False, 'types': rows}

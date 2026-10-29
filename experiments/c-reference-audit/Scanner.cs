@@ -146,6 +146,7 @@ public static class Scanner
             int offset = pos;
             starts.Add(offset);
             ushort code = il[pos++];
+            if (code is >= 0xf8 and <= 0xfd or 0xff) throw new BadImageFormatException();
             if (code == 0xfe)
             {
                 if (pos >= il.Length) throw new BadImageFormatException();

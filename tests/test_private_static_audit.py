@@ -341,6 +341,35 @@ class AuditTests(unittest.TestCase):
             result = a.pv.run_command(['synthetic'], Path(d) / 'private.log', timeout=120, memory_limit=2*1024**3)
             self.assertTrue(result['interrupted'])
 
+    def test_preparation_uses_real_r2_fixed_key_listing_interface(self):
+        from tools import r2_assets as ra
+        data = {name: ('own fixture ' + name).encode() for name in a.EXPECTED}
+        data['Version.txt'] = b'1.7.4985 rev1269\n'
+        expected = {name: hashlib.sha256(contents).hexdigest() for name, contents in data.items() if name != 'Version.txt'}
+        client = ra.R2(endpoint='https://abc.r2.cloudflarestorage.com', bucket='rimworld-17')
+        prefixes = []; downloads = []
+        def listing(*args):
+            prefix = args[args.index('--prefix') + 1]; prefixes.append(prefix)
+            name = prefix.removeprefix('Game-Linux/')
+            return {'Contents': [{'Key': prefix, 'Size': len(data[name])}]}
+        def get(key, dest, size, refresh=False):
+            downloads.append(key); dest.write_bytes(data[key.removeprefix('Game-Linux/')])
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a, 'EXPECTED', expected), patch.object(a.cw, 'r2_session', return_value=contextlib.nullcontext(client)), patch.object(client, 'call', side_effect=listing), patch.object(client, 'get', side_effect=get):
+            self.assertTrue(a.prepare(Path(d))['verified'])
+            self.assertEqual(len(prefixes), 8); self.assertEqual(set(prefixes), set(downloads))
+            self.assertNotIn('Game-Linux/', prefixes)
+
+    def test_publish_reports_verified_acquisition_totals(self):
+        identity = a.pv.current_identity(ENV)
+        manifest = {'inputs': {'Version.txt': {'size': 18, 'source': 'r2'}, 'sample.dll': {'size': 100, 'source': 'snapshot'}}, 'seconds': 1.25}
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a, 'load_session', return_value=manifest):
+            root = Path(d); session = a.session_path(root); session.mkdir(parents=True)
+            (session / 'scan.json').write_text(json.dumps({**identity, 'verified': False}))
+            result = a.publish(root)
+            self.assertEqual(result['acquisition'], {'files': 2, 'bytes': 118, 'downloadedBytes': 18, 'reusedBytes': 100, 'seconds': 1.25})
+            self.assertTrue(result['binaryVerified'])
+            self.assertEqual(result['staticAuditStatus'], 'incomplete')
+
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):
             with self.assertRaises(ValueError): a.prepare(Path(d))

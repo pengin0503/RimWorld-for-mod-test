@@ -1,6 +1,7 @@
 """Private, main-bound acquisition for the C reference metadata audit."""
 import hashlib
 import json
+import math
 import os
 import shutil
 import time
@@ -296,16 +297,25 @@ def public_summary(raw, identity):
 
 def publish(root):
     identity = pv.current_identity()
-    raw = {}
+    raw = {}; manifest = None
     try:
-        load_session(root)
+        manifest = load_session(root)
         path = session_path(root) / 'scan.json'
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 4*1024*1024:
             raise ValueError('invalid scanner evidence')
         raw = pv.read_json(path)
     except (ValueError, OSError):
         raw = {}
-    return public_summary(raw, identity)
+    summary = public_summary(raw, identity)
+    if manifest is not None:
+        summary['binaryVerified'] = True
+        inputs = manifest['inputs']
+        seconds = manifest.get('seconds')
+        seconds = seconds if type(seconds) in (int, float) and math.isfinite(seconds) and 0 <= seconds <= 1200 else None
+        summary['acquisition'] = {'files': len(inputs), 'bytes': sum(x['size'] for x in inputs.values()),
+            'downloadedBytes': sum(x['size'] for x in inputs.values() if x['source'] == 'r2'),
+            'reusedBytes': sum(x['size'] for x in inputs.values() if x['source'] == 'snapshot'), 'seconds': seconds}
+    return summary
 
 
 def main():

@@ -147,3 +147,11 @@ run/attempt/commit不一致、重複実行、古いsummaryから成功を作ら�
 この入口の実物受入（smoke/cow/C回帰/D回帰を各1回、その後all）はmain統合後に行う。
 未マージbranchへ秘密情報を渡すpreviewは追加しない。従来のbranch専用workflowは受入完了まで移行用に残す。
 Windowsの新機能とDの比較条件緩和は対象外。
+
+## mainからのC参照API静的調査
+
+`Private Linux C metadata audit` はmainからの手動実行専用で、固定されたLinuxビルドの8ファイルだけを対象にする。既存snapshotの該当ファイルはハッシュを再確認して再利用し、不足分のみR2から取得する。入力サイズは1ファイル64 MiB、合計128 MiBまで。ゲームやMODの実行、Workshopの列挙は行わない。
+
+R2資格情報は準備stepだけに渡す。scannerはゲームをロードせずPE metadataとILを解析し、120秒・合計RSS 2 GiB・ログ8 MiBをポーリング監督する。これは強制的なメモリ上限ではなく、kernel I/Oによってプロセス終了が遅れることがある。公開summaryは実行IDと入力を再検証し、固定API・許可済みの型・取得量だけを出す。DLL、パス、生ログ、私有結果は公開しない。
+
+`binaryVerified` は入力のバージョンとハッシュの一致だけを示す。`staticAuditStatus=completed` は固定対象の静的調査が完了したことだけを示し、`c0Passed` は常にfalseである。実UIへの到達やイベント処理順序、独立比較、Cの適格化は別途確認する。main統合後の実物受入が完了するまで、実DLLの解析結果を確認済みとして扱わない。

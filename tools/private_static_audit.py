@@ -16,7 +16,9 @@ def verify_directory(directory):
     try:
         if directory.is_symlink() or (directory/'Version.txt').is_symlink(): return False
         version = directory/'Version.txt'
-        if version.stat().st_size > 128 or version.read_text().removesuffix('\n').removesuffix('\r') != VERSION: return False
+        if version.stat().st_size > 128: return False
+        with version.open('rb') as stream: version_bytes = stream.read(129)
+        if version_bytes not in (VERSION.encode(), (VERSION+'\n').encode(), (VERSION+'\r\n').encode()): return False
         total = version.stat().st_size
         for name, digest in EXPECTED.items():
             path = directory/name
@@ -114,7 +116,7 @@ def load_session(root):
     root = cw._safe_private(Path(root))
     session = session_path(root)
     manifest_file = session / 'manifest.json'
-    if session.is_symlink() or manifest_file.is_symlink() or not manifest_file.is_file() or manifest_file.stat().st_size > 65536:
+    if session.parent.is_symlink() or session.is_symlink() or manifest_file.is_symlink() or not manifest_file.is_file() or manifest_file.stat().st_size > 65536:
         raise ValueError('invalid audit manifest')
     manifest = pv.read_json(manifest_file)
     if not isinstance(manifest, dict) or any(manifest.get(k) != v for k, v in identity.items()) or manifest.get('verified') is not True or manifest.get('invalidated') is True or not verify(root):

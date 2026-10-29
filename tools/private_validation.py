@@ -203,6 +203,8 @@ def run_command(command, log, *, timeout=900, memory_limit=4*1024**3):
             if process.poll() is None:
                 process.terminate()
             process.wait()
+    if log.stat().st_size > 8*1024*1024 or time.monotonic()-started >= timeout:
+        interrupted=True
     evidence=read_json(status)
     evidence=evidence if isinstance(evidence,dict) else {}
     code=evidence.get('exitCode')

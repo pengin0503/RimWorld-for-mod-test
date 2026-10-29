@@ -1,0 +1,187 @@
+"""Development-only D cross-check using the official quicktest's normal tick loop.
+
+No product module imports this script. Private logs stay outside the checkout.
+"""
+import argparse
+import copy
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
+from tools import validation_host as vh
+MARKER = '[RWMT-TICK] '
+
+
+def compare(product, official, count):
+    points = [0, 60] if count == 60 else [0, 60, 600]
+    faults = []
+    normalized = []
+    for label, evidence in [('product', product), ('official', official)]:
+        rows = evidence.get('rows', [])
+        if evidence.get('exitCode') != 0 or evidence.get('interrupted') or evidence.get('errors'):
+            faults.append(label + '.diagnosticsOrExit')
+        started = [r for r in rows if r.get('kind') == 'started']
+        observed = [r for r in rows if r.get('kind') == 'point']
+        ended = [r for r in rows if r.get('kind') == 'end']
+        if len(started) != 1 or len(ended) != 1 or len(rows) != len(points) + 2:
+            faults.append(label + '.rowSet')
+        start = started[0].get('gameTick') if len(started) == 1 else None
+        if type(start) is not int or (started and started[0].get('counter') != 0):
+            faults.append(label + '.start')
+        if [r.get('relative') for r in observed] != points:
+            faults.append(label + '.points')
+        for row in observed:
+            n = row.get('relative')
+            if (type(n) is not int or type(start) is not int or row.get('gameTick') != start + n
+                    or row.get('counter') != n or row.get('startedCalls') != 1 or row.get('longEvent') is not False):
+                faults.append(label + '.tickInvariant')
+            if not isinstance(row.get('view'), dict) or not row.get('view') or not isinstance(row.get('setup'), dict) or not row.get('setup'):
+                faults.append(label + '.contextMissing')
+        if len(ended) == 1 and (ended[0].get('advanced') != count or ended[0].get('counter') != count
+                or type(start) is not int or ended[0].get('gameTick') != start + count):
+            faults.append(label + '.end')
+        normalized.append(observed)
+    if normalized[0] != normalized[1]:
+        faults.append('independentObservationsDiffer')
+    # Expose fixed reason labels only; raw context and diagnostics remain private.
+    return {'equivalent': not faults, 'count': count, 'faults': sorted(set(faults)),
+            'productPoints': len(normalized[0]), 'officialPoints': len(normalized[1])}
+
+
+def parse_lines(lines, *, worker=False):
+    rows, errors = [], []
+    for line in lines:
+        if worker:
+            event = json.loads(line)
+            text = str(event.get('message', ''))
+            if event.get('level') in ('error', 'warning') and not vh.known_noise(event):
+                errors.append(text)
+        else:
+            text = line
+            if re.search(r'\b(?:ERROR|WARN)\s+\[', line) and not ('SteamAPI.Init() failed' in line
+                    or 'Persistent allocation ' in line or 'NativeAllocationRuntime' in line):
+                errors.append(line)
+        if MARKER in text:
+            try: rows.append(json.loads(text.split(MARKER, 1)[1]))
+            except ValueError: errors.append('invalid observation JSON')
+    return {'rows': rows, 'errors': errors}
+
+
+def build(project, dest, snapshot, harmony):
+    subprocess.run(['dotnet', 'build', str(REPO / 'tests/fixtures/validation-mods-src' / project),
+        '-c', 'Release', '-o', str(dest), f'-p:GameManagedDir={snapshot / "game"}',
+        f'-p:HarmonyDll={harmony}', '--nologo'], check=True, stdout=subprocess.DEVNULL)
+
+
+def bounded_official(root, timeout=120):
+    env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(root / 'home'),
+           'XDG_CONFIG_HOME': str(root / 'xdg'), 'LANG': 'C.UTF-8'}
+    start = time.monotonic(); stopped = False
+    with (root / 'stdout.log').open('wb') as log:
+        proc = subprocess.Popen(['./RimWorld', '-headless', '-quicktest', '-NoCrashDialog'],
+            cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+        try:
+            while proc.poll() is None:
+                if (time.monotonic() - start > timeout or vh._process_group_rss(proc.pid) > 2 * 1024**3
+                        or vh._dir_bytes([root / 'xdg', root / 'stdout.log']) > 8 * 1024**2):
+                    stopped = True; break
+                time.sleep(0.1)
+        finally:
+            # Always reap descendants, even if the parent exited by itself.
+            try: os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError: pass
+            proc.wait()
+    return proc.returncode, stopped, round(time.monotonic() - start, 3)
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--snapshot', type=Path, required=True)
+    p.add_argument('--harmony-dll', type=Path, required=True)
+    p.add_argument('--out', type=Path, required=True)
+    p.add_argument('--worker', type=Path, default=REPO / 'worker/bin')
+    a = p.parse_args(argv)
+    a.out = a.out.resolve(); a.snapshot = a.snapshot.resolve(); a.harmony_dll = a.harmony_dll.resolve()
+    if a.out.exists() or a.out == REPO or REPO in a.out.parents:
+        p.error('--out must be new and outside checkout')
+    a.out.mkdir(mode=0o700, parents=True)
+    fixtures = a.out / 'fixtures'; fixtures.mkdir()
+    for name, project in [('mapprobe', 'MapProbe'), ('tickprobe', 'TickProbe'), ('tickqualification', 'TickQualification')]:
+        dest = fixtures / name
+        shutil.copytree(REPO / 'tests/fixtures/validation-mods' / name, dest)
+        build(project, dest / 'Assemblies', a.snapshot, a.harmony_dll)
+    shutil.copytree(REPO / 'tests/fixtures/validation-mods/harmonylib', fixtures / 'harmonylib')
+    (fixtures / 'harmonylib/Assemblies').mkdir()
+    shutil.copyfile(a.harmony_dll, fixtures / 'harmonylib/Assemblies/0Harmony.dll')
+    shutil.copytree(REPO / 'tests/fixtures/validation-mods/okxml', fixtures / 'okxml')
+    summary = {'ok': False, 'runs': []}
+    # Independent fresh processes; all use the same prepared game snapshot.
+    for count in (60, 600, 600):
+        rowdir = a.out / f'run-{len(summary["runs"]) + 1}'; rowdir.mkdir()
+        defs = fixtures / 'tickqualification/Defs'; defs.mkdir(exist_ok=True)
+        def config(official):
+            return '<Defs><RWMT.TickQualification.ConfigDef><defName>RWMT_TickQualification</defName>' + \
+                f'<official>{str(official).lower()}</official><count>{count}</count></RWMT.TickQualification.ConfigDef></Defs>'
+        (defs / 'Config.xml').write_text(config(False))
+        request = {'recordType': 'modValidationRequest', 'schemaVersion': 1, 'levels': ['A', 'D'],
+            'mods': [{'path': str(fixtures / n), 'target': n == 'okxml'} for n in
+                     ('harmonylib', 'mapprobe', 'tickprobe', 'tickqualification', 'okxml')],
+            'map': {'seed': 'rwmt'}, 'tests': ['bounded-tick.v1'],
+            'tick': {'count': count, 'observeAt': [0, 60] if count == 60 else [0, 60, 600]},
+            'expectations': {'tickObservations': [{'tick': count, 'id': 'fixture.counter', 'equals': count}]},
+            'limits': {'timeoutSeconds': 180}}
+        path = rowdir / 'request.json'; path.write_text(json.dumps(request))
+        result = vh.run_validation(a.snapshot, path, rowdir / 'product', a.worker, keep_run_dirs=True)
+        target = rowdir / 'product/target'
+        events = target / 'events.jsonl'
+        product = parse_lines(events.read_text().splitlines(), worker=True) if events.is_file() else {'rows': [], 'errors': ['missing']}
+        process = result.get('process', {}).get('target', {})
+        product.update(exitCode=process.get('exitCode'), interrupted=result.get('executionStatus') != 'completed')
+        # Stage the official executable with exactly the product's copied mods/config.
+        root = rowdir / 'official'; root.mkdir()
+        game = a.snapshot / 'game'
+        for entry in game.iterdir():
+            if entry.name not in ('RimWorld', 'Data'):
+                (root / entry.name).symlink_to(entry)
+        shutil.copyfile(game / 'RimWorld', root / 'RimWorld'); (root / 'RimWorld').chmod(0o700)
+        (root / 'Data').mkdir(); (root / 'Data/Core').symlink_to(game / 'Data/Core')
+        shutil.copytree(target / 'host/Mods', root / 'Mods')
+        # Find only the self-made qualifier by its unique config filename.
+        configs = list((root / 'Mods').glob('*/Defs/Config.xml'))
+        if len(configs) != 1: raise ValueError('qualifier configuration missing')
+        configs[0].write_text(config(True))
+        conf = root / 'xdg/unity3d/Ludeon Studios/RimWorld by Ludeon Studios/Config'; conf.mkdir(parents=True)
+        for name in ('ModsConfig.xml', 'Prefs.xml'):
+            shutil.copyfile(target / 'userdata/Config' / name, conf / name)
+        (root / 'home').mkdir()
+        code, stopped, seconds = bounded_official(root)
+        log = conf.parent / 'Logs/Player.log'
+        official = parse_lines(log.read_text(errors='replace').splitlines()) if log.is_file() else {'rows': [], 'errors': ['missing']}
+        official.update(exitCode=code, interrupted=stopped)
+        (rowdir / 'private-comparison.json').write_text(json.dumps({'product':product,'official':official}, indent=2))
+        row = compare(product, official, count)
+        row.update(officialSeconds=seconds, officialExitCode=code,
+            productD=result.get('stages', {}).get('D', {}).get('status'),
+            productErrors=len(product['errors']), officialErrors=len(official['errors']))
+        # Sensitivity: a plausible counter defect must fail the same comparison.
+        changed = copy.deepcopy(official)
+        for observation in changed['rows']:
+            if observation.get('kind') == 'point' and observation.get('relative') == count:
+                observation['counter'] -= 1
+        row['sensitivity'] = not compare(product, changed, count)['equivalent']
+        summary['runs'].append(row)
+        summary['ok'] = all(r['equivalent'] and r['sensitivity'] for r in summary['runs'])
+        (a.out / 'safe-summary.json').write_text(json.dumps(summary, indent=2))
+        if not row['equivalent']: break  # do not repeat a known failing call path
+    return 0 if summary['ok'] and len(summary['runs']) == 3 else 1
+
+if __name__ == '__main__': raise SystemExit(main())

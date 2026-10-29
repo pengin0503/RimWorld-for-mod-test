@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -112,3 +113,19 @@ class NativeExecutionTests(unittest.TestCase):
                 data=pv.run_suites(('smoke','cow'),None,root/'out',root/'worker')
             self.assertEqual([x['processes'][0]['exitCode'] for x in data['suites']],[1,0])
             self.assertEqual(len(pv.read_json(root/'out/summary.json')['suites']),2)
+
+
+@unittest.skipUnless(PROC_VISIBLE and shutil.which('dotnet'), 'native Linux and installed .NET SDK required')
+class DotnetExecutionTests(unittest.TestCase):
+    def test_fixture_build_finishes_without_background_compiler_descendants(self):
+        # Force this job's test build to own a fresh compiler server if it uses one.
+        subprocess.run(['dotnet','build-server','shutdown'],capture_output=True,timeout=30,check=True)
+        sdks=subprocess.check_output(['dotnet','--list-sdks'],text=True)
+        major=max(int(line.split('.')[0]) for line in sdks.splitlines() if line[:1].isdigit())
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); project=root/'fixture.csproj'
+            project.write_text(f'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net{major}.0</TargetFramework><OutputType>Library</OutputType></PropertyGroup></Project>')
+            (root/'Fixture.cs').write_text('public static class Fixture { public static int Value => 42; }')
+            result=pv.run_command(['dotnet','build',str(project),'--nologo'],root/'build.log',timeout=90)
+            self.assertEqual(result['exitCode'],0, (root/'build.log').read_text()[-2000:])
+            self.assertFalse(result['interrupted'],'fixture build left a background compiler process')

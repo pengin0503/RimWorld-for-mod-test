@@ -175,6 +175,7 @@ class AuditTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', json.dumps(result))
         self.assertEqual(result['staticAuditStatus'], 'incomplete')
         self.assertFalse(result['c0Passed'])
+        self.assertEqual(result['types'][0]['methods'][0]['unreadableTokens'], [100663297])
 
     def test_known_signature_is_rebuilt_from_fixed_atoms(self):
         signature = {'kind': 'byref', 'element': {'kind': 'array', 'rank': 1,
@@ -292,6 +293,27 @@ class AuditTests(unittest.TestCase):
         result = a.public_summary({**identity, 'verified': True, 'types': types}, identity)
         self.assertEqual(result['staticAuditStatus'], 'incomplete')
         self.assertNotIn('NaN', json.dumps(result))
+
+    def test_scanner_child_environment_does_not_inherit_secrets(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {'PATH': '/usr/bin', 'AWS_SECRET_ACCESS_KEY': 'PRIVATE', 'GITHUB_TOKEN': 'PRIVATE', 'R2_ENDPOINT': 'PRIVATE'}, clear=True):
+            child = a.pv.child_environment(Path(d))
+            self.assertEqual(child['PATH'], '/usr/bin')
+            self.assertNotIn('AWS_SECRET_ACCESS_KEY', child)
+            self.assertNotIn('GITHUB_TOKEN', child)
+            self.assertNotIn('R2_ENDPOINT', child)
+
+    def test_scan_aggregates_fixed_images_and_cannot_run_twice(self):
+        def run(command, log, **kwargs):
+            types = [{'id': target, 'found': False, 'methods': [{'name': name, 'overloads': []} for name in names]} for target, names in a.TARGETS.items()]
+            Path(command[-1]).write_text(json.dumps({'sha256': command[-2], 'types': types}))
+            return {'exitCode': 0, 'interrupted': False, 'seconds': 0}
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a, 'load_session', return_value={'verified': True}), patch.object(a.pv, 'run_command', side_effect=run) as runner:
+            root = Path(d); (a.session_path(root) / 'input').mkdir(parents=True)
+            output = a.scan(root, Path('/synthetic/scanner.dll'))
+            self.assertEqual(runner.call_count, 5)
+            self.assertEqual(a.public_summary(output, a.pv.current_identity())['staticAuditStatus'], 'completed')
+            with self.assertRaises(ValueError): a.scan(root, Path('/synthetic/scanner.dll'))
+            self.assertFalse(json.loads((a.session_path(root) / 'scan.json').read_text())['verified'])
 
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):

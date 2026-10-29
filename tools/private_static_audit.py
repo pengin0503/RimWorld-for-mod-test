@@ -145,7 +145,10 @@ def scan(root, scanner):
     manifest = load_session(root)
     session = session_path(root)
     result_path = session / 'scan.json'
-    if result_path.exists(): raise ValueError('scanner already attempted')
+    if result_path.exists() or result_path.is_symlink():
+        if not result_path.is_symlink():
+            pv.write_json(result_path, {**identity, 'verified': False, 'invalidated': True})
+        raise ValueError('scanner already attempted')
     pv.write_json(result_path, {**identity, 'verified': False})
     start = time.monotonic()
     results = []
@@ -240,7 +243,7 @@ def public_summary(raw, identity):
             entries = [x for x in target['methods'] if isinstance(x, dict) and x.get('name') == name]
             if len(entries) != 1 or not isinstance(entries[0].get('overloads'), list) or len(entries[0]['overloads']) > 16:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
-            signatures = []; edges = []; unreadable = False
+            signatures = []; edges = []; unreadable = False; unreadable_tokens = []
             if not target['found'] and entries[0]['overloads']:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
             for item in entries[0]['overloads']:
@@ -264,10 +267,13 @@ def public_summary(raw, identity):
                         edge = allowed_edges.get(call.get('target'))
                         if edge: safe_edges.append({'typeId': edge[0], 'methodId': edge[1], 'kind': call['kind'], 'offset': call['offset']})
                     signatures.append(signature); edges.extend(safe_edges)
-                except (ValueError, TypeError): unreadable = True
+                except (ValueError, TypeError):
+                    unreadable = True
+                    token = item.get('token') if isinstance(item, dict) else None
+                    if type(token) is int and 0x06000001 <= token <= 0x06ffffff: unreadable_tokens.append(token)
             if unreadable: complete = False
             methods.append({'name': name, 'status': 'unreadable' if unreadable else 'found' if signatures else 'missing',
-                            'signatures': signatures, 'calls': edges})
+                            'signatures': signatures, 'calls': edges, 'unreadableTokens': unreadable_tokens})
         if len(target['methods']) != len(names): complete = False
         rows.append({'id': target_id, 'status': 'found' if target['found'] else 'missing', 'methods': methods})
     return {**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269', 'binaryVerified': binary,

@@ -40,7 +40,10 @@ Linux Python 3.12では333テスト成功（Windows専用8件skip）、native回
 私有子環境に `UseSharedCompilation=false` を加え、固定自作プロジェクトのbuildへ継承する。
 これは[MSBuildの環境プロパティ](https://learn.microsoft.com/en-us/visualstudio/msbuild/how-to-use-environment-variables-in-a-build)として扱われる。
 既存のfixture/比較プロジェクトにはこのプロパティの上書きがないことも確認した。
-最終CIと結果はこの記録を更新するまで保留。
+修正後の[最終実装CI40865894252](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/40865894252)は全8ジョブ成功。
+Linux Python3.12/3.13は各334テスト成功（Windows専用8件skip）。SDK-backed buildとnative回収を実行し、修正を確認した。
+最終レビューのCritical/Important未解決は0、Minor指摘は0。以後の変更は本記録だけ。
+ローカルでは関連25テスト成功（native6件skip）、既存イベント9テスト成功、compileall・diff検査・文書相対リンク検査も成功。
 
 ## ローカル環境の制約
 

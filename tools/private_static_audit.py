@@ -80,7 +80,7 @@ def prepare(root):
             pv.write_json(session/'manifest.json', {**identity, 'verified': False, 'invalidated': True})
         raise ValueError('audit session already exists') from None
     directory = session/'input'; directory.mkdir(mode=0o700)
-    manifest = {**identity, 'verified': False}
+    manifest = {**identity, 'repository': os.environ['GITHUB_REPOSITORY'], 'ref': os.environ['GITHUB_REF'], 'verified': False}
     pv.write_json(session/'manifest.json', manifest)
     names = ['Version.txt', *EXPECTED]
     snapshot = root / 'game-snapshot' / 'game'
@@ -92,7 +92,7 @@ def prepare(root):
             items = []
             for name in names:
                 key = 'Game-Linux/'+name
-                matches = [x for x in client.list_prefix(key) if x.get('key') == key]
+                matches = [x for x in client.list_static_audit_key(key) if x.get('key') == key]
                 if len(matches) != 1 or type(matches[0].get('size')) is not int or not 0 < matches[0]['size'] <= 64*1024*1024:
                     raise ValueError('invalid fixed input metadata')
                 items.extend(matches)
@@ -127,7 +127,7 @@ def load_session(root):
     if session.parent.is_symlink() or session.is_symlink() or manifest_file.is_symlink() or not manifest_file.is_file() or manifest_file.stat().st_size > 65536:
         raise ValueError('invalid audit manifest')
     manifest = pv.read_json(manifest_file)
-    if not isinstance(manifest, dict) or any(manifest.get(k) != v for k, v in identity.items()) or manifest.get('verified') is not True or manifest.get('invalidated') is True or not verify(root):
+    if not isinstance(manifest, dict) or any(manifest.get(k) != v for k, v in identity.items()) or manifest.get('repository') != os.environ['GITHUB_REPOSITORY'] or manifest.get('ref') != os.environ['GITHUB_REF'] or manifest.get('verified') is not True or manifest.get('invalidated') is True or not verify(root):
         raise ValueError('unverified audit session')
     inputs = manifest.get('inputs')
     names = ['Version.txt', *EXPECTED]
@@ -256,7 +256,7 @@ def public_summary(raw, identity):
             entries = [x for x in target['methods'] if isinstance(x, dict) and x.get('name') == name]
             if len(entries) != 1 or not isinstance(entries[0].get('overloads'), list) or len(entries[0]['overloads']) > 16:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
-            signatures = []; edges = []; unreadable = False; unreadable_tokens = []
+            signatures = []; edges = []; overloads = []; unreadable = False; unreadable_tokens = []
             if not target['found'] and entries[0]['overloads']:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
             for item in entries[0]['overloads']:
@@ -280,13 +280,14 @@ def public_summary(raw, identity):
                         edge = allowed_edges.get(call.get('target'))
                         if edge: safe_edges.append({'typeId': edge[0], 'methodId': edge[1], 'kind': call['kind'], 'offset': call['offset']})
                     signatures.append(signature); edges.extend(safe_edges)
+                    overloads.append({'signature': signature, 'calls': safe_edges})
                 except (ValueError, TypeError):
                     unreadable = True
                     token = item.get('token') if isinstance(item, dict) else None
                     if type(token) is int and 0x06000001 <= token <= 0x06ffffff: unreadable_tokens.append(token)
             if unreadable: complete = False
             methods.append({'name': name, 'status': 'unreadable' if unreadable else 'found' if signatures else 'missing',
-                            'signatures': signatures, 'calls': edges, 'unreadableTokens': unreadable_tokens})
+                            'signatures': signatures, 'calls': edges, 'overloads': overloads, 'unreadableTokens': unreadable_tokens})
         if len(target['methods']) != len(names): complete = False
         rows.append({'id': target_id, 'status': 'found' if target['found'] else 'missing', 'methods': methods})
     return {**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269', 'binaryVerified': binary,

@@ -107,6 +107,12 @@ class SDKTests(unittest.TestCase):
             self.assertEqual(dest.read_bytes(), payload)
         self.assertTrue(stream.closed)
 
+    def test_static_audit_exact_key_uses_sdk_prefix_without_enumerating_game(self):
+        self.stub.add_response('list_objects_v2', {'Contents': [{'Key': KEY, 'Size': 3}, {'Key': KEY + '.extra', 'Size': 4}]},
+            {'Bucket': BUCKET, 'Prefix': KEY, 'MaxKeys': 1000})
+        self.assertEqual(self.r2.list_static_audit_key(KEY), [{'key': KEY, 'size': 3}])
+        self.stub.assert_no_pending_responses()
+
     def test_prefix_pagination_and_escape_guard_are_shared(self):
         prefix = 'Game-Linux/'
         self.stub.add_response('list_objects_v2', {'Contents': [{'Key': KEY, 'Size': 3}],

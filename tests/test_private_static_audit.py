@@ -14,12 +14,14 @@ class AuditTests(unittest.TestCase):
         data={'Version.txt':b'1.7.4985 rev1269\n','Assembly-CSharp.dll':b'own synthetic PE','libcoreclr.so':b'own synthetic CLR'}
         expected={n:hashlib.sha256(v).hexdigest() for n,v in data.items() if n!='Version.txt'}
         class R2:
-            def list_prefix(self,prefix): return [{'key':'Game-Linux/'+n,'size':len(v)} for n,v in data.items() if ('Game-Linux/'+n).startswith(prefix)]
+            def list_static_audit_key(self,prefix): return [{'key':'Game-Linux/'+n,'size':len(v)} for n,v in data.items() if ('Game-Linux/'+n).startswith(prefix)]
             def get(self,key,dest,size,refresh=False): dest.parent.mkdir(parents=True,exist_ok=True); dest.write_bytes(data[key.removeprefix('Game-Linux/')]); return 'downloaded'
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,ENV,clear=True), patch.object(a,'EXPECTED',expected), patch.object(a.cw,'r2_session',return_value=contextlib.nullcontext(R2())):
             root=Path(d); a.prepare(root)
             record=json.loads((a.session_path(root)/'manifest.json').read_text())
             self.assertTrue(record['verified']); self.assertEqual(record['files'],3)
+            self.assertEqual(record['repository'], ENV['GITHUB_REPOSITORY'])
+            self.assertEqual(record['ref'], ENV['GITHUB_REF'])
             self.assertEqual(sorted(p.name for p in (a.session_path(root)/'input').iterdir()),['Assembly-CSharp.dll','Version.txt','libcoreclr.so'])
             (a.session_path(root)/'input/Assembly-CSharp.dll').write_bytes(b'corrupt')
             self.assertFalse(a.verify(root))
@@ -27,7 +29,7 @@ class AuditTests(unittest.TestCase):
     def test_metadata_budget_rejects_before_any_download(self):
         class R2:
             def __init__(self): self.downloads = []
-            def list_prefix(self, prefix):
+            def list_static_audit_key(self, prefix):
                 return [{'key': prefix, 'size': 64 * 1024 * 1024 + 1}]
             def get(self, key, dest, size, refresh=False): self.downloads.append(key)
         client = R2()
@@ -57,7 +59,7 @@ class AuditTests(unittest.TestCase):
         data = {'Version.txt': b'1.7.4985 rev1269\n', 'sample.dll': b'synthetic'}
         expected = {'sample.dll': hashlib.sha256(data['sample.dll']).hexdigest()}
         class R2:
-            def list_prefix(self, prefix):
+            def list_static_audit_key(self, prefix):
                 name = prefix.removeprefix('Game-Linux/')
                 return [{'key': prefix, 'size': len(data[name]) + 1}]
             def get(self, key, dest, size, refresh=False):
@@ -92,7 +94,7 @@ class AuditTests(unittest.TestCase):
         data = {'Version.txt': b'1.7.4985 rev1269\n', 'sample.dll': b'synthetic'}
         expected = {'sample.dll': hashlib.sha256(data['sample.dll']).hexdigest()}
         class R2:
-            def list_prefix(self, prefix):
+            def list_static_audit_key(self, prefix):
                 name = prefix.removeprefix('Game-Linux/')
                 return [{'key': prefix, 'size': len(data[name])}]
             def get(self, key, dest, size, refresh=False):
@@ -107,7 +109,7 @@ class AuditTests(unittest.TestCase):
         data = {'Version.txt': b'1.7.4985 rev1269\n', 'sample.dll': b'synthetic'}
         expected = {'sample.dll': hashlib.sha256(data['sample.dll']).hexdigest()}
         class R2:
-            def list_prefix(self, prefix):
+            def list_static_audit_key(self, prefix):
                 name = prefix.removeprefix('Game-Linux/')
                 return [{'key': prefix, 'size': len(data[name])}]
             def get(self, key, dest, size, refresh=False):
@@ -121,7 +123,7 @@ class AuditTests(unittest.TestCase):
         expected = {name: hashlib.sha256(data[name]).hexdigest() for name in ('sample.dll', 'other.dll')}
         class R2:
             def __init__(self): self.downloads = []
-            def list_prefix(self, prefix):
+            def list_static_audit_key(self, prefix):
                 name = prefix.removeprefix('Game-Linux/')
                 return [{'key': prefix, 'size': len(data[name])}]
             def get(self, key, dest, size, refresh=False):
@@ -138,7 +140,7 @@ class AuditTests(unittest.TestCase):
         data = {'Version.txt': b'1.7.4985 rev1269\n', 'sample.dll': b'synthetic'}
         expected = {'sample.dll': hashlib.sha256(data['sample.dll']).hexdigest()}
         class R2:
-            def list_prefix(self, prefix):
+            def list_static_audit_key(self, prefix):
                 name = prefix.removeprefix('Game-Linux/')
                 return [{'key': prefix, 'size': len(data[name])}]
             def get(self, key, dest, size, refresh=False): dest.write_bytes(data[key.removeprefix('Game-Linux/')])
@@ -155,7 +157,7 @@ class AuditTests(unittest.TestCase):
         data = {'Version.txt': b'1.7.4985 rev1269\n', 'sample.dll': b'synthetic'}
         expected = {'sample.dll': hashlib.sha256(data['sample.dll']).hexdigest()}
         class R2:
-            def list_prefix(self, prefix):
+            def list_static_audit_key(self, prefix):
                 name = prefix.removeprefix('Game-Linux/')
                 return [{'key': prefix, 'size': len(data[name])}]
             def get(self, key, dest, size, refresh=False): dest.write_bytes(data[key.removeprefix('Game-Linux/')])
@@ -192,6 +194,7 @@ class AuditTests(unittest.TestCase):
         raw = {**identity, 'verified': True, 'types': [{'id': 'game', 'found': True, 'methods': methods}]}
         result = a.public_summary(raw, identity)
         self.assertEqual(result['types'][0]['methods'][0]['signatures'][0], 'instance public System.Void (System.Int32)')
+        self.assertEqual(result['types'][0]['methods'][0]['overloads'][0]['signature'], 'instance public System.Void (System.Int32)')
         self.assertNotIn('PRIVATE', json.dumps(result))
         self.assertEqual(result['staticAuditStatus'], 'incomplete')
 
@@ -232,7 +235,7 @@ class AuditTests(unittest.TestCase):
         data = {'Version.txt': b'1.7.4985 rev1269\n', 'sample.dll': b'synthetic'}
         expected = {'sample.dll': hashlib.sha256(data['sample.dll']).hexdigest()}
         class R2:
-            def list_prefix(self, prefix):
+            def list_static_audit_key(self, prefix):
                 name = prefix.removeprefix('Game-Linux/')
                 return [{'key': prefix, 'size': len(data[name])}]
             def get(self, key, dest, size, refresh=False): dest.write_bytes(data[key.removeprefix('Game-Linux/')])
@@ -251,7 +254,7 @@ class AuditTests(unittest.TestCase):
     def test_duplicate_r2_metadata_stops_before_download(self):
         class R2:
             def __init__(self): self.downloads = []
-            def list_prefix(self, key): return [{'key': key, 'size': 1}, {'key': key, 'size': 1}]
+            def list_static_audit_key(self, key): return [{'key': key, 'size': 1}, {'key': key, 'size': 1}]
             def get(self, key, dest, size, refresh=False): self.downloads.append(key)
         client = R2()
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a.cw, 'r2_session', return_value=contextlib.nullcontext(client)):
@@ -261,7 +264,7 @@ class AuditTests(unittest.TestCase):
     def test_total_budget_rejects_before_download(self):
         class R2:
             def __init__(self): self.downloads = []
-            def list_prefix(self, key): return [{'key': key, 'size': 40 * 1024 * 1024}]
+            def list_static_audit_key(self, key): return [{'key': key, 'size': 40 * 1024 * 1024}]
             def get(self, key, dest, size, refresh=False): self.downloads.append(key)
         client = R2()
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a.cw, 'r2_session', return_value=contextlib.nullcontext(client)):

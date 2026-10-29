@@ -273,7 +273,8 @@ def public_summary(raw, identity):
             if not target['found'] and entries[0]['overloads']:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
             for item in entries[0]['overloads']:
-                reason_codes.update(method_reasons(item))
+                item_reasons = method_reasons(item)
+                reason_codes.update(item_reasons)
                 try:
                     if isinstance(item, dict) and not set(item).issubset({'token', 'return', 'parameters', 'genericCount', 'static', 'visibility', 'calls', 'branches', 'exceptions'}): complete = False
                     if not isinstance(item, dict) or type(item.get('static')) is not bool or item.get('visibility') not in VISIBILITY:
@@ -310,7 +311,7 @@ def public_summary(raw, identity):
                     signatures.append(signature); edges.extend(safe_edges)
                     overloads.append({'signature': signature, 'calls': safe_edges})
                 except (ValueError, TypeError):
-                    if not reason_codes: reason_codes.add('invalidSignature')
+                    if not item_reasons: reason_codes.add('invalidSignature')
                     unreadable = True
                     token = item.get('token') if isinstance(item, dict) else None
                     if type(token) is int and 0x06000001 <= token <= 0x06ffffff: unreadable_tokens.append(token)

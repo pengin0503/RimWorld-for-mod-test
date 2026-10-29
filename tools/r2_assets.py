@@ -168,7 +168,7 @@ class R2:
                 metadata = self.call("get-object", "--bucket", self.bucket, "--key", key, str(temporary))
             else:
                 try:
-                    metadata = self._sdk.get_object(key, temporary)
+                    metadata = self._sdk.get_object(key, temporary, expected_size)
                 except Exception:
                     raise AssetError('SDK object download failed') from None
             actual = temporary.stat().st_size

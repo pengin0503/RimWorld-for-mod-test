@@ -119,6 +119,19 @@ class SDKTests(unittest.TestCase):
             self.assertTrue(stream.closed)
             self.assertEqual(list(Path(directory).iterdir()), [])
 
+    def test_misreported_content_length_reads_at_most_one_extra_byte(self):
+        class Tracking(io.BytesIO):
+            def __init__(self, payload): super().__init__(payload); self.total = 0
+            def read(self, size=-1):
+                data = super().read(size); self.total += len(data); return data
+        stream = Tracking(b'1234567890')
+        self.stub.add_response('get_object', {'Body': StreamingBody(stream, 10), 'ContentLength': 3}, {'Bucket': BUCKET, 'Key': KEY})
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ra.AssetError): self.r2.get(KEY, Path(directory) / 'Version.txt', 3)
+            self.assertLessEqual(stream.total, 4)
+            self.assertTrue(stream.closed)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
     def test_static_audit_exact_key_uses_sdk_prefix_without_enumerating_game(self):
         self.stub.add_response('list_objects_v2', {'Contents': [{'Key': KEY, 'Size': 3}, {'Key': KEY + '.extra', 'Size': 4}]},
             {'Bucket': BUCKET, 'Prefix': KEY, 'MaxKeys': 1000})

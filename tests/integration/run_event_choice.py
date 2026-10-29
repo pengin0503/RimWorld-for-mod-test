@@ -24,6 +24,12 @@ def missing_fixture_confirmed(result):
                           'eventChoiceObservationIncomplete'})
 
 
+def record_result(out, rows, name, ok, result):
+    rows.append({"case":name,"ok":bool(ok),"status":result.get("status"),
+                 "stage":result.get("stages",{}).get("C",{}).get("status")})
+    (out / "summary.json").write_text(json.dumps(rows),encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--snapshot', required=True)
@@ -64,6 +70,8 @@ def main():
                                        'eventChoiceMismatch', 'baselineIncomplete'}))
     print('fixture observations:', 'matched' if ok else 'not confirmed',
           '; overall:', result['status'], '; C:', stage.get('status'))
+    rows = []
+    record_result(out, rows, 'positive', ok, result)
     # Mutate expectations only: the actual game must still generate Steel 10.
     for name, item, count in [('wrong-count', 'Steel', 11), ('wrong-item', 'WoodLog', 10)]:
         request['expectations']['eventChoices'][0].update(rewardThing=item, rewardCount=count)
@@ -76,6 +84,7 @@ def main():
                    and 'eventChoiceMismatch' in codes
                    and not codes.intersection({'newErrors', 'newWarnings', 'baselineIncomplete',
                                                'eventChoiceObservationIncomplete'}))
+        record_result(out, rows, name, matched, negative)
         ok = ok and matched
         print(name, 'detected' if matched else 'not confirmed')
     missing = out / 'missing-fixture'
@@ -86,6 +95,7 @@ def main():
     absent = vh.run_validation(args.snapshot, path, out / 'missing', args.worker,
                                baseline_cache=out / 'baseline-cache')
     matched = missing_fixture_confirmed(absent)
+    record_result(out, rows, 'missing-fixture', matched, absent)
     ok = ok and matched
     print('missing fixture', 'incomplete as required' if matched else 'not confirmed')
     return 0 if ok else 1

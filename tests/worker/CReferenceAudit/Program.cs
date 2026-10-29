@@ -6,6 +6,12 @@ using CReferenceAudit;
 
 static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 static void Require(bool condition, string message) { if (!condition) throw new Exception(message); }
+using (var core = new PEReader(File.OpenRead(typeof(Exception).Assembly.Location)))
+{
+    var metadata = core.GetMetadataReader();
+    var handle = metadata.TypeDefinitions.Single(h => metadata.GetString(metadata.GetTypeDefinition(h).Namespace) == "System" && metadata.GetString(metadata.GetTypeDefinition(h).Name) == "Exception");
+    Require((string?)CandidateCatalog.Match(metadata, handle)?["id"] == "exception", "core candidate missing");
+}
 string path = typeof(Verse.Game).Assembly.Location;
 byte[] image = File.ReadAllBytes(path);
 string marker = Path.Combine(Path.GetTempPath(), "rwmt-static-audit-" + Guid.NewGuid().ToString("N"));

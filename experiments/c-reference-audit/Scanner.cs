@@ -9,6 +9,8 @@ using System.Text.Json.Nodes;
 
 namespace CReferenceAudit;
 
+public sealed class BudgetExceededException : Exception { }
+
 public static class Scanner
 {
     static readonly (string Id, string Type, string[] Methods)[] Targets =
@@ -53,11 +55,11 @@ public static class Scanner
                     {
                         var method = reader.GetMethodDefinition(handle);
                         if (reader.GetString(method.Name) != methodName) continue;
-                        if (++methods > 128 || overloads.Count >= 16) throw new BadImageFormatException();
+                        if (++methods > 128 || overloads.Count >= 16) throw new BudgetExceededException();
                         var signature = method.DecodeSignature(provider, null);
                         CheckDepth(signature.ReturnType, 0);
                         foreach (var parameter in signature.ParameterTypes) CheckDepth(parameter, 0);
-                        if (signature.ParameterTypes.Length > 64 || signature.GenericParameterCount > 32) throw new BadImageFormatException();
+                        if (signature.ParameterTypes.Length > 64 || signature.GenericParameterCount > 32) throw new BudgetExceededException();
                         var parameters = new JsonArray();
                         foreach (var parameter in signature.ParameterTypes) parameters.Add(parameter);
                         var sites = new JsonArray();
@@ -68,7 +70,7 @@ public static class Scanner
                             var body = pe.GetMethodBody(method.RelativeVirtualAddress);
                             byte[] il = body.GetILBytes() ?? throw new BadImageFormatException();
                             totalIl += il.Length;
-                            if (il.Length > 65536 || totalIl > 1024 * 1024) throw new BadImageFormatException();
+                            if (il.Length > 65536 || totalIl > 1024 * 1024) throw new BudgetExceededException();
                             DecodeIl(reader, il, sites, branches, ref instructions, ref calls);
                             foreach (var region in body.ExceptionRegions)
                                 regions.Add(new JsonObject { ["kind"] = region.Kind.ToString(), ["tryOffset"] = region.TryOffset, ["tryLength"] = region.TryLength, ["handlerOffset"] = region.HandlerOffset, ["handlerLength"] = region.HandlerLength });
@@ -89,12 +91,13 @@ public static class Scanner
 
     static void CheckDepth(JsonNode node, int depth)
     {
-        if (depth >= 8 || node is not JsonObject obj) throw new BadImageFormatException();
+        if (depth >= 8) throw new BudgetExceededException();
+        if (node is not JsonObject obj) throw new BadImageFormatException();
         if (obj["element"] is JsonNode element) CheckDepth(element, depth + 1);
         if (obj["modifier"] is JsonNode modifier) CheckDepth(modifier, depth + 1);
         if (obj["arguments"] is JsonArray args)
         {
-            if (args.Count > 32) throw new BadImageFormatException();
+            if (args.Count > 32) throw new BudgetExceededException();
             foreach (var argument in args) CheckDepth(argument ?? throw new BadImageFormatException(), depth + 1);
         }
     }
@@ -142,7 +145,7 @@ public static class Scanner
         var branchTargets = new List<int>();
         while (pos < il.Length)
         {
-            if (++instructions > 100000) throw new BadImageFormatException();
+            if (++instructions > 100000) throw new BudgetExceededException();
             int offset = pos;
             starts.Add(offset);
             ushort code = il[pos++];
@@ -185,7 +188,7 @@ public static class Scanner
             }
             if (op == OpCodes.Call || op == OpCodes.Callvirt || op == OpCodes.Newobj)
             {
-                if (++calls > 4096) throw new BadImageFormatException();
+                if (++calls > 4096) throw new BudgetExceededException();
                 int token = BitConverter.ToInt32(il, pos);
                 sites.Add(new JsonObject { ["offset"] = offset, ["kind"] = op.Name, ["target"] = MemberName(reader, token) });
             }

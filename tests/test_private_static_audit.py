@@ -403,6 +403,15 @@ class AuditTests(unittest.TestCase):
         types[0]['methods'][0]['overloads'] = [{'return': {'kind': 'primitive', 'name': 'Void'}, 'parameters': [], 'genericCount': 0, 'static': False, 'visibility': 'Public', 'calls': []}]
         self.assertEqual(a.public_summary({**identity, 'verified': True, 'types': types}, identity)['staticAuditStatus'], 'incomplete')
 
+    def test_scanner_budget_exhaustion_is_reported_incomplete(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a, 'load_session', return_value={'inputs': {}, 'seconds': 0}), patch.object(a.pv, 'run_command', return_value={'exitCode': 4, 'interrupted': False, 'seconds': 0}):
+            root = Path(d); (a.session_path(root) / 'input').mkdir(parents=True)
+            with self.assertRaises(ValueError): a.scan(root, Path('/synthetic/scanner.dll'))
+            result = a.publish(root)
+            self.assertTrue(result['budgetExceeded'])
+            self.assertEqual(result['staticAuditStatus'], 'incomplete')
+            self.assertFalse(result['c0Passed'])
+
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):
             with self.assertRaises(ValueError): a.prepare(Path(d))

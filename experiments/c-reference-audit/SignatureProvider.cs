@@ -12,7 +12,7 @@ sealed class SignatureProvider : ISignatureTypeProvider<JsonNode, object?>
     public JsonNode GetFunctionPointerType(MethodSignature<JsonNode> signature) => Node("functionPointer");
     public JsonNode GetGenericInstantiation(JsonNode genericType, ImmutableArray<JsonNode> typeArguments)
     {
-        if (typeArguments.Length > 32) throw new BadImageFormatException();
+        if (typeArguments.Length > 32) throw new BudgetExceededException();
         var args = new JsonArray();
         foreach (var argument in typeArguments) args.Add(argument);
         return new JsonObject { ["kind"] = "generic", ["element"] = genericType, ["arguments"] = args };

@@ -151,6 +151,9 @@ def scan(root, scanner):
             pv.write_json(result_path, {**identity, 'verified': False, 'invalidated': True})
         raise ValueError('scanner already attempted')
     pv.write_json(result_path, {**identity, 'verified': False})
+    def budget_exceeded():
+        pv.write_json(result_path, {**identity, 'verified': False, 'budgetExceeded': True})
+        raise ValueError('scanner budget exceeded')
     start = time.monotonic()
     results = []
     total_output = 0
@@ -165,13 +168,13 @@ def scan(root, scanner):
         log = session/('scan-' + str(index) + '.log')
         process = pv.run_command(command, log, timeout=remaining, memory_limit=2*1024**3)
         if log.exists(): total_logs += log.stat().st_size
-        if total_logs > 8*1024*1024: raise ValueError('scanner log budget exceeded')
+        if total_logs > 8*1024*1024: budget_exceeded()
+        if process.get('exitCode') == 4 and process.get('interrupted') is False: budget_exceeded()
         if process.get('exitCode') != 0 or process.get('interrupted') is not False:
             raise ValueError('scanner did not finish')
-        if output.is_symlink() or not output.is_file() or output.stat().st_size > 4*1024*1024:
-            raise ValueError('invalid scanner output')
+        if output.is_symlink() or not output.is_file(): raise ValueError('invalid scanner output')
         total_output += output.stat().st_size
-        if total_output > 4*1024*1024: raise ValueError('scanner output budget exceeded')
+        if total_output > 4*1024*1024: budget_exceeded()
         result = pv.read_json(output)
         if not isinstance(result, dict) or result.get('sha256') != EXPECTED[name] or not isinstance(result.get('types'), list):
             raise ValueError('scanner identity mismatch')
@@ -181,7 +184,7 @@ def scan(root, scanner):
             value = metrics[metric]
             if type(value) is not int or value < 0: raise ValueError('invalid scanner metric')
             totals[metric] += value
-            if totals[metric] > limit: raise ValueError('scanner budget exceeded')
+            if totals[metric] > limit: budget_exceeded()
         results.append(result)
     load_session(root)
     types = []
@@ -325,6 +328,8 @@ def publish(root):
     except (ValueError, OSError):
         raw = {}
     summary = public_summary(raw, identity)
+    if isinstance(raw, dict) and all(raw.get(k) == v for k, v in identity.items()) and raw.get('budgetExceeded') is True:
+        summary['budgetExceeded'] = True
     if manifest is not None:
         summary['binaryVerified'] = True
         inputs = manifest['inputs']

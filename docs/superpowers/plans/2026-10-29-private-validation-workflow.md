@@ -5,7 +5,7 @@
 **Goal:** 最新mainからsuiteを選び、準備を重複せず有限検証を再実行できるようにする。
 **Architecture:** 固定suite registryと、秘密付き準備/秘密なし実行/再検証済み公開の3境界を作る。PR27の実験helperを再利用する。
 **Tech Stack:** Python3.12+、C#/.NET10、GitHub Actions、Linux（必要な部分だけ）。
-**Spec:** [共通設計](../specs/2026-10-29-linux-validation-next-design.md)。実装は[PR30](https://github.com/pengin0503/RimWorld-for-mod-test/pull/30)。main統合・手動実物受入は未完了。
+**Spec:** [共通設計](../specs/2026-10-29-linux-validation-next-design.md)。実装は[PR30](https://github.com/pengin0503/RimWorld-for-mod-test/pull/30)。PR30/31はmain統合済み。手動実物受入の結果は下記記録を参照。
 
 ## Global Constraints
 
@@ -41,9 +41,11 @@ R2は読取専用、索引でMODを照合、必要なpayloadのみ。同一job�
 - [x] `python -m unittest discover -s tests -p 'test_private_validation*.py' -v`のREDを確認する。
 - [x] workflow_dispatch/main限定/固定choice/default smoke/45分上限を追加する。GitHub inputはenv経由でparserへ渡し、shellのコマンド文字列へ埋め込まない。cow用Btrfsは専用一時imageだけをmountし、always cleanupする。
 - [x] Python全suiteと既存Worker合成検査を実行する。秘密なし公開CIでGREENを確認してPR化する。mainへの統合はユーザー指示を待つ。
-- [ ] main統合後に手動smoke、cow、c-regression、d-regressionを各1回、allを1回受入する。allのd-compareは現時点で不合格が見込まれるため、実行完了と独立適格化不合格を別記し、qualificationの成功を条件緩和で作らない。
+- [x] main統合後に手動smoke、cow、c-regression、d-regressionを各1回、allを1回受入する。allのd-compareは現時点で不合格が見込まれるため、実行完了と独立適格化不合格を別記し、qualificationの成功を条件緩和で作らない。
 
 **Stop:** PR27が未統合ならD比較/COW helperの接続を待つ。既存受入helperだけの合成検査は先行可能。secretを使うbranch previewの追加や私有cacheの外部保存へ黙って切り替えない。
 **Expected:** 新しいdefault-branch手動入口から同一commitを再検証でき、cowのネット資材取得0、allのsnapshot準備1、私有情報公開0。
 
 実装・検査の記録: [P2共通入口](../../research/2026-10-29-private-validation-workflow.md)。チェック済みは実装と公開合成検査の範囲。実物受入・C/Dの独立適格化・メモリ強制上限の完了を意味しない。
+
+main受入: [確定結果](../../research/2026-10-29-private-validation-acceptance.md)。個別4選択は受入成功、allは全5suite実行完了・D比較のみ不合格。資格の緩和は行わない。

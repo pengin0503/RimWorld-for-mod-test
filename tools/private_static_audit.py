@@ -239,6 +239,11 @@ VISIBILITY = {'Public': 'public', 'Private': 'private', 'Family': 'family', 'Ass
               'FamANDAssem': 'family-and-assembly', 'FamORAssem': 'family-or-assembly', 'PrivateScope': 'private-scope'}
 
 
+def method_reasons(item):
+    from tools.signature_reasons import classify
+    return classify(item, normalized_type, PRIMITIVES, TYPE_ATOMS)
+
+
 def public_summary(raw, identity):
     raw = raw if isinstance(raw, dict) else {}
     bound = all(raw.get(k) == v for k, v in identity.items())
@@ -264,10 +269,11 @@ def public_summary(raw, identity):
             if len(entries) != 1 or not isinstance(entries[0].get('overloads'), list) or len(entries[0]['overloads']) > 16:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
             if set(entries[0]) != {'name', 'overloads'}: complete = False
-            signatures = []; edges = []; overloads = []; unreadable = False; unreadable_tokens = []
+            signatures = []; edges = []; overloads = []; unreadable = False; unreadable_tokens = []; reason_codes = set()
             if not target['found'] and entries[0]['overloads']:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
             for item in entries[0]['overloads']:
+                reason_codes.update(method_reasons(item))
                 try:
                     if isinstance(item, dict) and not set(item).issubset({'token', 'return', 'parameters', 'genericCount', 'static', 'visibility', 'calls', 'branches', 'exceptions'}): complete = False
                     if not isinstance(item, dict) or type(item.get('static')) is not bool or item.get('visibility') not in VISIBILITY:
@@ -304,12 +310,14 @@ def public_summary(raw, identity):
                     signatures.append(signature); edges.extend(safe_edges)
                     overloads.append({'signature': signature, 'calls': safe_edges})
                 except (ValueError, TypeError):
+                    if not reason_codes: reason_codes.add('invalidSignature')
                     unreadable = True
                     token = item.get('token') if isinstance(item, dict) else None
                     if type(token) is int and 0x06000001 <= token <= 0x06ffffff: unreadable_tokens.append(token)
+            if reason_codes: unreadable = True
             if unreadable: complete = False
             methods.append({'name': name, 'status': 'unreadable' if unreadable else 'found' if signatures else 'missing',
-                            'signatures': signatures, 'calls': edges, 'overloads': overloads, 'unreadableTokens': unreadable_tokens})
+                            'signatures': signatures, 'calls': edges, 'overloads': overloads, 'unreadableTokens': unreadable_tokens, 'reasons': sorted(reason_codes)})
         if len(target['methods']) != len(names): complete = False
         rows.append({'id': target_id, 'status': 'found' if target['found'] else 'missing', 'methods': methods})
     return {**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269', 'binaryVerified': binary,

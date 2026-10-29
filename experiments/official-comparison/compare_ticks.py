@@ -4,7 +4,7 @@ No product module imports this script. Private logs stay outside the checkout.
 """
 import argparse
 import copy
-import importlib.util
+import hashlib
 import json
 import math
 import os
@@ -20,6 +20,9 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from tools import validation_host as vh
 MARKER = '[RWMT-TICK] '
+# Exact known 1.7 diagnostic, compared without publishing the private message.
+STEAM_DIAGNOSTIC_SHA256 = 'ee86ee64a1f2a1aad52ddca667ce8b7063ddaa952ce7a9c13ab5969a9d122eca'
+OFFICIAL_LOG = re.compile(r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+(ERROR|WARN|INFO)\s+\[([^\]]+)\] (.*)$')
 
 
 def valid_context(view, setup):
@@ -87,9 +90,17 @@ def parse_lines(lines, *, worker=False):
                 errors.append(text)
         else:
             text = line
-            if re.search(r'\b(?:ERROR|WARN)\s+\[', line) and not ('SteamAPI.Init() failed' in line
-                    or 'Persistent allocation ' in line or 'NativeAllocationRuntime' in line):
-                errors.append(line)
+            match = OFFICIAL_LOG.match(line)
+            if match and match[1] in ('ERROR', 'WARN'):
+                level, category, message = match.groups()
+                steam = (level == 'ERROR' and category == 'Verse'
+                    and hashlib.sha256(message.encode()).hexdigest() == STEAM_DIAGNOSTIC_SHA256)
+                shutdown = (level == 'WARN' and category == 'NativeAllocationRuntime'
+                    and any(r.get('kind') == 'end' for r in rows)
+                    and any(n['id'] == 'shutdownNativeAllocations' and n['match'].fullmatch(message) for n in vh.KNOWN_NOISE))
+                if not steam and not shutdown: errors.append(line)
+            elif re.search(r'\b(?:ERROR|WARN)\s+\[', line):
+                errors.append(line)  # malformed diagnostics cannot silently disappear
         if MARKER in text:
             try: rows.append(json.loads(text.split(MARKER, 1)[1]))
             except ValueError: errors.append('invalid observation JSON')
@@ -121,6 +132,41 @@ def bounded_official(root, timeout=120):
             except ProcessLookupError: pass
             proc.wait()
     return proc.returncode, stopped, round(time.monotonic() - start, 3)
+
+
+
+def summarize_run(product, official, count, *, seconds, product_d):
+    row = compare(product, official, count)
+    row['differentFields'] = [k for k in ('gameTick', 'counter', 'startedCalls', 'longEvent', 'view', 'setup')
+        if [r.get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
+           [r.get(k) for r in official['rows'] if r.get('kind') == 'point']]
+    row['viewDifferences'] = [k for k in ('width', 'height', 'rootSize', 'x', 'z', 'zoom')
+        if [r.get('view', {}).get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
+           [r.get('view', {}).get(k) for r in official['rows'] if r.get('kind') == 'point']]
+    row['setupDifferences'] = [k for k in ('seed', 'tile', 'sizeX', 'sizeZ', 'biome', 'generator', 'mods')
+        if [r.get('setup', {}).get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
+           [r.get('setup', {}).get(k) for r in official['rows'] if r.get('kind') == 'point']]
+    row['observations'] = {label: [{k:v for k,v in r.items()
+        if k in ('relative','gameTick','counter','startedCalls') and type(v) is int and -(2**63) <= v < 2**63}
+        for r in evidence['rows'] if r.get('kind') == 'point']
+        for label,evidence in [('product',product),('official',official)]}
+    row['numericViews'] = {label: [{k:v for k,v in r.get('view', {}).items()
+        if k in ('width','height','rootSize','x','z') and type(v) in (int,float) and math.isfinite(v)}
+        for r in evidence['rows'] if r.get('kind') == 'point']
+        for label,evidence in [('product',product),('official',official)]}
+    keywords = ('depend', 'description', 'packageId', 'supportedVersions', 'url', 'incompatible',
+                'XML', 'Texture', 'graphics', 'audio', 'camera', 'patch', 'frame')
+    row['diagnosticKinds'] = {label: [[k for k in keywords if k.lower() in error.lower()]
+        for error in evidence['errors']][:16] for label,evidence in [('product',product),('official',official)]}
+    row.update(officialSeconds=seconds if type(seconds) in (int,float) and math.isfinite(seconds) else None,
+        officialExitCode=official.get('exitCode') if type(official.get('exitCode')) is int else None,
+        productD=product_d if product_d in ('completed','failed','incomplete','notRequested') else None,
+        productErrors=len(product['errors']), officialErrors=len(official['errors']))
+    return row
+
+def summary_complete(runs):
+    return ([r.get('count') for r in runs] == [60, 600, 600]
+            and all(r.get('equivalent') is True and r.get('sensitivity') is True for r in runs))
 
 
 def main(argv=None):
@@ -188,35 +234,11 @@ def main(argv=None):
         official = parse_lines(log.read_text(errors='replace').splitlines()) if log.is_file() else {'rows': [], 'errors': ['missing']}
         official.update(exitCode=code, interrupted=stopped)
         (rowdir / 'private-comparison.json').write_text(json.dumps({'product':product,'official':official}, indent=2))
-        row = compare(product, official, count)
         d = result.get('stages', {}).get('D', {})
+        row = summarize_run(product, official, count, seconds=seconds, product_d=d.get('status'))
         if d.get('status') != 'completed' or not vh.bounded_tick.evidence_complete(request['tick'], d.get('evidence')):
             row['equivalent'] = False
             row['faults'].append('productEvidenceIncomplete')
-        row['differentFields'] = [k for k in ('gameTick', 'counter', 'startedCalls', 'longEvent', 'view', 'setup')
-            if [r.get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
-               [r.get(k) for r in official['rows'] if r.get('kind') == 'point']]
-        row['viewDifferences'] = [k for k in ('width', 'height', 'rootSize', 'x', 'z', 'zoom')
-            if [r.get('view', {}).get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
-               [r.get('view', {}).get(k) for r in official['rows'] if r.get('kind') == 'point']]
-        row['setupDifferences'] = [k for k in ('seed', 'tile', 'sizeX', 'sizeZ', 'biome', 'generator', 'mods')
-            if [r.get('setup', {}).get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
-               [r.get('setup', {}).get(k) for r in official['rows'] if r.get('kind') == 'point']]
-        row['numericViews'] = {label: [{k:v for k,v in r.get('view', {}).items()
-            if k in ('width','height','rootSize','x','z') and type(v) in (int,float) and math.isfinite(v)}
-            for r in evidence['rows'] if r.get('kind') == 'point']
-            for label,evidence in [('product',product),('official',official)]}
-        keywords = ('depend', 'description', 'packageId', 'supportedVersions', 'url', 'incompatible',
-                    'XML', 'Texture', 'graphics', 'audio', 'camera', 'patch', 'frame')
-        row['diagnosticKinds'] = {label: [[k for k in keywords if k.lower() in error.lower()]
-            for error in evidence['errors']][:16] for label,evidence in [('product',product),('official',official)]}
-        row['faultTypes'] = sorted(set(re.findall(r'\b(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*Exception\b',
-            '\n'.join(product['errors'] + official['errors']))))[:8]
-        row['faultMethods'] = sorted(set(re.findall(r'\bat ([A-Za-z_][A-Za-z0-9_.+`]*)(?=\()',
-            '\n'.join(product['errors'] + official['errors']))))[:12]
-        row.update(officialSeconds=seconds, officialExitCode=code,
-            productD=result.get('stages', {}).get('D', {}).get('status'),
-            productErrors=len(product['errors']), officialErrors=len(official['errors']))
         # Sensitivity: a plausible counter defect must fail the same comparison.
         changed = copy.deepcopy(official)
         for observation in changed['rows']:
@@ -224,9 +246,14 @@ def main(argv=None):
                 observation['counter'] -= 1
         row['sensitivity'] = not compare(product, changed, count)['equivalent']
         summary['runs'].append(row)
-        summary['ok'] = all(r['equivalent'] and r['sensitivity'] for r in summary['runs'])
+        summary['ok'] = summary_complete(summary['runs'])
         (a.out / 'safe-summary.json').write_text(json.dumps(summary, indent=2))
-        if not row['equivalent']: break  # do not repeat a known failing call path
+        # Continue finite boundary characterization after a view/diagnostic mismatch,
+        # but never repeat a missing or interrupted tick call path.
+        needed = 2 if count == 60 else 3
+        if (row['productPoints'] != needed or row['officialPoints'] != needed
+                or d.get('status') != 'completed' or code != 0 or stopped):
+            break
     return 0 if summary['ok'] and len(summary['runs']) == 3 else 1
 
 if __name__ == '__main__': raise SystemExit(main())

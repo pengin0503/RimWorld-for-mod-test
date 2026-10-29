@@ -60,6 +60,34 @@ class TickComparisonTests(unittest.TestCase):
         self.assertFalse(m.compare(a,copy.deepcopy(a),600)['equivalent'])
         self.assertFalse(m.compare(self.evidence(),self.evidence(),True)['equivalent'])
 
+    def test_complete_summary_requires_all_three_planned_runs(self):
+        m=self.helper()
+        self.assertTrue(callable(getattr(m, 'summary_complete', None)), 'summary completion guard missing')
+        rows=[{'count':60,'equivalent':True,'sensitivity':True},
+              {'count':600,'equivalent':True,'sensitivity':True},
+              {'count':600,'equivalent':True,'sensitivity':True}]
+        self.assertFalse(m.summary_complete(rows[:1]))
+        self.assertFalse(m.summary_complete(rows[:2]))
+        self.assertTrue(m.summary_complete(rows))
+        rows[2]['sensitivity']=False
+        self.assertFalse(m.summary_complete(rows))
+
+    def test_official_errors_mentioning_known_noise_are_not_discarded(self):
+        m=self.helper()
+        for message in ('Unhandled exception in NativeAllocationRuntime during frame update',
+                        'Persistent allocation failed during tick',
+                        'Unexpected [Steamworks.NET] SteamAPI.Init() failed in tick'):
+            result=m.parse_lines(['2026-10-29 00:00:00.000 ERROR [Verse] '+message])
+            self.assertEqual(len(result['errors']),1,message)
+
+    def test_full_public_summary_cannot_expose_private_identifiers(self):
+        m=self.helper()
+        self.assertTrue(callable(getattr(m,'summarize_run',None)), 'fixed summary builder missing')
+        bad=self.evidence();bad['errors']=['PrivateTenant.CustomerException at PrivateTenant.SecretMethod()']
+        result=m.summarize_run(bad,self.evidence(),600,seconds=1.0,product_d='completed')
+        self.assertNotIn('PrivateTenant',str(result))
+        self.assertFalse(result['equivalent'])
+
     def test_summary_does_not_publish_private_strings(self):
         m=self.helper();bad=self.evidence()
         bad['errors']=['PRIVATE log'];bad['rows'][2]['view']['x']='PRIVATE path'

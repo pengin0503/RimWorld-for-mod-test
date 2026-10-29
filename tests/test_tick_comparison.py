@@ -49,6 +49,17 @@ class TickComparisonTests(unittest.TestCase):
             a=self.evidence();a[field]=value
             self.assertFalse(m.compare(a,copy.deepcopy(a),600)['equivalent'])
 
+    def test_identical_malformed_contexts_and_reordered_rows_do_not_qualify(self):
+        m=self.helper()
+        for section,key,value in [('view','width',0),('view','x',True),('setup','mods',[]),('setup','seed','other')]:
+            a=self.evidence()
+            for row in a['rows']:
+                if row.get('kind') == 'point': row[section][key]=value
+            self.assertFalse(m.compare(a,copy.deepcopy(a),600)['equivalent'], (section,key))
+        a=self.evidence();a['rows'][0],a['rows'][1]=a['rows'][1],a['rows'][0]
+        self.assertFalse(m.compare(a,copy.deepcopy(a),600)['equivalent'])
+        self.assertFalse(m.compare(self.evidence(),self.evidence(),True)['equivalent'])
+
     def test_summary_does_not_publish_private_strings(self):
         m=self.helper();bad=self.evidence()
         bad['errors']=['PRIVATE log'];bad['rows'][2]['view']['x']='PRIVATE path'

@@ -89,7 +89,12 @@ namespace RWMT.TickQualification
         public static bool Prefix(ref bool __state)
         {
             __state = false;
-            if (ProbeMod.Finished) return false;  // never execute count+1
+            if (ProbeMod.Finished)
+            {
+                if (ProbeMod.Config.official) return false; // bound the reference frame loop
+                ProbeMod.Emit(new { kind = "unexpectedExtraProductTick" });
+                return true; // product defects must remain observable, never masked
+            }
             if (ProbeMod.StartedCalls != 1)
             {
                 ProbeMod.Emit(new { kind = "unexpectedTickBeforeStarted" });

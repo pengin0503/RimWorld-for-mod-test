@@ -6,6 +6,7 @@ import argparse
 import copy
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -21,9 +22,26 @@ from tools import validation_host as vh
 MARKER = '[RWMT-TICK] '
 
 
+def valid_context(view, setup):
+    if not isinstance(view, dict) or set(view) != {'width', 'height', 'rootSize', 'x', 'z', 'zoom'}:
+        return False
+    if any(type(view[k]) is not int or view[k] <= 0 for k in ('width', 'height')):
+        return False
+    if any(type(view[k]) not in (int, float) or not math.isfinite(view[k]) for k in ('rootSize', 'x', 'z')):
+        return False
+    if view['rootSize'] != 24 or not all(0 <= view[k] <= 250 for k in ('x', 'z')) or not isinstance(view['zoom'], str) or not view['zoom']:
+        return False
+    if not isinstance(setup, dict) or set(setup) != {'seed', 'tile', 'biome', 'sizeX', 'sizeZ', 'generator', 'mods'}:
+        return False
+    return (setup['seed'] == 'rwmt' and setup['sizeX'] == setup['sizeZ'] == 250
+        and type(setup['tile']) is int and setup['tile'] >= 0 and setup['biome'] == 'AridShrubland'
+        and setup['generator'] == 'Base_Player' and isinstance(setup['mods'], list) and len(setup['mods']) >= 2
+        and all(isinstance(n, str) and re.fullmatch(r'[A-Za-z0-9_.-]+', n) for n in setup['mods']))
+
+
 def compare(product, official, count):
     points = [0, 60] if count == 60 else [0, 60, 600]
-    faults = []
+    faults = [] if type(count) is int and count in (60, 600) else ['unsupportedCount']
     normalized = []
     for label, evidence in [('product', product), ('official', official)]:
         rows = evidence.get('rows', [])
@@ -34,6 +52,8 @@ def compare(product, official, count):
         ended = [r for r in rows if r.get('kind') == 'end']
         if len(started) != 1 or len(ended) != 1 or len(rows) != len(points) + 2:
             faults.append(label + '.rowSet')
+        if [r.get('kind') for r in rows] != ['started'] + ['point'] * len(points) + ['end']:
+            faults.append(label + '.rowOrder')
         start = started[0].get('gameTick') if len(started) == 1 else None
         if type(start) is not int or (started and started[0].get('counter') != 0):
             faults.append(label + '.start')
@@ -44,7 +64,7 @@ def compare(product, official, count):
             if (type(n) is not int or type(start) is not int or row.get('gameTick') != start + n
                     or row.get('counter') != n or row.get('startedCalls') != 1 or row.get('longEvent') is not False):
                 faults.append(label + '.tickInvariant')
-            if not isinstance(row.get('view'), dict) or not row.get('view') or not isinstance(row.get('setup'), dict) or not row.get('setup'):
+            if not valid_context(row.get('view'), row.get('setup')):
                 faults.append(label + '.contextMissing')
         if len(ended) == 1 and (ended[0].get('advanced') != count or ended[0].get('counter') != count
                 or type(start) is not int or ended[0].get('gameTick') != start + count):
@@ -169,6 +189,31 @@ def main(argv=None):
         official.update(exitCode=code, interrupted=stopped)
         (rowdir / 'private-comparison.json').write_text(json.dumps({'product':product,'official':official}, indent=2))
         row = compare(product, official, count)
+        d = result.get('stages', {}).get('D', {})
+        if d.get('status') != 'completed' or not vh.bounded_tick.evidence_complete(request['tick'], d.get('evidence')):
+            row['equivalent'] = False
+            row['faults'].append('productEvidenceIncomplete')
+        row['differentFields'] = [k for k in ('gameTick', 'counter', 'startedCalls', 'longEvent', 'view', 'setup')
+            if [r.get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
+               [r.get(k) for r in official['rows'] if r.get('kind') == 'point']]
+        row['viewDifferences'] = [k for k in ('width', 'height', 'rootSize', 'x', 'z', 'zoom')
+            if [r.get('view', {}).get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
+               [r.get('view', {}).get(k) for r in official['rows'] if r.get('kind') == 'point']]
+        row['setupDifferences'] = [k for k in ('seed', 'tile', 'sizeX', 'sizeZ', 'biome', 'generator', 'mods')
+            if [r.get('setup', {}).get(k) for r in product['rows'] if r.get('kind') == 'point'] !=
+               [r.get('setup', {}).get(k) for r in official['rows'] if r.get('kind') == 'point']]
+        row['numericViews'] = {label: [{k:v for k,v in r.get('view', {}).items()
+            if k in ('width','height','rootSize','x','z') and type(v) in (int,float) and math.isfinite(v)}
+            for r in evidence['rows'] if r.get('kind') == 'point']
+            for label,evidence in [('product',product),('official',official)]}
+        keywords = ('depend', 'description', 'packageId', 'supportedVersions', 'url', 'incompatible',
+                    'XML', 'Texture', 'graphics', 'audio', 'camera', 'patch', 'frame')
+        row['diagnosticKinds'] = {label: [[k for k in keywords if k.lower() in error.lower()]
+            for error in evidence['errors']][:16] for label,evidence in [('product',product),('official',official)]}
+        row['faultTypes'] = sorted(set(re.findall(r'\b(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*Exception\b',
+            '\n'.join(product['errors'] + official['errors']))))[:8]
+        row['faultMethods'] = sorted(set(re.findall(r'\bat ([A-Za-z_][A-Za-z0-9_.+`]*)(?=\()',
+            '\n'.join(product['errors'] + official['errors']))))[:12]
         row.update(officialSeconds=seconds, officialExitCode=code,
             productD=result.get('stages', {}).get('D', {}).get('status'),
             productErrors=len(product['errors']), officialErrors=len(official['errors']))

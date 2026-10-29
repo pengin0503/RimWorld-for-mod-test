@@ -46,7 +46,7 @@ D要求がある場合のTickApi.Initializeは、その後の別キューにあ�
 自然生成されたSteel等の絶対個数や座標を比較せず、選択による差分を別実装で得る。
 正常/数量違い/品目違い/fixture不在を分け、欠落をfalseや0へ補って一致扱いにしない。
 
-[私有静的調査入口の設計案](../superpowers/specs/2026-10-29-private-static-c-audit-design.md)で、取得・非実行解析・公開境界・受入を具体化した。設計確認前の実装は保留。
+[私有静的調査入口の設計案](../superpowers/specs/2026-10-29-private-static-c-audit-design.md)で、取得・非実行解析・公開境界・受入を具体化した。設計に基づく実装は進行中。
 
 ## ケース別ゲートと停止条件
 

@@ -36,6 +36,15 @@ class AssetTests(unittest.TestCase):
         self.assertIn('--continuation-token', mocked.call_args.args)
         self.assertEqual(mocked.call_args.args[-1], 'tok')
 
+    def test_static_audit_exact_listing_allows_only_fixed_keys(self):
+        r2 = ra.R2(endpoint='https://abc.r2.cloudflarestorage.com', bucket='rimworld-17')
+        key = 'Game-Linux/Assembly-CSharp.dll'
+        with patch.object(r2, 'call', return_value={'Contents': [{'Key': key, 'Size': 3}, {'Key': key + '.extra', 'Size': 5}]}) as call:
+            self.assertEqual(r2.list_static_audit_key(key), [{'key': key, 'size': 3}])
+            self.assertIn(key, call.call_args.args)
+        with patch.object(r2, 'call', side_effect=AssertionError('unexpected lookup')):
+            with self.assertRaises(ra.AssetError): r2.list_static_audit_key('Game-Linux/Data/secret')
+
     def test_listing_cannot_escape_prefix(self):
         r2 = ra.R2(endpoint='https://abc.r2.cloudflarestorage.com', bucket='rimworld-17')
         with patch.object(r2, 'call', return_value={'Contents': [{'Key': 'Workshop/999/A.xml', 'Size': 3}]}):

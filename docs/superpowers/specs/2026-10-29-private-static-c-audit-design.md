@@ -1,6 +1,6 @@
 # C0 私有静的調査入口の設計案
 
-2026-10-29。**提案・未承認・未実装。** ユーザーの指示により、実装より先に設計を確定する。
+2026-10-29。ユーザーは本設計に基づく実装を指示した。静的監査がC0の動的適格化を代替しないことは変わらない。
 基準mainは `f223c514e4ee9c768cb0f819cfd8d9089e2450ff`。
 [既存C0調査](../../research/c-reference-entrypoints.md)と[ケース別適格化計画](../plans/2026-10-29-c-independent-qualification.md)を補う。
 この入口の完成はC0全体の通過やCの適格化を意味しない。
@@ -18,7 +18,7 @@ DLLのAssembly.Load、Assembly.LoadFrom、Reflectionによるゲーム型の生�
 静的調査が答えるのは、固定メソッドの存在・正確な署名・可視性・直接呼出位置まで。
 実UIへの到達、実Gameの状態、キューの実行順序、報酬の観測、正常/不一致の判定感度は答えない。
 
-## 方式の比較（まだユーザー選択前）
+## 方式の比較
 
 | 案 | 利点 | 費用・制約 | 提案 |
 |---|---|---|---|
@@ -26,7 +26,7 @@ DLLのAssembly.Load、Assembly.LoadFrom、Reflectionによるゲーム型の生�
 | P2 registryへstatic-auditを追加 | 手動入口を共通化できる | 現在のneedsGame/Worker/Harmony分岐、allの意味、公開契約を変更する必要 | 初版では採らない案 |
 | ローカル取得と手動解析 | runnerの運用追加が不要 | 現環境にDLL/SDK/資格情報がなく、コネクター取得も失敗 | 今回は成立しない |
 
-以下は推奨案を具体化した設計であり、ユーザーが選択済みとは扱わない。
+以下は実装対象の専用main-only workflowを具体化した設計である。
 
 ## 処理の境界
 
@@ -130,19 +130,18 @@ staticAuditStatus=completedは、固定検索群を最後まで処理し、missi
 実物受入は統合済みmainの手動実行1回。取得量記録、固定8入力のhash一致、対象APIの実際の署名/missing、秘密なし解析、再検証済み公開を確認する。
 失敗時に別refへsecretを渡す・公開proxyを作る・R2権限を変える迂回は行わない。
 
-## 実装の分割案と承認待ち事項
+## 実装の分割
 
 実装単位は、(1)取得/manifest/publication境界、(2)PE metadata/IL scannerと自作PEテスト、(3)専用workflow接続とmain受入の3つ。
 Python側は既存codex_workflow/private_validationの安全な資材・identity・Linux監督を再利用し、C# scannerはゲームDLLへのcompile-time参照も持たない。
 ファイル候補はtools/private_static_audit.py、experiments/c-reference-audit/、tests/test_private_static_audit.py、tests/worker/CReferenceAudit/、.github/workflows/linux-private-c-audit.yml。
-公開API契約の変更が必要になれば先に設計へ戻る。正式なRED→GREEN実装手順は、この設計の承認後に別計画へ書く。
+公開API契約の変更が必要になれば先に設計へ戻る。RED→GREEN実装手順は[実装計画](../plans/2026-10-29-private-static-c-audit.md)を参照。
 
-方式・128MiB予算・監督上限・公開範囲は本書の提案。既存のユーザー決定としては扱わない。
-ユーザーによる設計確認までは、製品コード、project追加、依存導入、workflow追加、実物実行を進めない。
+128MiB予算・監督上限・公開範囲を実装条件とする。実物受入はmainへの統合後に実施し、静的結果だけで資格を更新しない。
 
 ## 設計確認の状態
 
-本書は設計案であり、正式な実装計画・実装の承認はまだない。
+設計提示後、ユーザーが実装と完了後のPRマージを指示した。
 独立したbuilder checkは途中まで実施され、固定8入力とadapterの一致、非実行、C0=false、main限定の秘密境界は確認された。
 確認担当が利用上限に達して終了したため、独立レビュー全体の完了とは扱わない。
 その後、著者が解析予算、入力hashと解析byte列の結合、公開型名の固定許可集合を補足し、文書内の整合とリンクを自己点検した。

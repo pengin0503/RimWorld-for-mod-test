@@ -176,7 +176,7 @@ def tree_rss(pid):
     return total
 
 
-def run_command(command, log, *, timeout=900):
+def run_command(command, log, *, timeout=900, memory_limit=4*1024**3):
     started=time.monotonic(); interrupted=False
     if not native_process_available():
         return {'exitCode':None,'interrupted':True,'seconds':0}
@@ -194,7 +194,7 @@ def run_command(command, log, *, timeout=900):
         try:
             while process.poll() is None:
                 if (time.monotonic()-started>=timeout or log.stat().st_size>8*1024*1024
-                        or tree_rss(process.pid)>4*1024**3):
+                        or tree_rss(process.pid)>memory_limit):
                     interrupted=True; break
                 time.sleep(.05)
         finally:
@@ -203,6 +203,8 @@ def run_command(command, log, *, timeout=900):
             if process.poll() is None:
                 process.terminate()
             process.wait()
+    if log.stat().st_size > 8*1024*1024 or time.monotonic()-started >= timeout:
+        interrupted=True
     evidence=read_json(status)
     evidence=evidence if isinstance(evidence,dict) else {}
     code=evidence.get('exitCode')

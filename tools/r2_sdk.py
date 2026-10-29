@@ -42,13 +42,22 @@ class SDKTransport:
         except Exception:
             raise TransportError('SDK object listing failed') from None
 
-    def get_object(self, key, destination):
+    def get_object(self, key, destination, expected_size=None):
         try:
             response = self.client.get_object(Bucket=self.bucket, Key=key)
             body = response['Body']
             try:
+                if expected_size is not None and response.get('ContentLength') != expected_size:
+                    raise TransportError('SDK object size changed')
+                total = 0
                 with open(destination, 'wb') as output:
-                    while chunk := body.read(1024 * 1024):
+                    while True:
+                        amount = 1024 * 1024 if expected_size is None else min(1024 * 1024, expected_size - total + 1)
+                        chunk = body.read(amount)
+                        if not chunk: break
+                        total += len(chunk)
+                        if expected_size is not None and total > expected_size:
+                            raise TransportError('SDK object exceeded expected size')
                         output.write(chunk)
             finally:
                 body.close()

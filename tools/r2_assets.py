@@ -18,6 +18,9 @@ from urllib.parse import urlsplit
 MAX_OBJECTS = 5000
 MAX_BYTES = 3 * 1024 ** 3
 WORKSHOP_ID = re.compile(r"[0-9]{1,20}\Z")
+STATIC_AUDIT_KEYS = frozenset('Game-Linux/' + name for name in (
+    'Version.txt', 'Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'UnityStubs.dll',
+    'Waylith.UnityCompat.dll', 'libcoreclr.so', 'System.Private.CoreLib.dll'))
 
 
 class AssetError(Exception):
@@ -115,6 +118,14 @@ class R2:
     def list_prefix(self, prefix: str) -> list[dict]:
         if prefix != 'Game-Linux/' and not re.fullmatch(r'Workshop/[0-9]{1,20}/', prefix):
             raise AssetError('listing requires an exact approved game or MOD prefix')
+        return self._list_prefix(prefix)
+
+    def list_static_audit_key(self, key: str) -> list[dict]:
+        if key not in STATIC_AUDIT_KEYS:
+            raise AssetError('static audit listing requires a fixed key')
+        return [item for item in self._list_prefix(key) if item['key'] == key]
+
+    def _list_prefix(self, prefix: str) -> list[dict]:
         entries = []
         token = None
         while True:
@@ -157,7 +168,7 @@ class R2:
                 metadata = self.call("get-object", "--bucket", self.bucket, "--key", key, str(temporary))
             else:
                 try:
-                    metadata = self._sdk.get_object(key, temporary)
+                    metadata = self._sdk.get_object(key, temporary, expected_size)
                 except Exception:
                     raise AssetError('SDK object download failed') from None
             actual = temporary.stat().st_size

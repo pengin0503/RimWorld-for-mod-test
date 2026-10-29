@@ -23,3 +23,17 @@ class ReasonTests(unittest.TestCase):
     def test_unknown_schema_is_not_a_type_failure(self):
         item=self.item();item['PRIVATE']='secret'
         self.assertEqual(audit.method_reasons(item), ['invalidSchema'])
+
+    def test_unknown_return_does_not_hide_invalid_parameter_shape(self):
+        item=self.item();item['return']={'kind':'named','name':'PRIVATE.Secret'}
+        item['parameters']=[{'kind':'array','rank':False,'element':{'kind':'primitive','name':'Int32'}}]
+        self.assertEqual(audit.method_reasons(item), ['invalidSignature','unsupportedTypeAtom'])
+
+    def test_public_summary_emits_only_fixed_reasons(self):
+        identity={'runId':'100-1','commit':'a'*40}
+        item=self.item();item['visibility']='PRIVATE';item['return']={'kind':'named','name':'PRIVATE.Secret'}
+        raw={**identity,'verified':True,'types':[{'id':'game','found':True,'methods':[{'name':'InitNewGame','overloads':[item]},{'name':'FinalizeInit','overloads':[]}]}]}
+        result=audit.public_summary(raw,identity)
+        self.assertEqual(result['types'][0]['methods'][0]['reasons'],['invalidVisibility','unsupportedTypeAtom'])
+        self.assertNotIn('PRIVATE',str(result));self.assertFalse(result['c0Passed'])
+        self.assertEqual(result['staticAuditStatus'],'incomplete')

@@ -65,6 +65,9 @@ probeは全tickで初期化イベントが残っていないことを検査し�
 
 ## 適格化へ持ち越す条件
 
+2026-10-29に[公式との独立比較](2026-10-29-bounded-tick-independent-comparison.md)を追加実行。
+同じseedでも変わる開始視点と描画系診断の差が残るため、独立適格化は完了扱いにしていない。
+
 - 公式Linuxの同じ開始条件と独立比較するまではDをexperimental/incompleteに保つ。
 - 比較方法は、同じ自作probeを公式headless quicktestで読み、StartedNewGame直後を相対0とし、
   同じ0/60/600でprobe状態・実tick番号・開始通知を別経路で採取する。固定視点の位置・ズーム24・寸法も合わせる。追加のpause-on-load tickを区別し、

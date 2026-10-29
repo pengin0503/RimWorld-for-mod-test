@@ -22,18 +22,22 @@ Linux x86_64, RimWorld 1.7.4985 rev1269, bundled WaylithClr only. R2 read-only; 
 ### Task 1: COW measurement
 Files: tests/test_cow_measurement.py, experiments/cow-measurement/measure.py, dedicated private workflow.
 Interface: run(root, repeats=5) returns whitelisted JSON with copy/reflink modes, time, unique data bytes, isolation, fallback.
-- [ ] Tests first: union physical intervals, missing FIEMAP, native copy independence, stale hashes and summary.
-- [ ] Run failing tests, implement, rerun.
-- [ ] Run CI on newly mounted loopback Btrfs and record timings/data/isolation.
+- [x] Tests first: union physical intervals, missing FIEMAP, native copy independence, stale hashes and summary.
+- [x] Run failing tests, implement, rerun.
+- [x] Run CI on newly mounted loopback Btrfs and record timings/data/isolation.
 
 ### Task 2: Independent D comparison
 Files: development-only TickQualification fixture, experiments/official-comparison/compare_ticks.py, tests/test_tick_comparison.py and private workflow.
 Interface: compare(product, official, count) rejects missing/duplicate/extra rows, setup/view mismatch, errors, bad increments and unexpected fixture values.
-- [ ] Tests first for positive and negative comparison sensitivity.
-- [ ] Implement official bounded probe, isolated process execution, finite supervisor and sanitized summary.
-- [ ] Run real 60/600 and fault/sensitivity controls, repeated normal cases.
+- [x] Tests first for positive and negative comparison sensitivity.
+- [x] Implement official bounded probe, isolated process execution, finite supervisor and sanitized summary.
+- [x] Run real 60/600 and fault/sensitivity controls, repeated normal cases.
 
 ### Task 3: Evidence and integration
-- [ ] Record actual evidence and remaining stopping conditions. Lift qualification only for demonstrated scoped conditions; otherwise keep experimental.
-- [ ] Run relevant tests and public CI; one whole-branch review and fix material findings.
-- [ ] Create reviewable non-draft PR; leave merge to explicit user instruction.
+- [x] Record actual evidence and remaining stopping conditions. Lift qualification only for demonstrated scoped conditions; otherwise keep experimental.
+- [x] Run relevant tests and public CI; one whole-branch review and fix material findings.
+- [x] Create reviewable non-draft PR; leave merge to explicit user instruction.
+
+## Outcome
+
+COW experiment completed on native Btrfs. Independent D comparison executed60/600/600; ticks/counters/start/event invariants agreed, viewport coordinates and diagnostics did not. D qualification remains incomplete (no production lift). Real-game counter-mutation rejection is not claimed to prove sensitivity while the positive comparison itself differs. Public CI40827112925 all8 passed, Linux309 tests/8skip; private40827107028 correctly rejected equivalence. Final review issues fixed RED→GREEN. See research records.

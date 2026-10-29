@@ -174,7 +174,7 @@ MOD のサイズをハッシュ計算前に確認し、合計が上限を超え�
 
 MOD が多い場合は要求の `limits.timeoutSeconds` と `limits.memoryMiB` を明示して調整する運用を推奨します。既定値は変更していません。上限に達した実行は成功ではなく `incomplete` として扱います。
 
-LinuxではMODの準備時にコピーオンライト複製を試し、利用できなければ通常コピーへ戻ります。どちらもコピー後の内容をSHA-256で照合し、baseline・target・入力MODは別のファイルとして扱います。MODにハードリンクは使いません。`process.baseline.modCopyModes` と `process.target.modCopyModes` の `reflink` / `copy` に件数を記録します。既存の `linkModes` はゲームスナップショットへのリンク方式のみです。非対応FSでの高速化は保証しません。
+LinuxではMODの準備時にコピーオンライト複製を試し、利用できなければ通常コピーへ戻ります。どちらもコピー後の内容をSHA-256で照合し、baseline・target・入力MODは別のファイルとして扱います。MODにハードリンクは使いません。`process.baseline.modCopyModes` と `process.target.modCopyModes` の `reflink` / `copy` に件数を記録します。既存の `linkModes` はゲームスナップショットへのリンク方式のみです。非対応FSでの高速化は保証しません。自作144 MiB入力を専用Btrfsで測った[対応FSの実測](research/2026-10-29-cow-filesystem-measurement.md)では、検証込み複製の中央値が約39.8%短縮しました。ゲーム全体の短縮率ではありません。
 
 
 ### 決めた tick だけ進めて観測する（D・実験）

@@ -1,0 +1,93 @@
+name: Private Linux validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Fixed validation suite
+        type: choice
+        required: true
+        default: smoke
+        options: [smoke, c-regression, d-regression, d-compare, cow, all]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-linux-validation
+  cancel-in-progress: false
+
+jobs:
+  validation:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_ROOT: ${{ runner.temp }}/rwmt-private
+      HARMONY_DLL: ${{ runner.temp }}/harmony/lib/net10.0/0Harmony.dll
+      COW_ROOT: ${{ runner.temp }}/rwmt-cow-mount
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Bind fresh session before preparation
+        id: session
+        env:
+          SELECTED_SUITE: ${{ inputs.suite }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python tools/private_validation.py init --suite "$SELECTED_SUITE" --private-root "$PRIVATE_ROOT"
+      - uses: actions/setup-dotnet@v5
+        id: runtime
+        if: steps.session.outputs.needsGame == 'true'
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install R2 SDK
+        id: sdk
+        if: steps.session.outputs.needsGame == 'true'
+        run: python -m pip install -r requirements-r2-sdk.txt
+      - name: Prepare one private runtime
+        id: game
+        if: always() && steps.session.outcome == 'success' && steps.session.outputs.needsGame == 'true' && steps.runtime.outcome == 'success' && steps.sdk.outcome == 'success'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: rimworld-17
+          AWS_DEFAULT_REGION: auto
+          RWMT_R2_TRANSPORT: sdk
+        run: |
+          python tools/private_validation.py prepare --private-root "$PRIVATE_ROOT" > "$RUNNER_TEMP/private-prepare.log" 2>&1 || { echo 'Private preparation failed'; exit 1; }
+      - name: Build Worker without cloud credentials
+        if: always() && steps.session.outcome == 'success' && steps.game.outcome == 'success'
+        run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+      - name: Obtain pinned fixture comparison library
+        if: always() && steps.session.outcome == 'success' && steps.session.outputs.needsHarmony == 'true' && steps.game.outcome == 'success'
+        run: |
+          curl --fail --silent --show-error --max-time 90 https://api.nuget.org/v3-flatcontainer/lib.harmony/2.4.3/lib.harmony.2.4.3.nupkg -o "$RUNNER_TEMP/harmony.nupkg"
+          python -c 'import zipfile,os; zipfile.ZipFile(os.environ["RUNNER_TEMP"]+"/harmony.nupkg").extract("lib/net10.0/0Harmony.dll",os.environ["RUNNER_TEMP"]+"/harmony")'
+      - name: Create dedicated disposable COW filesystem
+        if: always() && steps.session.outcome == 'success' && steps.session.outputs.needsCow == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y btrfs-progs
+          truncate -s 3G "$RUNNER_TEMP/rwmt-cow.img"
+          mkfs.btrfs -q -f "$RUNNER_TEMP/rwmt-cow.img"
+          mkdir "$COW_ROOT"
+          sudo mount -o loop,compress=no "$RUNNER_TEMP/rwmt-cow.img" "$COW_ROOT"
+          sudo chown "$(id -u):$(id -g)" "$COW_ROOT"
+      - name: Run fixed suites without cloud credentials
+        if: always() && steps.session.outcome == 'success'
+        run: |
+          python tools/private_validation.py run --private-root "$PRIVATE_ROOT" --worker worker/bin --harmony-dll "$HARMONY_DLL" --cow-root "$COW_ROOT" > "$RUNNER_TEMP/private-validation.log" 2>&1 || { echo 'Acceptance did not complete successfully; see rebuilt summary'; exit 1; }
+      - name: Publish revalidated fixed fields only
+        if: always() && steps.session.outcome == 'success'
+        run: python tools/private_validation.py publish --private-root "$PRIVATE_ROOT"
+      - name: Unmount disposable filesystem
+        if: always() && steps.session.outcome == 'success' && steps.session.outputs.needsCow == 'true'
+        run: |
+          if mountpoint -q "$COW_ROOT"; then sudo umount "$COW_ROOT"; fi

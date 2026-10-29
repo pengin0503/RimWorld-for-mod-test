@@ -117,3 +117,29 @@ prepare はゲーム本体を新たな私有スナップショットへコピー
 - 対象MODのDLLは任意コードを含み得る。私有キーや個人ファイルを持つ環境で未信頼MODを実行する場合はリスクを明示し、権限を分離すること。
 - 検証ホストの合格は「そのOS/CLR/ビルド/要求された範囲」の合格であり、Windowsでの長時間ゲーム動作の保証ではない。
 
+
+## mainからの共通私有検証（P2）
+
+`Private Linux validation` の手動実行はmain限定で、起動時commitを全stepで固定する。
+選択肢は `smoke`（既定: ok/harmony-ok/map-ok）、`c-regression`（材料6＋自作イベント4）、
+`d-regression`（自作有限tick10）、`d-compare`（公式との独立比較60/600/600）、`cow`、`all`。
+allは個別5suiteを順に試す。ゲームsnapshotは同一job内で一度だけ準備し、R2資格情報はその準備stepのみに渡す。
+実行子環境は許可したランタイム変数だけを引き継ぎ、HOME/TMP/XDGを私有領域に分ける。
+smoke/独立比較用の開発ライブラリは従来の実験と同じLib.Harmony 2.4.3を使用する。
+これは第三者MODの選定・取得ではない。実MODを扱う後続P4では私有索引の照合を先に行う。
+
+cow単独はR2・ゲーム・索引・Worker・.NET SDKを使用せず、専用一時Btrfs上の自作516ファイルだけを測る。
+Btrfs準備が失敗してもゲームsuiteを、ゲーム準備が失敗してもcowを、それぞれ独立に試す。
+不足した前提のsuiteはblocked、途中停止はincompleteとし、先に完了したsuiteを保存する。
+親監督はhelperごと15分、実行合計40分、workflow全体45分。ログ8 MiB・合計RSS4 GiBはポーリングであり強制メモリ上限ではない。
+Linux PIDとprocfsが一致し、pidfdが利用できる環境のみを受け付ける。
+
+公開は固定suite名・実行状態・判定状態・資格状態・終了コード・時間だけを再構築する。
+`acceptancePassed` は固定回帰試験の期待どおりの動作を意味する。C/Dの受入成功でも
+`validationStatus=incomplete` / `qualificationStatus=experimental` を保持し、MOD全体の合格や独立適格化と呼ばない。
+D比較不合格をworkflow成功に変換しない。ゲーム・MOD・索引・生ログはArtifacts/Cacheへ保存しない。
+run/attempt/commit不一致、重複実行、古いsummaryから成功を作らない。
+
+この入口の実物受入（smoke/cow/C回帰/D回帰を各1回、その後all）はmain統合後に行う。
+未マージbranchへ秘密情報を渡すpreviewは追加しない。従来のbranch専用workflowは受入完了まで移行用に残す。
+Windowsの新機能とDの比較条件緩和は対象外。

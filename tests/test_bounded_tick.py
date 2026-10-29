@@ -94,6 +94,17 @@ class TickEvidenceTests(unittest.TestCase):
                 self.assertEqual(result[3]['D']['status'], 'incomplete')
 
 
+    def test_tick_exception_diagnostic_survives_interrupted_execution(self):
+        from tests.test_validation_host import worker_result
+        r = vh.validate_request(request(), Path('/tmp'))
+        worker = worker_result(executionStatus='interrupted', tick=evidence())
+        error = {'level': 'error', 'category': 'Verse', 'stage': 'tick.run', 'message': 'controlled tick error'}
+        result = vh.evaluate(r, [], worker, None, [error], worker_result(), None, [], {}, 'experimental')
+        self.assertEqual(result[0], 'incomplete')
+        self.assertEqual(result[4][0]['message'], 'controlled tick error')
+        self.assertIn('newErrors', [x['code'] for x in result[2]])
+
+
     def test_missing_forged_or_partial_evidence_never_completes(self):
         variants = [None, {}, dict(evidence(), advanced=601), dict(evidence(), endTick=1601),
                     dict(evidence(), startTick=True), dict(evidence(), status='incomplete'),

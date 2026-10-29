@@ -32,6 +32,37 @@ public sealed class TickApi
         _ticks = Reflect.InstanceProperty(manager, "TicksGame");
     }
 
+    public Dictionary<string, object?>? CameraContext { get; private set; }
+
+    private void InstallFixedTickView()
+    {
+        // 1.7 pawn/thing tick rates call GenTicks.GetCameraUpdateRate even headless.
+        // Use the real CameraDriver predicates against a real, fixed Camera. The
+        // driver is deliberately NOT attached: no Awake/Update/input/render callbacks.
+        Type driverType = Reflect.Type("Verse.CameraDriver, Assembly-CSharp");
+        object driver = Activator.CreateInstance(driverType)!;
+        object camera = _map.CurrentCamera.GetValue(null)
+            ?? throw new InvalidOperationException("tick view camera is unavailable");
+        Reflect.InstanceField(driverType, "cachedCamera").SetValue(driver, camera);
+        Reflect.StaticField(Reflect.Type("Verse.Current, Assembly-CSharp"), "cameraDriverInt").SetValue(null, driver);
+        Reflect.InstanceMethod(driverType, "ResetSize").Invoke(driver, null);
+        object start = Reflect.StaticProperty(Reflect.Type("Verse.MapGenerator, Assembly-CSharp"), "PlayerStartSpot").GetValue(null)!;
+        Reflect.InstanceMethod(driverType, "JumpToCurrentMapLoc", start.GetType()).Invoke(driver, [start]);
+        object position = Reflect.InstanceField(driverType, "rootPos").GetValue(driver)!;
+        object transform = Reflect.InstanceProperty(camera.GetType(), "transform").GetValue(camera)!;
+        Reflect.InstanceProperty(transform.GetType(), "position").SetValue(transform, position);
+        Reflect.InstanceProperty(camera.GetType(), "orthographicSize").SetValue(camera, 24f);
+        Type ui = Reflect.Type("Verse.UI, Assembly-CSharp");
+        Reflect.StaticMethod(ui, "ApplyUIScale").Invoke(null, null);
+        int width = (int)Reflect.StaticField(ui, "screenWidth").GetValue(null)!;
+        int height = (int)Reflect.StaticField(ui, "screenHeight").GetValue(null)!;
+        if (width <= 0 || height <= 0) throw new InvalidOperationException("fixed tick view has no valid dimensions");
+        // Force real view-rect calculation now, before tick zero.
+        _ = Reflect.InstanceProperty(driverType, "CurrentViewRect").GetValue(driver);
+        CameraContext = new() { ["mode"] = "fixedPlayerStartDefaultZoom", ["width"] = width,
+            ["height"] = height, ["rootSize"] = 24, ["attached"] = false, ["rendered"] = false };
+    }
+
     public void Initialize(object game)
     {
         Diagnostics.Stage = "tick.initialize";
@@ -40,6 +71,7 @@ public sealed class TickApi
         // One generated map: select it without the CurrentMap setter's MapUI and
         // ambient-sound notifications. No camera or interactive scene is created.
         _currentMapIndex.SetValue(game, (sbyte)0);
+        InstallFixedTickView();
         _scenarioStart.Invoke(_map.Scenario.GetValue(game), null);
         _historyFinalize.Invoke(_history.GetValue(game), null);
         _research.Invoke(null, null);

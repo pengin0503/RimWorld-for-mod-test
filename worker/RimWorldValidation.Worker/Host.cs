@@ -423,6 +423,13 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         }
     }
 
+    private Dictionary<string, object?> TickCheckpointEvidence()
+    {
+        Dictionary<string, object?> evidence = _ticks!.Evidence(_tickInitialization);
+        evidence["camera"] = _tickApi?.CameraContext;
+        return evidence;
+    }
+
     private void WriteTickCheckpoint()
     {
         string path = Path.Combine(Path.GetDirectoryName(request.ResultPath)!, "tick-evidence.json");
@@ -431,7 +438,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         {
             ["recordType"] = "rwmtTickCheckpoint", ["schemaVersion"] = 1,
             ["runId"] = request.RunId, ["nonce"] = request.Nonce,
-            ["tick"] = _ticks!.Evidence(_tickInitialization)
+            ["tick"] = TickCheckpointEvidence()
         }));
         File.Move(temp, path, overwrite: true);
     }
@@ -501,6 +508,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
             {
                 json.WritePropertyName("tick");
                 Dictionary<string, object?> evidence = _ticks?.Evidence(_tickInitialization) ?? new();
+                evidence["camera"] = _tickApi?.CameraContext;
                 if (_tickError != null) { evidence["status"] = "incomplete"; evidence["error"] = _tickError; }
                 JsonSerializer.Serialize(json, evidence);
             }
@@ -605,7 +613,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         json.WriteStartArray("skippedOfficialSteps");
         IEnumerable<string> skipped = request.Tick == null ? MapStage.SkippedOfficialSteps :
             new[] { MapStage.SkippedOfficialSteps[0],
-                "D: camera jump/reset, CurrentMap UI and ambient notifications, pause-on-load extra tick are not executed; no interactive scene or save" };
+                "D: a non-attached real CameraDriver supplies a fixed player-start view at default zoom for tick-rate predicates; no camera Update/input/render callbacks, CurrentMap UI/ambient notifications, pause-on-load extra tick, interactive scene or save" };
         foreach (string step in skipped)
         {
             json.WriteStringValue(step);

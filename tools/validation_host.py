@@ -1345,7 +1345,7 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         failed.extend(map_evaluation['failed'])
 
     fresh = []
-    if completed and baseline is not None:
+    if (completed or 'D' in levels) and baseline is not None:
         fresh = [dict(e) for e in new_diagnostics(events, baseline_events)]  # annotated below; inputs stay as read
         allow = request.get('allow') or {}
         translation = judge_translation_errors(new_translation_errors(worker, baseline), allow)

@@ -23,7 +23,12 @@ fixture GameComponentのCounterを別に記録する。ゲームが捕捉して�
 
 要求/証拠/キャッシュ/途中保存のPythonテスト、有限実行の合成C#ケース、Workerビルドを実施。
 公開テストはゲームなしの契約・合成検査であり、実ゲームtickの証明に代用しない。
-ローカル全体テストは既存GUI/session関連で停止する環境制約があり、全件成功とは報告しない。
+ローカル全体テストは180秒で打ち切り、全件成功とは報告しない。既存環境依存の
+`test_closing_the_gui_stops_its_children`、`test_interrupt_preserves_keyboard_interrupt_and_stops_gui`、
+`test_memory_stop_does_not_report_success_exit_code`、`test_guardian_crash_keeps_session_busy_while_detached_worker_lives`、
+`test_supervisor_crash_stops_detached_worker_before_session_cleanup`で失敗/エラーがあり、
+`test_memory_limit_stops_the_worker`で停止した。新規理由コードの辞書漏れは修正し、対象の同期検査は再成功。
+既存GUIモデル36件は別途成功。環境依存箇所の全体回帰は公開CIで確認する。
 
 ## 私有Linux受入
 

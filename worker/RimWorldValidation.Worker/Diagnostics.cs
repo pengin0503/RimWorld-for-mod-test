@@ -39,6 +39,8 @@ public sealed class Diagnostics : ILoggerProvider
     public int Truncated { get; private set; }
     public Dictionary<string, int> CountsByLevel { get; } = new();
 
+    public int ErrorCount { get { lock (_lock) return CountsByLevel.GetValueOrDefault("error"); } }
+
     public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
 
     public void Record(string level, string category, string message, Exception? exception)

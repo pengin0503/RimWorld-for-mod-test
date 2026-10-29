@@ -25,6 +25,7 @@ public sealed class WorkerRequest
     public required IReadOnlyList<string> ExpectedModOrder { get; init; }
     public required JsonElement Expectations { get; init; }
     public MapRequest? Map { get; init; }
+    public TickRequest? Tick { get; init; }
 
     public static WorkerRequest Load(string path)
     {
@@ -51,6 +52,7 @@ public sealed class WorkerRequest
             ExpectedModOrder = root.GetProperty("expectedModOrder").EnumerateArray().Select(e => e.GetString()!).ToArray(),
             Expectations = root.GetProperty("expectations").Clone(),
             Map = MapRequest.Load(root),
+            Tick = TickRequest.Load(root),
         };
     }
 

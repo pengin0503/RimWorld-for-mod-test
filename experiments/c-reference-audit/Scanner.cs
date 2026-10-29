@@ -84,7 +84,7 @@ public static class Scanner
             }
             output.Add(new JsonObject { ["id"] = target.Id, ["found"] = definitions.Length == 1, ["methods"] = entries });
         }
-        return new JsonObject { ["sha256"] = digest, ["types"] = output };
+        return new JsonObject { ["sha256"] = digest, ["types"] = output, ["metrics"] = new JsonObject { ["methods"] = methods, ["ilBytes"] = totalIl, ["instructions"] = instructions, ["calls"] = calls } };
     }
 
     static void CheckDepth(JsonNode node, int depth)
@@ -108,6 +108,8 @@ public static class Scanner
     static string MemberName(MetadataReader reader, int token)
     {
         EntityHandle entity = MetadataTokens.EntityHandle(token);
+        if (entity.Kind == HandleKind.MethodSpecification)
+            return MemberName(reader, MetadataTokens.GetToken(reader.GetMethodSpecification((MethodSpecificationHandle)entity).Method));
         if (entity.Kind == HandleKind.MethodDefinition)
         {
             var method = reader.GetMethodDefinition((MethodDefinitionHandle)entity);
@@ -136,10 +138,13 @@ public static class Scanner
     static void DecodeIl(MetadataReader reader, byte[] il, JsonArray sites, JsonArray branches, ref int instructions, ref int calls)
     {
         int pos = 0;
+        var starts = new HashSet<int>();
+        var branchTargets = new List<int>();
         while (pos < il.Length)
         {
             if (++instructions > 100000) throw new BadImageFormatException();
             int offset = pos;
+            starts.Add(offset);
             ushort code = il[pos++];
             if (code == 0xfe)
             {
@@ -163,6 +168,7 @@ public static class Scanner
                 int delta = size == 1 ? unchecked((sbyte)il[pos]) : BitConverter.ToInt32(il, pos);
                 long target = (long)pos + size + delta;
                 if (target < 0 || target >= il.Length) throw new BadImageFormatException();
+                branchTargets.Add((int)target);
                 branches.Add(new JsonObject { ["offset"] = offset, ["target"] = (int)target });
             }
             else if (op.OperandType == OperandType.InlineSwitch)
@@ -172,6 +178,7 @@ public static class Scanner
                 {
                     long target = (long)pos + size + BitConverter.ToInt32(il, pos + 4 + i * 4);
                     if (target < 0 || target >= il.Length) throw new BadImageFormatException();
+                    branchTargets.Add((int)target);
                     branches.Add(new JsonObject { ["offset"] = offset, ["target"] = (int)target });
                 }
             }
@@ -183,6 +190,7 @@ public static class Scanner
             }
             pos += size;
         }
+        if (branchTargets.Any(target => !starts.Contains(target))) throw new BadImageFormatException();
     }
 
     static int SwitchSize(byte[] il, int pos)

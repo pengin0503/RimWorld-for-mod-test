@@ -305,7 +305,7 @@ class AuditTests(unittest.TestCase):
     def test_scan_aggregates_fixed_images_and_cannot_run_twice(self):
         def run(command, log, **kwargs):
             types = [{'id': target, 'found': False, 'methods': [{'name': name, 'overloads': []} for name in names]} for target, names in a.TARGETS.items()]
-            Path(command[-1]).write_text(json.dumps({'sha256': command[-2], 'types': types}))
+            Path(command[-1]).write_text(json.dumps({'sha256': command[-2], 'types': types, 'metrics': {'methods': 0, 'ilBytes': 0, 'instructions': 0, 'calls': 0}}))
             return {'exitCode': 0, 'interrupted': False, 'seconds': 0}
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a, 'load_session', return_value={'verified': True}), patch.object(a.pv, 'run_command', side_effect=run) as runner:
             root = Path(d); (a.session_path(root) / 'input').mkdir(parents=True)
@@ -314,6 +314,15 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(a.public_summary(output, a.pv.current_identity())['staticAuditStatus'], 'completed')
             with self.assertRaises(ValueError): a.scan(root, Path('/synthetic/scanner.dll'))
             self.assertFalse(json.loads((a.session_path(root) / 'scan.json').read_text())['verified'])
+
+    def test_scan_rejects_global_method_budget_across_images(self):
+        def run(command, log, **kwargs):
+            types = [{'id': target, 'found': False, 'methods': [{'name': name, 'overloads': []} for name in names]} for target, names in a.TARGETS.items()]
+            Path(command[-1]).write_text(json.dumps({'sha256': command[-2], 'types': types, 'metrics': {'methods': 70, 'ilBytes': 0, 'instructions': 0, 'calls': 0}}))
+            return {'exitCode': 0, 'interrupted': False, 'seconds': 0}
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a, 'load_session', return_value={'verified': True}), patch.object(a.pv, 'run_command', side_effect=run):
+            root = Path(d); (a.session_path(root) / 'input').mkdir(parents=True)
+            with self.assertRaises(ValueError): a.scan(root, Path('/synthetic/scanner.dll'))
 
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):

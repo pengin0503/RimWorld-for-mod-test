@@ -153,12 +153,18 @@ def scan(root, scanner):
     start = time.monotonic()
     results = []
     total_output = 0
+    total_logs = 0
+    limits = {'methods': 128, 'ilBytes': 1024*1024, 'instructions': 100000, 'calls': 4096}
+    totals = {name: 0 for name in limits}
     for index, name in enumerate(ADAPTER['sha256']):
         remaining = 120 - (time.monotonic() - start)
         if remaining <= 0: raise ValueError('scanner timeout')
         output = session / ('scan-' + str(index) + '.json')
         command = ['dotnet', str(scanner), str(session/'input'/name), EXPECTED[name], str(output)]
-        process = pv.run_command(command, session/('scan-' + str(index) + '.log'), timeout=remaining, memory_limit=2*1024**3)
+        log = session/('scan-' + str(index) + '.log')
+        process = pv.run_command(command, log, timeout=remaining, memory_limit=2*1024**3)
+        if log.exists(): total_logs += log.stat().st_size
+        if total_logs > 8*1024*1024: raise ValueError('scanner log budget exceeded')
         if process.get('exitCode') != 0 or process.get('interrupted') is not False:
             raise ValueError('scanner did not finish')
         if output.is_symlink() or not output.is_file() or output.stat().st_size > 4*1024*1024:
@@ -168,6 +174,13 @@ def scan(root, scanner):
         result = pv.read_json(output)
         if not isinstance(result, dict) or result.get('sha256') != EXPECTED[name] or not isinstance(result.get('types'), list):
             raise ValueError('scanner identity mismatch')
+        metrics = result.get('metrics')
+        if not isinstance(metrics, dict) or set(metrics) != set(limits): raise ValueError('invalid scanner metrics')
+        for metric, limit in limits.items():
+            value = metrics[metric]
+            if type(value) is not int or value < 0: raise ValueError('invalid scanner metric')
+            totals[metric] += value
+            if totals[metric] > limit: raise ValueError('scanner budget exceeded')
         results.append(result)
     load_session(root)
     types = []

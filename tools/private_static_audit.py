@@ -1,5 +1,6 @@
 """Private, main-bound acquisition for the C reference metadata audit."""
 import hashlib
+import json
 import os
 import shutil
 import time
@@ -9,6 +10,8 @@ from tools import codex_workflow as cw, private_validation as pv, validation_hos
 ADAPTER = vh.ADAPTERS['rimworld-1.7.4985-rev1269']
 EXPECTED = {**ADAPTER['sha256'], **ADAPTER['qualified'][('linux-x64', 'waylith')]['runtimeSha256']}
 VERSION = '1.7.4985 rev1269'
+MANAGED_NAMES = frozenset(('Assembly-CSharp.dll', 'RimWorld.dll', 'Waylith.dll', 'UnityStubs.dll', 'Waylith.UnityCompat.dll'))
+RUNTIME_NAMES = frozenset(('libcoreclr.so', 'System.Private.CoreLib.dll'))
 
 
 def verify_directory(directory):
@@ -60,6 +63,11 @@ def valid_snapshot_file(path, name):
 def prepare(root):
     identity = pv.current_identity()
     started = time.monotonic()
+    runtime_hashes = ADAPTER.get('qualified', {}).get(('linux-x64', 'waylith'), {}).get('runtimeSha256', {})
+    if set(ADAPTER.get('sha256', {})) != MANAGED_NAMES or set(runtime_hashes) != RUNTIME_NAMES:
+        raise ValueError('adapter input set changed')
+    if any(not isinstance(v, str) or len(v) != 64 or any(c not in '0123456789abcdef' for c in v) for v in (*ADAPTER['sha256'].values(), *runtime_hashes.values())):
+        raise ValueError('invalid adapter digest')
     root = cw._safe_private(Path(root))
     parent = root / 'static-audit'
     if parent.is_symlink(): raise ValueError('invalid audit directory')
@@ -215,7 +223,11 @@ def public_summary(raw, identity):
     binary = bound and raw.get('verified') is True
     source = raw.get('types') if binary and isinstance(raw.get('types'), list) else []
     rows = []
-    complete = binary and len(source) == len(TARGETS)
+    try:
+        encoded = json.dumps(raw, allow_nan=False)
+        finite = len(encoded.encode('utf-8')) <= 4*1024*1024
+    except (ValueError, TypeError, RecursionError): finite = False
+    complete = binary and finite and len(source) == len(TARGETS)
     allowed_edges = {TARGET_NAMES[k] + '.' + n: (k, n) for k, values in TARGETS.items() for n in values}
     for target_id, names in TARGETS.items():
         matches = [x for x in source if isinstance(x, dict) and x.get('id') == target_id]

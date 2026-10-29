@@ -55,6 +55,8 @@ public static class Scanner
                         if (reader.GetString(method.Name) != methodName) continue;
                         if (++methods > 128 || overloads.Count >= 16) throw new BadImageFormatException();
                         var signature = method.DecodeSignature(provider, null);
+                        CheckDepth(signature.ReturnType, 0);
+                        foreach (var parameter in signature.ParameterTypes) CheckDepth(parameter, 0);
                         if (signature.ParameterTypes.Length > 64 || signature.GenericParameterCount > 32) throw new BadImageFormatException();
                         var parameters = new JsonArray();
                         foreach (var parameter in signature.ParameterTypes) parameters.Add(parameter);
@@ -83,6 +85,18 @@ public static class Scanner
             output.Add(new JsonObject { ["id"] = target.Id, ["found"] = definitions.Length == 1, ["methods"] = entries });
         }
         return new JsonObject { ["sha256"] = digest, ["types"] = output };
+    }
+
+    static void CheckDepth(JsonNode node, int depth)
+    {
+        if (depth >= 8 || node is not JsonObject obj) throw new BadImageFormatException();
+        if (obj["element"] is JsonNode element) CheckDepth(element, depth + 1);
+        if (obj["modifier"] is JsonNode modifier) CheckDepth(modifier, depth + 1);
+        if (obj["arguments"] is JsonArray args)
+        {
+            if (args.Count > 32) throw new BadImageFormatException();
+            foreach (var argument in args) CheckDepth(argument ?? throw new BadImageFormatException(), depth + 1);
+        }
     }
 
     static string TypeName(MetadataReader reader, TypeDefinitionHandle handle)

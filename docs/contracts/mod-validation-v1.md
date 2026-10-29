@@ -200,7 +200,8 @@ Linux は画面を描画しません。固定ケース `bill-ingredient-options.
   Controllerは実tick差分・観測順・件数・値の型を独立検査する。Workerの完了宣言だけで判定しない。
 - ゲームが内部で捕捉してログにしたtick例外も、Dの観測完了にはしない。観測点ごとにrunId/nonce付き
   `tick-evidence.json`を原子的に保存する。強制終了で最終結果がない場合、この途中証拠を回収するが、
-  最終tickまでの値があっても必ずincomplete。tick中に新しいlong eventが必要になったケースもincompleteで止める。既存の実時間・メモリ・ログ制限と子孫回収を適用する。
+  最終tickまでの値があっても必ずincomplete。中断時のendTick/advancedは最後に確認できた値で、
+  強制終了時のゲーム内tickそのものを断定しない。tick中に新しいlong eventが必要になったケースもincompleteで止める。既存の実時間・メモリ・ログ制限と子孫回収を適用する。
 - `stages.D`は観測完了でcompleted、確実な値の不一致でfailed／`tickObservationMismatch`、
   欠落・不明ID・例外・未到達でincomplete／`tickObservationIncomplete`。
   独立適格化は未完了のため、常に`dNotQualified`・全体experimental/incompleteを維持する。

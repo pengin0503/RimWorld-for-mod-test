@@ -39,12 +39,28 @@ DriverはGameObjectへアタッチせず、Awake/Update/input/renderを登録し
 `test_memory_stop_does_not_report_success_exit_code`、`test_guardian_crash_keeps_session_busy_while_detached_worker_lives`、
 `test_supervisor_crash_stops_detached_worker_before_session_cleanup`で失敗/エラーがあり、
 `test_memory_limit_stops_the_worker`で停止した。新規理由コードの辞書漏れは修正し、対象の同期検査は再成功。
-既存GUIモデル36件は別途成功。環境依存箇所の全体回帰は公開CIで確認する。
+既存GUIモデル36件は別途成功。公開CI [40812653139](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/40812653139)
+は全8ジョブ成功。Linux Python 3.12は296件実行・8件skip、Workerと合成runner、既存モデルも成功。
+独立レビュー後、確実な途中不一致の保持、終了状態によるD完了制約、メモリ停止理由/子孫回収の検証を修正し、
+固定視点修正の追加レビューで修正必須の指摘なし。
 
 ## 私有Linux受入
 
-実ゲームジョブの結果を確認して本節を確定する。受入は60/600、期待値違い、不明ID、probe不在、
-途中例外、時間/メモリ/ログ上限と、同じスナップショット上の既存C回帰を対象とする。
+固定視点修正後の私有ジョブ [40812647946](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/40812647946)
+（実装SHA `f0b686edde9a18b4359fd3f244a3b0ab97a3c6c2`）で、Dの10ケースと既存C回帰が成功した。
+60tickでは0/60、600tickでは0/60/600でゲームtickとprobe値が一致し、開始0・終了60/600・差分60/600。
+再実行ではbaselineCached=trueを実測。期待値599に対して実値600ならD failed、未知ID/probe不在はD incomplete。
+途中例外はtick61で停止し0/60の観測を保持。時間停止・memoryLimit・logLimitでも途中観測を保持し、
+3つの停止ケースすべてで制御用子プロセスの回収を確認した。中断時のendTick/advancedは最後の確認値であり、
+停止した瞬間のゲーム内tickを推測しない。全体は全ケースexperimental/incomplete。
+
+初期化イベントを完全に抜けてからtickを進める最終版も、
+[40813652506](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/40813652506)
+（SHA `66539da0ec688c3bffd2cd8a0b7fc1e3f2d645ed`）でD10ケースとC回帰がすべて成功。
+probeは全tickで初期化イベントが残っていないことを検査した。60/600の到達とCounter一致、
+不一致/未知ID/probe不在/途中例外、3つの上限停止と子プロセス回収を再確認した。
+最終版の[公開CI 40813657945](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/40813657945)も全8ジョブ成功。
+イベントCの4ケース、材料Cの6ケースは同じスナップショットで回帰成功。これはCの独立適格化ではない。
 資材準備だけにR2認証を渡し、Worker実行には渡さない。私有生ログ・資材・索引は公開しない。
 
 ## 適格化へ持ち越す条件

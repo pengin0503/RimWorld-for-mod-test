@@ -39,12 +39,12 @@
 ### Task 3: Cache, supervision and private Linux regression
 **Files:** tools/validation_host.py, tests/test_bounded_tick.py, tests/integration/run_bounded_tick.py, .github/workflows/linux-private-bounded-tick.yml, .github/workflows/offline-audit.yml.
 **Interfaces:** Tick baseline identity includes version/config/observation spec; private runner emits only status/codes/counts and booleans.
-- [ ] Test cache segregation, partial evidence rejection, old-request compatibility and unsupported platform/build before execution. Run targeted tests; expect missing behavior failures.
-- [ ] Implement cache and baseline checks. Add private real regression: 60/600, wrong value, unknown ID, absent probe, throwing probe, limits, process cleanup and existing A/map/C regression on reused snapshot. Fixed fixture has no third-party dependency.
-- [ ] Run Python suite, Worker build and synthetic tests, then CI and private real-game job. Record exact unverified cases instead of widening claims; commit.
+- [x] Test cache segregation, partial evidence rejection, old-request compatibility and unsupported platform/build before execution. Run targeted tests; expect missing behavior failures.
+- [x] Implement cache and baseline checks. Add private real regression: 60/600, wrong value, unknown ID, absent probe, throwing probe, limits, process cleanup and existing A/map/C regression on reused snapshot. Fixed fixture has no third-party dependency.
+- [x] Run Python suite, Worker build and synthetic tests, then CI and private real-game job. Record exact unverified cases instead of widening claims; commit.
 
 ### Task 4: Document and review final scope
 **Files:** docs/contracts/mod-validation-v1.md, docs/validation-host.md, docs/design/bounded-tick-v1-draft.md, docs/research/2026-10-29-bounded-tick.md, README.md, AGENTS.md.
 **Interfaces:** docs reflect tested behavior, experimental scope and independent qualification stop conditions.
-- [ ] Document real call path, measured cases, limits and gaps; update D status only where proven.
-- [ ] Review full diff, fix material findings with regression tests, verify final checks, create a non-draft PR. Do not merge without explicit instruction.
+- [x] Document real call path, measured cases, limits and gaps; update D status only where proven.
+- [x] Review full diff, fix material findings with regression tests, verify final checks, create a non-draft PR. Do not merge without explicit instruction.

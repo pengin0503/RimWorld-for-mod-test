@@ -324,6 +324,20 @@ class AuditTests(unittest.TestCase):
             root = Path(d); (a.session_path(root) / 'input').mkdir(parents=True)
             with self.assertRaises(ValueError): a.scan(root, Path('/synthetic/scanner.dll'))
 
+    def test_supervisor_interrupts_when_rss_exceeds_limit(self):
+        class Child:
+            returncode = 0
+            pid = 123
+            def __init__(self, command, stdout, **kwargs):
+                self.finished = False
+                Path(command[2]).write_text(json.dumps({'exitCode': 0, 'strayProcessesKilled': False}))
+            def poll(self): return 0 if self.finished else None
+            def terminate(self): self.finished = True
+            def wait(self): return 0
+        with tempfile.TemporaryDirectory() as d, patch.object(a.pv, 'native_process_available', return_value=True), patch.object(a.pv.subprocess, 'Popen', Child), patch.object(a.pv, 'tree_rss', return_value=2*1024**3 + 1):
+            result = a.pv.run_command(['synthetic'], Path(d) / 'private.log', timeout=120, memory_limit=2*1024**3)
+            self.assertTrue(result['interrupted'])
+
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):
             with self.assertRaises(ValueError): a.prepare(Path(d))

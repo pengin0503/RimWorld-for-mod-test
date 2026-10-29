@@ -227,7 +227,8 @@ def prepare_session(root):
     manifest.update(preparationAttempted=True,gameReady=False)
     write_json(session/'session.json',manifest)
     try:
-        cw.prepare(SimpleNamespace(private_root=root,refresh=False,aws='aws'))
+        accounting = cw.prepare(SimpleNamespace(private_root=root,refresh=False,aws='aws'))
+        write_json(session/'preparation.json', accounting)
         manifest['gameReady']=True
     finally: write_json(session/'session.json',manifest)
 

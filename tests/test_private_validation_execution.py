@@ -31,11 +31,13 @@ class PreparationTests(unittest.TestCase):
                 pv.prepare_session(root)
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,ENV,clear=True):
             root=Path(d); session=pv.init_session(root,'all'); calls=[]
-            def prepare(args): calls.append(args.private_root); (root/'game-snapshot').mkdir(); return {'status':'prepared'}
+            def prepare(args): calls.append(args.private_root); (root/'game-snapshot').mkdir(); return {'status':'prepared','files':42,'r2':{'selected':42,'listedBytes':12345},'timings':{'fetchSeconds':1.5}}
             with patch.object(cw,'prepare',side_effect=prepare):
                 pv.prepare_session(root); pv.prepare_session(root)
             self.assertEqual(len(calls),1)
             self.assertTrue(pv.read_json(session/'session.json')['gameReady'])
+            self.assertEqual(pv.read_json(session/'preparation.json')['r2']['listedBytes'],12345)
+            self.assertEqual(pv.read_json(session/'preparation.json')['timings']['fetchSeconds'],1.5)
 
     def test_failed_game_preparation_keeps_cow_runnable(self):
         from tools import codex_workflow as cw

@@ -320,7 +320,7 @@ EXPECTATION_KEYS = {
     'tickObservations': ({'tick', 'id', 'equals'}, set()),
 }
 # Judged by the Controller from the map observation; the Worker never sees them.
-CONTROLLER_EXPECTATIONS = {'mapThings'}
+CONTROLLER_EXPECTATIONS = {'mapThings', 'tickObservations'}
 MAP_DEF_TYPES = {'ThingDef', 'TerrainDef'}
 PATCH_KINDS = {'prefix', 'postfix', 'transpiler', 'finalizer'}
 
@@ -1331,7 +1331,11 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         incomplete.extend(c_incomplete)
         failed.extend(c_failed)
     if 'D' in levels:
-        d_stage, d_incomplete, d_failed = evaluate_tick(request, (worker or {}).get('tick'))
+        summary = (worker or {}).get('diagnosticsSummary') or {}
+        d_stage, d_incomplete, d_failed = evaluate_tick(request, (worker or {}).get('tick'),
+            interrupted=bool(not completed or worker_problem or process.get('killedFor')
+                             or process.get('exitCode') not in (0, None) or summary.get('dropped')
+                             or summary.get('truncated') or (worker or {}).get('verseLogLimitReached')))
         stages['D'] = d_stage
         incomplete.extend(d_incomplete)
         failed.extend(d_failed)

@@ -6,10 +6,33 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from tools import validation_host as vh
+
+
+def child_stopped(path):
+    if not path.is_file():
+        return False
+    try:
+        pid = int(path.read_text())
+        if pid <= 1:
+            return False
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                state = Path(f'/proc/{pid}/stat').read_text().split(')')[1].split()[0]
+                if state == 'Z':
+                    return True
+            except (FileNotFoundError, ProcessLookupError):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
+    except (OSError, ValueError, IndexError):
+        return False
 
 
 def main():
@@ -56,9 +79,15 @@ def main():
         codes = [x['code'] for x in r.get('reasons', [])]
         want = 'failed' if expected is not None else 'incomplete' if observer != 'fixture.counter' or missing or mode else 'completed'
         ok = r['status'] == 'incomplete' and stage.get('status') == want and 'dNotQualified' in codes
+        cleanup = None
+        if mode in ('hang', 'memory', 'log'):
+            cleanup = child_stopped(out / name / 'target/home/tick-probe-child.pid')
+            ok &= cleanup
         if mode:
             ok &= 'tickObservationIncomplete' in codes
             ok &= [o.get('tick') for o in (stage.get('evidence') or {}).get('observations', [])] == [0, 60]
+            if mode == 'memory':
+                ok &= 'memoryLimit' in codes
             if mode == 'log':
                 ok &= 'logLimit' in codes
             if mode == 'hang':
@@ -68,8 +97,20 @@ def main():
                 {'newErrors', 'newWarnings', 'baselineIncomplete', 'tickObservationIncomplete'})
         tick = stage.get('evidence') or {}
         tick_error = tick.get('error') or ''
+        fault_text = tick_error + '\n' + '\n'.join(str(e.get('message', '')) for e in r.get('diagnostics', {}).get('newInTarget', []))
+        for run_name in ('baseline', 'target'):
+            event_path = out / name / run_name / 'events.jsonl'
+            if event_path.is_file():
+                for line in event_path.read_text(errors='replace').splitlines()[:2000]:
+                    try:
+                        event = json.loads(line)
+                        if event.get('level') == 'error': fault_text += '\n' + str(event.get('message', ''))
+                    except ValueError:
+                        pass
+        fault_types = sorted(set(re.findall(r'\b(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*Exception\b', fault_text)))[:8]
+        fault_methods = sorted(set(re.findall(r'\bat ([A-Za-z_][A-Za-z0-9_.+`]*)(?=\()', fault_text)))[:12]
         member = re.search(r'adapter member not found: ([A-Za-z0-9_.(),]+)', tick_error)
-        rows.append({'errorType': (re.match(r'^[A-Za-z][A-Za-z0-9_.+`]*Exception', tick_error).group(0)
+        rows.append({'faultTypes': fault_types, 'faultMethods': fault_methods, 'errorType': (re.match(r'^[A-Za-z][A-Za-z0-9_.+`]*Exception', tick_error).group(0)
                                    if re.match(r'^[A-Za-z][A-Za-z0-9_.+`]*Exception', tick_error) else None),
                      'missingMember': member.group(1) if member else None, 'case': name, 'ok': bool(ok), 'status': r['status'], 'D': stage.get('status'),
                      'executionStatus': r['executionStatus'], 'codes': codes,
@@ -77,7 +118,7 @@ def main():
                      'observations': [{'tick': o.get('tick'), 'gameTick': o.get('gameTick'),
                                        'counter': o.get('values', {}).get('fixture.counter')}
                                       for o in tick.get('observations', [])],
-                     'baselineCached': r.get('diagnostics', {}).get('baselineCached'),
+                     'baselineCached': r.get('diagnostics', {}).get('baselineCached'), 'descendantsStopped': cleanup,
                      'stop': (r.get('process', {}).get('target') or {}).get('killedFor')})
         summary.write_text(json.dumps({'runs': rows, 'ok': all(x['ok'] for x in rows)}, indent=2))
         # Whitelist errors' type names and stages, never messages/paths/stack traces.

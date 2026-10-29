@@ -20,7 +20,7 @@ RimWorld を通常起動できない環境でも、作成した MOD を実物の
 | 標準 .NET での実行 | 実験扱い（常に `incomplete`）。WaylithClr との実害のある差を確認済み |
 | マップ生成（`map`） | Linux x86_64 で実装・適格化済み。ロード後に一時的なワールドとマップを 1 枚生成し、模式図の画像・内容・期待値の判定を出す。このビルドのマップ生成は同じ種でも毎回少し違う（公式も同じ）ため、公式 quick test と各 5 回の分布で比較。[マップ生成の適格化](docs/research/map-qualification.md) |
 | C：指定動作テスト | 新規 Bill の材料表示候補/許可状態のみ実装（Linux 非描画・experimental、適格化未完了）。[契約](docs/contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental) |
-| D：ゲーム開始後・tick | 未実装 |
+| D：ゲーム開始後・tick | Linux対応ビルドの有限tick基盤 `bounded-tick.v1` を実装（experimental）。自作fixture観測に限定、独立適格化は未完了。[契約](docs/contracts/mod-validation-v1.md#d有限-ticklinuxexperimental) |
 | 入力監査 CLI | 実装済み。ZIP・XML 構文・manifest を検査 |
 | MOD 事前検査 CLI / Windows 画面 | 実装済み。静的検査のみ（`gameVerification=notRun`） |
 | 既存の通常起動機能 | **削除済み**。CLI `play` は移行エラーを返すだけ。画面の起動ボタンも削除 |
@@ -40,7 +40,7 @@ AI の通常の検証先は Linux、Windows 向けの新規開発は中止し、
 - [入力監査 CLI](docs/offline-input-audit.md)：Python 3.12+、外部パッケージ不要。
 - [資材の現状と必要性の確認方針](docs/linux-files-needed.md)：Linux 一式を待つことと、工程別の不足を調べることを区別。
 
-実装済みの範囲は A：Defs・XML パッチ・選択言語・参照解決・公式の Def 検査、B：DLL 初期化と期待した Harmony 登録です。C：指定動作テストは後段、D：一時世界・限定 tick は別の将来設計です。ロード成功や Harmony 登録だけで、MOD の全機能が正しいとは判定しません。
+実装済みの範囲は A：Defs・XML パッチ・選択言語・参照解決・公式の Def 検査、B：DLL 初期化と期待した Harmony 登録です。C：指定動作テストは後段、D：一時世界・限定 tick はLinuxの固定fixtureでexperimentalとして実装しています。ロード成功や Harmony 登録だけで、MOD の全機能が正しいとは判定しません。
 
 ## 受領資料と調査記録
 

@@ -38,7 +38,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 | 項目 | 規則 |
 |---|---|
 | 未知のフィールド | 全階層で拒否（`blocked` / `invalidRequest`） |
-| `levels` | `A` 必須。`B`（DLL・Harmony）と `C`（指定動作）は A の完了が前提。`C` は固定ケース `bill-ingredient-options.v1` または自作 fixture 限定の `event-choice.v1` を実装（非描画・experimental）。その他は要求不正で `blocked` |
+| `levels` | `A` 必須。`B`（DLL・Harmony）と `C`（指定動作）は A の完了が前提。`C` は固定ケース `bill-ingredient-options.v1` または自作 fixture 限定の `event-choice.v1` を実装（非描画・experimental）。`D`はLinux限定の有限tick（後述）を実装。未知の段階は要求不正で `blocked` |
 | `official` | 既定 `["Core"]`。先頭は Core。Royalty/Ideology/Biotech/Odyssey から選ぶ。Anomaly は対象外（スナップショットにないため `officialContentMissing`） |
 | `mods` | 読み込み順。公式コンテンツの後に並ぶ。`path` は要求ファイルからの相対パス可。`packageId` は任意で、指定時は About.xml と一致必須。`target: true` を 1 個以上。`path` が `.zip` で終わる場合は ZIP を `--out` の下へ展開して使う（下記）。`expectedLoadFolders` は任意で、入力を限定取得したときに計画したロードフォルダ（優先順、MOD root からの相対パス、root は空文字）。指定時は対象実行の `runningMods[].loadFolders` と完全一致を要求する |
 | `target` | 検証対象。ベースライン（同じ構成から対象だけ外した実行）との差分で、対象が持ち込んだ診断を判定する |
@@ -58,7 +58,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 主な項目：
 
 - `status`、`executionStatus`（`completed` / `failed` / `notStarted` / `interrupted`）、`fidelity`（`qualified` / `experimental`）、`reasons[]`（`code` と `detail`）。
-- `stages.A/B/C`：`completed` / `failed` / `incomplete` / `blocked` / `notRequested`。
+- `stages.A/B/C/D`：`completed` / `failed` / `incomplete` / `blocked` / `notRequested`。
 - `request`（sha256、正規化後の levels/official/language/limits）、`game`（版、fingerprint、adapter、照合方法）、`platform`、`runtime`（実際の CLR 記述と WaylithClr 設定）、`tool.workerSha256`。
 - `mods[]`（packageId、元パス、ZIP 入力なら `archive` の元パスと sha256、ファイル数、内容 sha256、同梱 0Harmony.dll）、`modOrder`（要求と実際）、`runningMods`、`modClasses`、`activeLanguage`、`loadedAssemblies`（mvid）。
 - `checks`：期待値ごとの実値と `match` / `mismatch` / `missing` / `error`。Harmony は登録一覧、期待外の登録、読み込まれた Harmony の版も含む。
@@ -164,3 +164,47 @@ Linux は画面を描画しません。固定ケース `bill-ingredient-options.
 ### C：自作 fixture のイベント選択肢（非描画・experimental）
 
 `tests: ["event-choice.v1"]`、生成マップの `map`、`expectations.eventChoices` に `{ "event": "RWMT_ChoiceEvent", "choice": "accept", "rewardThing": "Steel", "rewardCount": 10 }` を1件指定する。事件と選択肢は自作 fixture に固定し、別々の任意ゲーム API を呼び出す機能は提供しない。Worker は生成マップ上で事件の実行、選択肢の提示と実行、**選択肢の直前と直後のマップ上のアイテム数量の差**を観測する。`actual.rewardSource=mapItemStackDelta` と `mapDeltaUnambiguous=true` が必要で、fixture 内の報酬カウンターは合否判定に使用しない。複数アイテムの増加、アイテムの減少、数量取得失敗は観測不能として `incomplete`。観測不足や実行例外は `incomplete`、観測済みの値の不一致は C 段階を `failed` とする。独立した適格化までは観測が一致しても全体を `incomplete` とする。MOD 一般のイベント・クエストの合格、実画面の動作、時間経過を保証しない。
+
+## D：有限 tick（Linux・experimental）
+
+`levels: ["A", "D"]`、`tests: ["bounded-tick.v1"]`、`map` と `tick` を明示する。
+初版はB/Cとの同時要求を受け付けない。Linux x86_64、1.7.4985 rev1269、同梱WaylithClrと
+登録Adapterの組だけで実行し、他OS/CLR/ビルドは`boundedTickUnsupported`で起動前blocked。
+
+```json
+"levels": ["A", "D"],
+"tests": ["bounded-tick.v1"],
+"map": {"seed": "RWMT-tick"},
+"tick": {"count": 600, "observeAt": [0, 60, 600]},
+"expectations": {"tickObservations": [
+  {"tick": 600, "id": "fixture.counter", "equals": 600}
+]}
+```
+
+- `count`は整数1〜60000、`observeAt`は0〜countの昇順・重複なし整数1〜64件で、最終点countを含む。
+  初期の実ゲーム受入は60/600tick。要求していない観測点は追加せず、0を観測する場合は明示する。
+- `tickObservations`は1〜64件、`tick`はobserveAt内、`tick/id`は重複不可。
+  IDは英字開始・英数/`_`/`.`/`-`の1〜128文字、equalsは符号付き64bit整数（真偽値不可）。
+  初版の登録IDは`fixture.counter`のみ。不明な安全なIDは要求形式として受理するが、観測不能としてincomplete。
+- 観測には自作`RWMT.TickProbe`のGameComponentが必要。`tests/fixtures/validation-mods-src/TickProbe`を
+  私有ゲームDLLに対してビルドし、対応Aboutと一緒に**非target依存**としてbaseline/target両方へ載せる。
+  ホストが値を加算せず、実ゲームのGameComponentTickがCounterを進める。対象MODは別のtargetとして指定する。
+- 既存のマップ生成完了後に、実Game.FinalizeInit、Scenario.PostGameStart、Historyの初期化、
+  開始研究、GameComponent.StartedNewGameを行う。単一マップの選択はUI/環境音通知を省いて行い、
+  カメラ移動・pause-on-loadの追加tick・対話シーン・継続セーブは提供しない。
+  ゲーム内部のProgramStateは有限実行の間Playingとなるが、通常起動や対話入口にはしない。
+- `TickManager.DoSingleTick`を1回ずつ呼び、毎回`TicksGame`の差がちょうど1であることを確認する。
+  `startTick/endTick/advanced`と、各`tick/gameTick/values`を記録し、最終点の後は進めない。
+  Controllerは実tick差分・観測順・件数・値の型を独立検査する。Workerの完了宣言だけで判定しない。
+- ゲームが内部で捕捉してログにしたtick例外も、Dの観測完了にはしない。観測点ごとにrunId/nonce付き
+  `tick-evidence.json`を原子的に保存する。強制終了で最終結果がない場合、この途中証拠を回収するが、
+  最終tickまでの値があっても必ずincomplete。既存の実時間・メモリ・ログ制限と子孫回収を適用する。
+- `stages.D`は観測完了でcompleted、確実な値の不一致でfailed／`tickObservationMismatch`、
+  欠落・不明ID・例外・未到達でincomplete／`tickObservationIncomplete`。
+  独立適格化は未完了のため、常に`dNotQualified`・全体experimental/incompleteを維持する。
+  一致しても任意MOD・長期プレイ・描画の保証にしない。
+- baselineキーはケース/観測版・tick設定・観測期待値を含み、A/B/C結果をDへ流用しない。
+  未完了・旧版・証拠不整合のD baselineはキャッシュへ保存せず、読み込み時も再実行する。
+  tick指定のない従来要求は従来の経路を使う。
+
+実装経路と検証の記録は[有限tick実装記録](../research/2026-10-29-bounded-tick.md)。

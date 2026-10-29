@@ -29,6 +29,7 @@ public static class ReasonCatalog
         ["snapshotInvalid"] = "スナップショットが壊れているか、形式が違います。",
         ["snapshotMissing"] = "スナップショットが見つかりません。",
         ["snapshotModified"] = "スナップショットのファイルが作成後に変わっています。",
+        ["boundedTickUnsupported"] = "有限tick検証は対応するLinuxビルドと同梱ランタイムでのみ利用できます。",
         ["unknownBuild"] = "このゲームのビルドには対応表（Adapter）がありません。",
         ["workerMissing"] = "検証用の Worker がビルドされていません。",
         // failed: a problem was found

@@ -64,6 +64,36 @@ class TickEvidenceTests(unittest.TestCase):
         self.assertEqual(stage['status'], 'failed')
         self.assertEqual(failed[0]['code'], 'tickObservationMismatch')
 
+    def test_known_mismatch_survives_unknown_id_and_partial_tail(self):
+        r = request()
+        r['expectations']['tickObservations'] = [
+            {'tick': 600, 'id': 'fixture.counter', 'equals': 599},
+            {'tick': 600, 'id': 'unknown.counter', 'equals': 0}]
+        stage, inc, failed = vh.evaluate_tick(vh.validate_request(r, Path('/tmp')), evidence())
+        self.assertEqual(stage['status'], 'failed')
+        self.assertEqual(stage['checks'][0]['actual'], 600)
+        self.assertIn('tickObservationMismatch', [x['code'] for x in failed])
+        self.assertIn('tickObservationIncomplete', [x['code'] for x in inc])
+        r['expectations']['tickObservations'] = [{'tick': 60, 'id': 'fixture.counter', 'equals': 59}]
+        e = evidence(); e.update(status='incomplete', endTick=1061, advanced=61)
+        e['observations'] = e['observations'][:2]
+        stage, inc, failed = vh.evaluate_tick(vh.validate_request(r, Path('/tmp')), e)
+        self.assertEqual(stage['status'], 'failed')
+        self.assertEqual(stage['checks'][0]['actual'], 60)
+        self.assertTrue(failed)
+        self.assertIn('tickObservationIncomplete', [x['code'] for x in inc])
+
+    def test_process_stop_prevents_stage_completion(self):
+        from tests.test_validation_host import worker_result
+        normalized = vh.validate_request(request(), Path('/tmp'))
+        worker = worker_result()
+        worker['tick'] = evidence()
+        for process in ({'killedFor': 'logLimit', 'exitCode': -9}, {'exitCode': 3}):
+            with self.subTest(process=process):
+                result = vh.evaluate(normalized, [], worker, None, [], worker, None, [], process, 'experimental')
+                self.assertEqual(result[3]['D']['status'], 'incomplete')
+
+
     def test_missing_forged_or_partial_evidence_never_completes(self):
         variants = [None, {}, dict(evidence(), advanced=601), dict(evidence(), endTick=1601),
                     dict(evidence(), startTick=True), dict(evidence(), status='incomplete'),
@@ -113,6 +143,7 @@ class TickControllerTests(unittest.TestCase):
             fields = request(); fields.pop('mods'); cache = root / 'cache'
             def run(**updates):
                 return fx.run(['probe', '*target'], baseline_cache=cache, **dict(fields, **updates))[0]
+            fx.run(['probe', '*target'], map={'seed': 'RWMT-tick'}, baseline_cache=cache)
             first = run()
             self.assertEqual(first['stages']['D']['status'], 'completed')
             self.assertEqual(first['status'], 'incomplete')
@@ -127,7 +158,9 @@ class TickControllerTests(unittest.TestCase):
             # A prior partial or old-version result must be executed again, not trusted.
             for path in cache.glob('*.json'):
                 if path.name.endswith('map-observation.json'): continue
-                row = json.loads(path.read_text()); row['worker']['tick']['status'] = 'incomplete'
+                row = json.loads(path.read_text())
+                if 'tick' not in row['worker']: continue
+                row['worker']['tick']['status'] = 'incomplete'
                 path.write_text(json.dumps(row))
             self.assertFalse(run()['diagnostics']['baselineCached'])
 

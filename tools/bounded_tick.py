@@ -44,48 +44,59 @@ def validate_tick(value, levels, tests, map_request, rows):
     return {'count': count, 'observeAt': list(points)}
 
 
-def evidence_complete(config, evidence):
-    """Do not trust a Worker completion flag or host-side loop count."""
+def validated_prefix(config, evidence):
+    """Return only a structurally consistent prefix, including interrupted evidence."""
     if not isinstance(evidence, dict):
-        return False
-    if (evidence.get('caseId') != CASE or evidence.get('observerVersion') != OBSERVER_VERSION
-            or isinstance(evidence.get('observerVersion'), bool)
-            or evidence.get('initialization') != INITIALIZATION or evidence.get('status') != 'completed'):
-        return False
+        return None
+    if (evidence.get('caseId') != CASE or type(evidence.get('observerVersion')) is not int
+            or evidence['observerVersion'] != OBSERVER_VERSION or evidence.get('initialization') != INITIALIZATION):
+        return None
     start, end, advanced = (evidence.get(k) for k in ('startTick', 'endTick', 'advanced'))
     if (not all(integer(n) and 0 <= n <= 2**31-1 for n in (start, end, advanced))
-            or end - start != config['count'] or advanced != config['count']):
-        return False
+            or end - start != advanced or not 0 <= advanced <= config['count']):
+        return None
     observations = evidence.get('observations')
-    if not isinstance(observations, list) or len(observations) != len(config['observeAt']):
-        return False
+    if not isinstance(observations, list) or len(observations) > len(config['observeAt']):
+        return None
+    actual = {}
     for point, row in zip(config['observeAt'], observations):
         if (not isinstance(row, dict) or not integer(row.get('tick')) or row['tick'] != point
-                or not integer(row.get('gameTick')) or row['gameTick'] != start + point):
-            return False
+                or point > advanced or not integer(row.get('gameTick')) or row['gameTick'] != start + point):
+            return None
         values = row.get('values')
         if (not isinstance(values, dict) or set(values) != OBSERVERS
                 or not all(integer(n) and -(2**63) <= n < 2**63 for n in values.values())):
-            return False
-    return True
+            return None
+        actual[point] = values
+    return actual
 
 
-def evaluate_tick(request, evidence):
+def evidence_complete(config, evidence):
+    actual = validated_prefix(config, evidence)
+    return (actual is not None and evidence.get('status') == 'completed' and not evidence.get('error')
+            and evidence['advanced'] == config['count'] and len(actual) == len(config['observeAt']))
+
+
+def evaluate_tick(request, evidence, *, interrupted=False):
     stage = {'status': 'incomplete', 'fidelity': 'experimental', 'checks': [], 'evidence': evidence}
     incomplete = [{'code': 'dNotQualified', 'detail': 'bounded-tick.v1 has no independent qualification'}]
     failed = []
-    expected = request['expectations']['tickObservations']
-    if (not evidence_complete(request['tick'], evidence)
-            or any(row['id'] not in OBSERVERS for row in expected)):
+    actual = validated_prefix(request['tick'], evidence)
+    unavailable = interrupted or not evidence_complete(request['tick'], evidence)
+    for row in request['expectations']['tickObservations']:
+        check = {'tick': row['tick'], 'id': row['id'], 'expected': row['equals']}
+        if actual is None or row['tick'] not in actual or row['id'] not in OBSERVERS:
+            check.update(actual=None, outcome='error')
+            unavailable = True
+        else:
+            value = actual[row['tick']][row['id']]
+            check.update(actual=value, outcome='match' if value == row['equals'] else 'mismatch')
+        stage['checks'].append(check)
+    if unavailable:
         incomplete.append({'code': 'tickObservationIncomplete',
                            'detail': 'missing, interrupted, unknown or inconsistent real-game tick observations'})
-        return stage, incomplete, failed
-    actual = {row['tick']: row['values'] for row in evidence['observations']}
-    for row in expected:
-        value = actual[row['tick']][row['id']]
-        stage['checks'].append({'tick': row['tick'], 'id': row['id'], 'expected': row['equals'],
-                                'actual': value, 'outcome': 'match' if value == row['equals'] else 'mismatch'})
-    stage['status'] = 'completed'
+    else:
+        stage['status'] = 'completed'
     if any(row['outcome'] == 'mismatch' for row in stage['checks']):
         stage['status'] = 'failed'
         failed.append({'code': 'tickObservationMismatch', 'detail': 'observed fixture state differs from expectation'})

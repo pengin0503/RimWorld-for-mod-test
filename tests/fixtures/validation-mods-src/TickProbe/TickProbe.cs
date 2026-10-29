@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using Verse;
 
@@ -20,6 +22,11 @@ namespace RWMT.TickProbe
             if (Counter == 60)
             {
                 string mode = DefDatabase<TickProbeConfigDef>.GetNamedSilentFail("RWMT_TickConfig")?.mode;
+                if (mode == "hang" || mode == "memory" || mode == "log")
+                {
+                    Process child = Process.Start(new ProcessStartInfo("/bin/sleep", "600") { UseShellExecute = false });
+                    File.WriteAllText(Path.Combine(Environment.GetEnvironmentVariable("HOME"), "tick-probe-child.pid"), child.Id.ToString());
+                }
                 if (mode == "throw") throw new InvalidOperationException("RWMT controlled tick exception");
                 if (mode == "hang") while (true) Thread.Sleep(100);
                 if (mode == "memory")

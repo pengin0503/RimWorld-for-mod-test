@@ -1,5 +1,7 @@
 # Linux共通私有検証入口（P2）
 
+追記: PR29/30/31はmain統合済み。[main手動受入の確定記録](2026-10-29-private-validation-acceptance.md)を参照。以下の未マージ・受入前という説明は実装時点の記録。
+
 2026-10-29。基準main `b66bcf932110184c726dffe1b6a623a604d4862d`。
 既存PR27/28は統合済み。P1文書整合は[PR29](https://github.com/pengin0503/RimWorld-for-mod-test/pull/29)、
 本実装は[PR30](https://github.com/pengin0503/RimWorld-for-mod-test/pull/30)。新規2件は未マージ。

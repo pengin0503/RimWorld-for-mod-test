@@ -1,5 +1,6 @@
 """Private, main-bound acquisition for the C reference metadata audit."""
 import hashlib
+import os
 import shutil
 import time
 from pathlib import Path
@@ -129,6 +130,42 @@ def load_session(root):
     return manifest
 
 
+def scan(root, scanner):
+    identity = pv.current_identity()
+    manifest = load_session(root)
+    session = session_path(root)
+    result_path = session / 'scan.json'
+    if result_path.exists(): raise ValueError('scanner already attempted')
+    pv.write_json(result_path, {**identity, 'verified': False})
+    start = time.monotonic()
+    results = []
+    for index, name in enumerate(ADAPTER['sha256']):
+        remaining = 120 - (time.monotonic() - start)
+        if remaining <= 0: raise ValueError('scanner timeout')
+        output = session / ('scan-' + str(index) + '.json')
+        command = ['dotnet', str(scanner), str(session/'input'/name), EXPECTED[name], str(output)]
+        process = pv.run_command(command, session/('scan-' + str(index) + '.log'), timeout=remaining, memory_limit=2*1024**3)
+        if process.get('exitCode') != 0 or process.get('interrupted') is not False:
+            raise ValueError('scanner did not finish')
+        if output.is_symlink() or not output.is_file() or output.stat().st_size > 4*1024*1024:
+            raise ValueError('invalid scanner output')
+        result = pv.read_json(output)
+        if not isinstance(result, dict) or result.get('sha256') != EXPECTED[name] or not isinstance(result.get('types'), list):
+            raise ValueError('scanner identity mismatch')
+        results.append(result)
+    load_session(root)
+    types = []
+    for target in TARGETS:
+        rows = [row for result in results for row in result['types'] if isinstance(row, dict) and row.get('id') == target]
+        found = [row for row in rows if row.get('found') is True]
+        if len(rows) != len(results) or len(found) > 1: raise ValueError('ambiguous scanner output')
+        if found: types.append(found[0])
+        elif rows: types.append(rows[0])
+    combined = {**identity, 'verified': True, 'types': types}
+    pv.write_json(result_path, combined)
+    return combined
+
+
 PRIMITIVES = frozenset(('Void', 'Boolean', 'Char', 'SByte', 'Byte', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Single', 'Double', 'String', 'Object', 'IntPtr', 'UIntPtr'))
 TYPE_ATOMS = frozenset(('System.Action', 'System.Collections.Generic.List`1', 'System.Collections.Generic.IEnumerable`1',
     'Verse.Game', 'Verse.MapGenerator', 'Verse.LongEventHandler', 'RimWorld.Dialog_BillConfig', 'Verse.ThingFilterUI',
@@ -216,3 +253,45 @@ def public_summary(raw, identity):
         rows.append({'id': target_id, 'status': 'found' if target['found'] else 'missing', 'methods': methods})
     return {**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269', 'binaryVerified': binary,
             'verified': binary, 'staticAuditStatus': 'completed' if complete else 'incomplete', 'c0Passed': False, 'types': rows}
+
+
+def publish(root):
+    identity = pv.current_identity()
+    raw = {}
+    try:
+        load_session(root)
+        path = session_path(root) / 'scan.json'
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 4*1024*1024:
+            raise ValueError('invalid scanner evidence')
+        raw = pv.read_json(path)
+    except (ValueError, OSError):
+        raw = {}
+    return public_summary(raw, identity)
+
+
+def main():
+    import argparse
+    import json
+    parser = argparse.ArgumentParser()
+    parser.add_argument('action', choices=('prepare', 'scan', 'publish'))
+    parser.add_argument('--private-root', required=True)
+    parser.add_argument('--scanner')
+    args = parser.parse_args()
+    pv.install_stop_handlers()
+    if args.action == 'prepare': prepare(Path(args.private_root))
+    elif args.action == 'scan':
+        if not args.scanner: raise ValueError('scanner required')
+        scan(Path(args.private_root), Path(args.scanner).resolve())
+    else:
+        summary = publish(Path(args.private_root))
+        text = json.dumps(summary, allow_nan=False)
+        if len(text.encode()) > 512*1024: raise ValueError('public summary budget exceeded')
+        print(text)
+        output = os.environ.get('GITHUB_STEP_SUMMARY')
+        if output:
+            with open(output, 'a', encoding='utf-8') as stream:
+                stream.write('## Private C static audit\n\n```json\n' + text + '\n```\n')
+
+
+if __name__ == '__main__':
+    main()

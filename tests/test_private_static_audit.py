@@ -193,6 +193,32 @@ class AuditTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', json.dumps(result))
         self.assertEqual(result['staticAuditStatus'], 'incomplete')
 
+    def test_scanner_supervisor_receives_finite_timeout_and_memory_limit(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True):
+            root = Path(d); session = a.session_path(root); (session / 'input').mkdir(parents=True)
+            with patch.object(a, 'load_session', return_value={'verified': True}), patch.object(a.pv, 'run_command', return_value={'exitCode': 1, 'interrupted': False, 'seconds': 0}) as run:
+                with self.assertRaises(ValueError): a.scan(root, Path('/synthetic/scanner.dll'))
+                self.assertLessEqual(run.call_args.kwargs['timeout'], 120)
+                self.assertEqual(run.call_args.kwargs['memory_limit'], 2 * 1024**3)
+
+    def test_publish_revalidates_inputs_before_trusting_scanner_result(self):
+        identity = a.pv.current_identity(ENV)
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a, 'load_session', side_effect=ValueError('changed')):
+            root = Path(d); session = a.session_path(root); session.mkdir(parents=True)
+            (session / 'scan.json').write_text(json.dumps({**identity, 'verified': True, 'types': []}))
+            result = a.publish(root)
+            self.assertFalse(result['binaryVerified'])
+            self.assertEqual(result['staticAuditStatus'], 'incomplete')
+
+    def test_workflow_keeps_credentials_in_preparation_step(self):
+        text = (Path(__file__).resolve().parents[1] / '.github/workflows/linux-private-c-audit.yml').read_text()
+        self.assertIn("github.ref == 'refs/heads/main'", text)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', text)
+        prepare = text.split('      - name: Prepare fixed private inputs', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('R2_ACCESS_KEY_ID', prepare)
+        self.assertNotIn('secrets.', text.replace(prepare, ''))
+        self.assertNotIn('upload-artifact', text)
+
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):
             with self.assertRaises(ValueError): a.prepare(Path(d))

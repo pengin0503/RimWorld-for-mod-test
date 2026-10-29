@@ -269,6 +269,8 @@ def public_summary(raw, identity):
                     if isinstance(item, dict) and not set(item).issubset({'token', 'return', 'parameters', 'genericCount', 'static', 'visibility', 'calls', 'branches', 'exceptions'}): complete = False
                     if not isinstance(item, dict) or type(item.get('static')) is not bool or item.get('visibility') not in VISIBILITY:
                         raise ValueError('invalid method')
+                    token = item.get('token')
+                    if type(token) is not int or not 0x06000001 <= token <= 0x06ffffff: raise ValueError('invalid method token')
                     params = item.get('parameters'); generics = item.get('genericCount')
                     if not isinstance(params, list) or len(params) > 64 or type(generics) is not int or not 0 <= generics <= 32:
                         raise ValueError('invalid signature')

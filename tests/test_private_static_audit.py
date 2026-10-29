@@ -396,6 +396,13 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(result['staticAuditStatus'], 'incomplete')
         self.assertNotIn('SECRET', json.dumps(result))
 
+    def test_method_without_valid_metadata_token_is_incomplete(self):
+        identity = a.pv.current_identity(ENV)
+        types = [{'id': target, 'found': False, 'methods': [{'name': name, 'overloads': []} for name in names]} for target, names in a.TARGETS.items()]
+        types[0]['found'] = True
+        types[0]['methods'][0]['overloads'] = [{'return': {'kind': 'primitive', 'name': 'Void'}, 'parameters': [], 'genericCount': 0, 'static': False, 'visibility': 'Public', 'calls': []}]
+        self.assertEqual(a.public_summary({**identity, 'verified': True, 'types': types}, identity)['staticAuditStatus'], 'incomplete')
+
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):
             with self.assertRaises(ValueError): a.prepare(Path(d))

@@ -21,7 +21,7 @@
 
 上記は存在と直接呼出位置の証拠であり、イベントのキュー実行順序、同一のfresh Game/new Billでの実UI到達、独立した材料候補・報酬差分の採取を証明しない。
 
-`MapGenerator.GenerateMap`、`LongEventHandler.QueueLongEvent`、`ThingFilterUI.DoThingFilterConfigWindow`、`BillUtility.MakeNewBill`、`IncidentWorker.TryExecute` の署名には、公開用の固定型集合では再構築できないものがあり `unreadable` とされた。未知型を自動許可したり、件数だけを成功扱いにしたりしない。
+`MapGenerator.GenerateMap`、`LongEventHandler.QueueLongEvent`、`ThingFilterUI.DoThingFilterConfigWindow`、`BillUtility.MakeNewBill`、`IncidentWorker.TryExecute` は `unreadable` とされた。ただし現行publisherは型以外の検査失敗も同じ状態へ集約するため、公開summaryだけから許可外の型が原因とは確定できない。[未読理由の特定と型追加の設計](../superpowers/specs/2026-10-30-c-signature-review-design.md)で原因分離を先に行う。未知型を自動許可したり、件数だけを成功扱いにしたりしない。
 
 ## 後続ゲート
 

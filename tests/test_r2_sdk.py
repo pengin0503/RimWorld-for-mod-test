@@ -107,6 +107,18 @@ class SDKTests(unittest.TestCase):
             self.assertEqual(dest.read_bytes(), payload)
         self.assertTrue(stream.closed)
 
+    def test_oversized_response_is_rejected_before_body_read(self):
+        class Tracking(io.BytesIO):
+            def __init__(self, payload): super().__init__(payload); self.reads = 0
+            def read(self, size=-1): self.reads += 1; return super().read(size)
+        stream = Tracking(b'1234')
+        self.stub.add_response('get_object', {'Body': StreamingBody(stream, 4), 'ContentLength': 4}, {'Bucket': BUCKET, 'Key': KEY})
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ra.AssetError): self.r2.get(KEY, Path(directory) / 'Version.txt', 3)
+            self.assertEqual(stream.reads, 0)
+            self.assertTrue(stream.closed)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
     def test_static_audit_exact_key_uses_sdk_prefix_without_enumerating_game(self):
         self.stub.add_response('list_objects_v2', {'Contents': [{'Key': KEY, 'Size': 3}, {'Key': KEY + '.extra', 'Size': 4}]},
             {'Bucket': BUCKET, 'Prefix': KEY, 'MaxKeys': 1000})

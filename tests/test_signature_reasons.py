@@ -37,3 +37,16 @@ class ReasonTests(unittest.TestCase):
         self.assertEqual(result['types'][0]['methods'][0]['reasons'],['invalidVisibility','unsupportedTypeAtom'])
         self.assertNotIn('PRIVATE',str(result));self.assertFalse(result['c0Passed'])
         self.assertEqual(result['staticAuditStatus'],'incomplete')
+
+    def test_bad_generic_count_does_not_hide_parameter_failure(self):
+        item=self.item();item['genericCount']=-1
+        item['parameters']=[{'kind':'named','name':'PRIVATE.Secret'}]
+        self.assertEqual(audit.method_reasons(item), ['invalidSignature','unsupportedTypeAtom'])
+
+    def test_later_overload_keeps_its_fallback_reason(self):
+        first=self.item();first['return']={'kind':'named','name':'PRIVATE.Secret'}
+        second=self.item();second['parameters']=[{'kind':'named','name':'System.Collections.Generic.IEnumerable`1'} for _ in range(64)]
+        identity={'runId':'100-1','commit':'a'*40}
+        raw={**identity,'verified':True,'types':[{'id':'game','found':True,'methods':[{'name':'InitNewGame','overloads':[first,second]},{'name':'FinalizeInit','overloads':[]}]}]}
+        result=audit.public_summary(raw,identity)
+        self.assertEqual(result['types'][0]['methods'][0]['reasons'], ['invalidSignature','unsupportedTypeAtom'])

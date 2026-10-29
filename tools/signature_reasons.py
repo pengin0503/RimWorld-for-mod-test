@@ -30,11 +30,12 @@ def classify(item, normalize, primitives, atoms):
         elif type(node.get('index')) is not int or not 0<=node['index']<32:reasons.add('invalidSignature')
     check_type(item.get('return'))
     params=item.get('parameters'); count=item.get('genericCount')
-    if not isinstance(params,list) or type(count) is not int or count<0: reasons.add('invalidSignature')
+    if type(count) is not int or count<0: reasons.add('invalidSignature')
+    elif count>32: reasons.add('budgetExceeded')
+    if not isinstance(params,list): reasons.add('invalidSignature')
+    elif len(params)>64: reasons.add('budgetExceeded')
     else:
-        if len(params)>64 or count>32: reasons.add('budgetExceeded')
-        else:
-            for param in params: check_type(param)
+        for param in params: check_type(param)
     def integer(value,maximum=65535):return type(value) is int and 0<=value<=maximum
     branches=item.get('branches',[]);regions=item.get('exceptions',[])
     if not isinstance(branches,list) or not isinstance(regions,list): reasons.add('invalidControlFlow')

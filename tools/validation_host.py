@@ -30,8 +30,9 @@ import zipfile
 
 try:
     import map_render
+    import bounded_tick
 except ImportError:  # imported as tools.validation_host
-    from tools import map_render
+    from tools import map_render, bounded_tick
 
 TOOL_VERSION = '0.1.0'
 WORKER_NAME = 'RimWorldValidationWorker'
@@ -41,7 +42,7 @@ MAP_OBSERVATION = 'map-observation.json'
 PROGRESS_FILE = 'progress.jsonl'
 MAX_PROGRESS_EVENTS = 500  # Worker errors and warnings copied into the progress log, per run
 EXIT_CODES = {'passed': 0, 'failed': 1, 'blocked': 2, 'incomplete': 3}
-LEVELS = ('A', 'B', 'C')
+LEVELS = ('A', 'B', 'C', 'D')
 OFFICIAL_ORDER = ('Core', 'Royalty', 'Ideology', 'Biotech', 'Anomaly', 'Odyssey')
 EXPANSION_IDS = tuple(f'ludeon.rimworld.{name.lower()}' for name in OFFICIAL_ORDER[1:])
 # Mods: the install's own local mods never join a run; only the requested ones are copied into host/Mods.
@@ -84,6 +85,7 @@ def detect_build_platform(files):
 ADAPTERS = {
     'rimworld-1.7.4985-rev1269': {
         'version': '1.7.4985 rev1269',
+        'experimentalFeatures': ('bounded-tick.v1',),
         'sha256': {
             'Assembly-CSharp.dll': '0be7a7ea4b3111d4430f45b36c234a5e43287880b0514b23915f2ef9a0629e16',
             'RimWorld.dll': '39bd67253a7fa5503ff7f2b51bc3ab5983fb1430acf57d7e8bb322d20e380555',
@@ -277,7 +279,7 @@ def load_snapshot(snapshot, *, full=False, official=()):
 # Request
 
 REQUEST_KEYS = {'recordType', 'schemaVersion', 'levels', 'official', 'mods', 'language', 'expectations', 'allow', 'limits',
-                'tests', 'map'}
+                'tests', 'map', 'tick'}
 # Defaults follow the official developer quick test (Root_Play.SetupForQuickTestPlay), except
 # the fixed seed: baseline and target must generate from the same seed to be comparable.
 MAP_DEFAULTS = {'seed': 'rwmt', 'size': 250, 'planetCoverage': 0.3, 'scenario': 'Crashlanded',
@@ -315,9 +317,10 @@ EXPECTATION_KEYS = {
     'mapThings': ({'type', 'defName'}, {'minCount', 'maxCount'}),
     'billIngredients': ({'recipe', 'thing', 'visible', 'allowed'}, set()),
     'eventChoices': ({'event', 'choice', 'rewardThing', 'rewardCount'}, set()),
+    'tickObservations': ({'tick', 'id', 'equals'}, set()),
 }
 # Judged by the Controller from the map observation; the Worker never sees them.
-CONTROLLER_EXPECTATIONS = {'mapThings'}
+CONTROLLER_EXPECTATIONS = {'mapThings', 'tickObservations'}
 MAP_DEF_TYPES = {'ThingDef', 'TerrainDef'}
 PATCH_KINDS = {'prefix', 'postfix', 'transpiler', 'finalizer'}
 
@@ -355,7 +358,7 @@ def validate_request(request, base):
     _require(request.get('schemaVersion') == 1, 'schemaVersion must be 1')
 
     levels = _strings(request.get('levels'), 'levels')
-    _require(len(set(levels)) == len(levels) and set(levels) <= set(LEVELS), 'levels must be distinct values of A, B, C')
+    _require(len(set(levels)) == len(levels) and set(levels) <= set(LEVELS), 'levels must be distinct values of A, B, C, D')
     _require('A' in levels, 'levels must include A; B and C depend on a completed load')
 
     official = _strings(request.get('official', ['Core']), 'official')
@@ -405,6 +408,8 @@ def validate_request(request, base):
             _require(required <= set(item) <= required | optional,
                      f'{where} needs exactly {", ".join(sorted(required))}' + (f' (optional {", ".join(sorted(optional))})' if optional else ''))
             for key, value in item.items():
+                if kind == 'tickObservations':
+                    continue  # validated as a bounded, typed case below
                 if key in ('exists', 'visible', 'allowed'):
                     _require(isinstance(value, bool), f'{where}.{key} must be a boolean')
                 elif key == 'genericArity':
@@ -472,9 +477,15 @@ def validate_request(request, base):
             _require(choices[0]['event'] == 'RWMT_ChoiceEvent' and choices[0]['choice'] == 'accept',
                      'event choice supports only the controlled RWMT fixture')
     else:
-        _require(not tests, 'tests need level C')
+        _require(not tests or 'D' in levels, 'tests need level C or D')
         _require(not expectations.get('billIngredients'), 'billIngredients need level C')
         _require(not expectations.get('eventChoices'), 'eventChoices need level C')
+
+    try:
+        tick = bounded_tick.validate_tick(request.get('tick'), levels, tests, map_request,
+                                          expectations.get('tickObservations', []))
+    except ValueError as error:
+        raise RequestError(str(error)) from None
 
     limits = dict(DEFAULT_LIMITS)
     given = request.get('limits', {})
@@ -487,7 +498,7 @@ def validate_request(request, base):
         limits[key] = value
     return {'levels': levels, 'official': official, 'mods': resolved, 'language': language,
             'expectations': {k: expectations.get(k, []) for k in EXPECTATION_KEYS},
-            'allow': {k: allow.get(k, []) for k in ALLOW_KEYS}, 'tests': tests, 'limits': limits, 'map': map_request}
+            'allow': {k: allow.get(k, []) for k in ALLOW_KEYS}, 'tests': tests, 'limits': limits, 'map': map_request, 'tick': tick}
 
 
 def validate_map(value):
@@ -848,6 +859,8 @@ def build_run_dir(run_dir, snapshot, request, mods, worker_dir, runtime, *, expe
     if request.get('map'):
         worker_request['map'] = {**{k: v for k, v in request['map'].items() if k != 'imageScale'},
                                  'observationPath': str(run_dir / MAP_OBSERVATION)}
+    if request.get('tick'):
+        worker_request['tick'] = request['tick']
     _write_json(run_dir / 'worker-request.json', worker_request)
     return order, link_modes
 
@@ -1317,13 +1330,22 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         stages['C'] = c_stage
         incomplete.extend(c_incomplete)
         failed.extend(c_failed)
+    if 'D' in levels:
+        summary = (worker or {}).get('diagnosticsSummary') or {}
+        d_stage, d_incomplete, d_failed = evaluate_tick(request, (worker or {}).get('tick'),
+            interrupted=bool(not completed or worker_problem or process.get('killedFor')
+                             or process.get('exitCode') not in (0, None) or summary.get('dropped')
+                             or summary.get('truncated') or (worker or {}).get('verseLogLimitReached')))
+        stages['D'] = d_stage
+        incomplete.extend(d_incomplete)
+        failed.extend(d_failed)
     if map_evaluation is not None:
         stages['map'] = map_evaluation['stage']
         incomplete.extend(map_evaluation['incomplete'])
         failed.extend(map_evaluation['failed'])
 
     fresh = []
-    if completed and baseline is not None:
+    if (completed or 'D' in levels) and baseline is not None:
         fresh = [dict(e) for e in new_diagnostics(events, baseline_events)]  # annotated below; inputs stay as read
         allow = request.get('allow') or {}
         translation = judge_translation_errors(new_translation_errors(worker, baseline), allow)
@@ -1353,6 +1375,9 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
             stages[level]['note'] = 'stage observations completed, but the run as a whole is incomplete'
     return status, execution, incomplete + failed, stages, fresh
 
+
+# Kept public alongside existing fixed-case evaluators.
+evaluate_tick = bounded_tick.evaluate_tick
 
 def evaluate_event_choice(request, checks):
     case = 'event-choice.v1'
@@ -1625,6 +1650,10 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
             raise Blocked('invalidRequest', str(error)) from None
         result['request'].update({'sha256': request['sha256'], 'levels': request['levels'], 'official': request['official'],
                                   'language': request['language'], 'limits': request['limits']})
+        if request.get('tick'):
+            result['request']['tick'] = request['tick']
+        if request.get('tick') and (result['platform'] != 'linux-x64' or runtime != 'waylith'):
+            raise Blocked('boundedTickUnsupported', 'bounded-tick.v1 requires Linux x86_64 and bundled WaylithClr')
         if result['platform'] not in BUILD_FILES:
             raise Blocked('platformUnsupported',
                           f'running the Worker is implemented for {" and ".join(BUILD_FILES)} only; this is {result["platform"]}')
@@ -1660,6 +1689,9 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
             fidelity = 'qualified' if runtime_ok and levels_ok else 'experimental'
         else:
             fidelity = 'experimental'
+        if request.get('tick') and (not qualification or not runtime_ok
+                or 'bounded-tick.v1' not in (adapter or {}).get('experimentalFeatures', ())):
+            raise Blocked('boundedTickUnsupported', 'no bounded-tick adapter for this exact game/runtime build')
         result['fidelity'] = fidelity
         result['qualificationEvidence'] = qualification['evidence'] if qualification and fidelity == 'qualified' else None
 
@@ -1717,6 +1749,11 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         process['linkModes'] = link_modes
         process['modCopyModes'] = mod_copy_modes
         worker, problem, events = read_worker_output(run_dir, run_id, nonce, wall, limits['diagnostics'] + 10)
+        if worker is None and request.get('tick'):
+            checkpoint = bounded_tick.load_checkpoint(run_dir, run_id, nonce)
+            if checkpoint is not None:
+                worker = {'executionStatus': 'interrupted', 'tick': checkpoint,
+                          'failure': 'partial tick checkpoint; final Worker result is absent'}
         progress('workerFinished', run=name, exitCode=process.get('exitCode'), killedFor=process.get('killedFor'),
                  seconds=round(time.time() - wall, 1), executionStatus=(worker or {}).get('executionStatus'),
                  problem=problem, noiseSkipped=tail.noise)
@@ -1738,12 +1775,19 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'official': request['official'], 'language': request['language'], 'limits': limits,
         'mods': [(m['packageId'], m['sha256']) for m in baseline_mods],
         'map': {k: v for k, v in request['map'].items() if k != 'imageScale'} if request['map'] else None,
+        **({'boundedTick': {'caseId': bounded_tick.CASE, 'observerVersion': bounded_tick.OBSERVER_VERSION,
+                            'tick': request['tick'], 'observations': request['expectations']['tickObservations']}}
+           if request.get('tick') else {}),
     }, sort_keys=True).encode()).hexdigest()
     baseline_run = None
     cache_file = Path(baseline_cache) / f'{baseline_key}.json' if baseline_cache else None
     map_cache_file = cache_file.with_name(f'{baseline_key}.{MAP_OBSERVATION}') if cache_file else None
     if cache_file and cache_file.is_file():
         baseline_run = json.loads(cache_file.read_text(encoding='utf-8'))
+        if request.get('tick') and not bounded_tick.evidence_complete(
+                request['tick'], (baseline_run.get('worker') or {}).get('tick')):
+            baseline_run = None
+    if baseline_run is not None:
         baseline_run['cached'] = True
         progress('baselineCached', run='baseline')
         map_completed = ((baseline_run.get('worker') or {}).get('map') or {}).get('status') == 'completed'
@@ -1754,7 +1798,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         baseline_run = one_run('baseline', baseline_mods, {k: [] for k in expectations})
         baseline_run['cached'] = False
         if cache_file and baseline_run['worker'] and baseline_run['worker'].get('executionStatus') == 'completed' \
-                and not baseline_run['process'].get('killedFor') and not baseline_issues(baseline_run['worker']):
+                and not baseline_run['process'].get('killedFor') and not baseline_issues(baseline_run['worker']) \
+                and (not request.get('tick') or bounded_tick.evidence_complete(request['tick'], baseline_run['worker'].get('tick'))):
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             cached = dict(baseline_run)
             observation = Path(baseline_run['runDir']) / MAP_OBSERVATION
@@ -1774,6 +1819,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         else f'baseline run did not complete: {(baseline_worker or {}).get("failure") or baseline_run["process"].get("killedFor")}')
     if not baseline_problem and baseline_issues(baseline_worker):
         baseline_problem = 'baseline observations are not reliable: ' + '; '.join(baseline_issues(baseline_worker))
+    if request.get('tick') and not bounded_tick.evidence_complete(request['tick'], (baseline_worker or {}).get('tick')):
+        baseline_problem = baseline_problem or 'baseline tick observations are incomplete'
     map_evaluation = None
     if request['map']:
         map_qualified = fidelity == 'qualified' and 'map' in (qualification or {}).get('features', ())
@@ -1805,6 +1852,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'process': {'baseline': baseline_run['process'], 'target': target_run['process']},
         'scope': _scope(request, stages),
     })
+    if request.get('tick'):
+        result['tick'] = {'baseline': (baseline_worker or {}).get('tick'), 'target': worker.get('tick')}
     if map_evaluation is not None:
         result['map'] = map_evaluation['section']
     timings['baselinePrepareSeconds'] = baseline_run['prepareSeconds']
@@ -1821,6 +1870,8 @@ def _scope(request, stages):
                        'map components) with the requested seed; diagnostics compared with the baseline map')
     if 'C' in request['levels']:
         checked.append('non-rendered new-bill ingredient option predicates (experimental); see stages.C')
+    if 'D' in request['levels']:
+        checked.append('bounded real game ticks and registered fixture state (experimental); see stages.D')
     not_checked = [
         'other languages than ' + request['language'],
         ('the game start after map generation (Game.FinalizeInit, GameComponent.StartedNewGame), ticks, rendered UI, rendering, '
@@ -1829,6 +1880,9 @@ def _scope(request, stages):
         'runtime behavior outside the requested fixed C case; events, quests and ticks',
         'behaviour on other platforms or runtimes than the one recorded in "runtime"',
     ]
+    if 'D' in request['levels']:
+        not_checked[1] = 'rendered UI, rendering, camera, audio output, Steam and persistent saves'
+        not_checked[2] = 'runtime behavior outside the fixed D fixture; arbitrary MOD events/quests and long-term play'
     if 'B' not in request['levels']:
         not_checked.insert(0, 'Harmony patch expectations (level B not requested; mod code still ran while loading)')
     if request['map']:

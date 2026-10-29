@@ -50,6 +50,13 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
     private volatile Exception? _mapException;
     private Dictionary<string, object?>? _mapSummary;
 
+    private BoundedTickRunner? _ticks;
+    private TickApi? _tickApi;
+    private string? _tickInitialization;
+    private string? _tickError;
+    private int _tickErrorsBefore;
+    private bool _ticksReady;
+
     public int ExitCode { get; private set; } = 3;
 
     private sealed class Stage(string name, double start)
@@ -227,18 +234,23 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
                 Finish("failed", "a scene change was requested; the worker never loads a playable scene");
                 return;
             }
-            // Only the map stage may create a Game, and it never starts play.
+            // Only the temporary map/D stages may own a Game; no interactive scene is started.
             if (_mapStage == null && api.CurrentGame.GetValue(null) != null)
             {
                 Finish("failed", "game code created a Game instance; the worker never enters play");
                 return;
+            }
+            if (_ticksReady && !api.AnyEventNowOrWaiting())
+            {
+                _ticksReady = false;
+                RunBoundedTicks();
             }
             api.AudioListenerSync();
             if (api.AudioBackendCurrent.GetValue(null) is object audio)
             {
                 api.AudioBackendUpdate.Invoke(audio, null);
             }
-            if (_markerRan && !api.AnyEventNowOrWaiting())
+            if (_markerRan && (request.Tick != null || !api.AnyEventNowOrWaiting()))
             {
                 Finish("completed", null);
                 return;
@@ -365,8 +377,81 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
                 }
             }
             Complete(_mapStage, _mapException == null && _mapSummary != null ? "completed" : "failed");
-            _markerRan = true;
+            if (request.Tick == null) _markerRan = true;
         }, async: false, handler: null);
+        if (request.Tick is { } tickRequest)
+        {
+            _ticks = new BoundedTickRunner(tickRequest.Count, tickRequest.ObserveAt);
+            Queue(() =>
+            {
+                if (_mapException != null || _map?.Game == null) { _tickError = "map unavailable"; return; }
+                try
+                {
+                    _tickErrorsBefore = diagnostics.ErrorCount;
+                    _tickApi = new TickApi(bound);
+                    _tickApi.Initialize(_map.Game);
+                    _tickInitialization = "gameFinalizeInitAndStartedNewGame";
+                }
+                catch (Exception error) when (error is not OutOfMemoryException)
+                {
+                    _tickError = error.ToString();
+                    diagnostics.Record("error", "Worker", "bounded tick initialization failed", error);
+                }
+            }, async: false, handler: error => _tickError = error.ToString());
+            // Only arm execution here. Real ticks run from Host.Tick after the
+            // event queue and initialization callbacks have completely drained.
+            Queue(() => _ticksReady = true, async: false,
+                handler: error => { _tickError = error.ToString(); _markerRan = true; });
+        }
+    }
+
+    private void RunBoundedTicks()
+    {
+        Diagnostics.Stage = "tick.run";
+        try
+        {
+            if (_tickError == null && _tickApi != null && _map?.Game is object game)
+            {
+                if (diagnostics.ErrorCount != _tickErrorsBefore)
+                    throw new InvalidOperationException("game initialization emitted an error");
+                Func<long> probe = _tickApi.Probe(game);
+                _ticks!.Run(() => _tickApi.ReadTick(game), () =>
+                {
+                    _tickApi.SingleTick(game);
+                    // Component exceptions may be caught and logged by the game.
+                    if (diagnostics.ErrorCount != _tickErrorsBefore)
+                        throw new InvalidOperationException("game tick emitted an error");
+                    if (api.AnyEventNowOrWaiting())
+                        throw new InvalidOperationException("tick queued a long event outside the fixed D case");
+                }, probe, () => clock.Elapsed.TotalSeconds >= request.DeadlineSeconds
+                    || Volatile.Read(ref _finished) != 0, WriteTickCheckpoint);
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _tickError = error.ToString();
+        }
+        _markerRan = true;
+    }
+
+    private Dictionary<string, object?> TickCheckpointEvidence()
+    {
+        Dictionary<string, object?> evidence = _ticks!.Evidence(_tickInitialization);
+        evidence["camera"] = _tickApi?.CameraContext;
+        return evidence;
+    }
+
+    private void WriteTickCheckpoint()
+    {
+        string path = Path.Combine(Path.GetDirectoryName(request.ResultPath)!, "tick-evidence.json");
+        string temp = path + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["recordType"] = "rwmtTickCheckpoint", ["schemaVersion"] = 1,
+            ["runId"] = request.RunId, ["nonce"] = request.Nonce,
+            ["tick"] = TickCheckpointEvidence()
+        }));
+        File.Move(temp, path, overwrite: true);
     }
 
     private void Queue(Action action, bool async, Action<Exception>? handler)
@@ -430,6 +515,14 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
             json.WriteNumber("elapsedSeconds", Math.Round(clock.Elapsed.TotalSeconds, 3));
             WriteRuntime(json);
             WriteStages(json);
+            if (request.Tick != null)
+            {
+                json.WritePropertyName("tick");
+                Dictionary<string, object?> evidence = _ticks?.Evidence(_tickInitialization) ?? new();
+                evidence["camera"] = _tickApi?.CameraContext;
+                if (_tickError != null) { evidence["status"] = "incomplete"; evidence["error"] = _tickError; }
+                JsonSerializer.Serialize(json, evidence);
+            }
             json.WriteStartArray("skippedOfficialSteps");
             foreach (string step in SkippedOfficialSteps)
             {
@@ -529,7 +622,10 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
             JsonSerializer.Serialize(json, _mapSummary);
         }
         json.WriteStartArray("skippedOfficialSteps");
-        foreach (string step in MapStage.SkippedOfficialSteps)
+        IEnumerable<string> skipped = request.Tick == null ? MapStage.SkippedOfficialSteps :
+            new[] { MapStage.SkippedOfficialSteps[0],
+                "D: a non-attached real CameraDriver supplies a fixed player-start view at default zoom for tick-rate predicates; no camera Update/input/render callbacks, CurrentMap UI/ambient notifications, pause-on-load extra tick, interactive scene or save" };
+        foreach (string step in skipped)
         {
             json.WriteStringValue(step);
         }

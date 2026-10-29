@@ -176,3 +176,21 @@ MOD が多い場合は要求の `limits.timeoutSeconds` と `limits.memoryMiB` �
 
 LinuxではMODの準備時にコピーオンライト複製を試し、利用できなければ通常コピーへ戻ります。どちらもコピー後の内容をSHA-256で照合し、baseline・target・入力MODは別のファイルとして扱います。MODにハードリンクは使いません。`process.baseline.modCopyModes` と `process.target.modCopyModes` の `reflink` / `copy` に件数を記録します。既存の `linkModes` はゲームスナップショットへのリンク方式のみです。非対応FSでの高速化は保証しません。
 
+
+### 決めた tick だけ進めて観測する（D・実験）
+
+DはLinuxの対応ビルドで、一時マップを生成してゲーム開始通知を行い、指定したtickまで進める経路です。
+[要求例と制限](contracts/mod-validation-v1.md#d有限-ticklinuxexperimental)を参照してください。
+現在の観測IDは自作fixtureの`fixture.counter`に限定され、任意MODの状態を自由に読むAPIは提供しません。
+観測probeをbaseline/target共通の非target MODとして用意し、変更対象は別のtarget MODにします。
+
+開発用の私有受入コマンド（同じスナップショットを全ケースで再利用）：
+
+```bash
+python tests/integration/run_bounded_tick.py --snapshot /private/rw-snapshot --out /private/tick-acceptance
+```
+
+終了コード0は受入スクリプトのケースが期待どおりだったことを意味します。
+検証結果そのものは独立適格化までexperimental/incompleteです。未知ID・未到達・例外・上限停止を
+「問題なし」へ読み替えず、到達した観測値と理由を確認してください。時間経過を要求しないA/B/C/マップは
+従来どおりで、Cの独立適格化やCOW対応FSの性能実測は別作業です。

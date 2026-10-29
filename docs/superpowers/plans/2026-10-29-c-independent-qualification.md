@@ -5,7 +5,7 @@
 **Goal:** 材料候補と自作イベントを別々の参照経路で評価し、証拠が揃ったケースだけ資格を付ける。
 **Architecture:** C0で公式参照の文脈/APIを実証してから、別実装のprobeとControllerのケース別資格を接続する。片方の不成立を他方の実行の停止理由にしない。
 **Tech Stack:** Python3.12+、C#/.NET10、GitHub Actions、Linux（必要な部分だけ）。
-**Spec:** [共通設計](../specs/2026-10-29-linux-validation-next-design.md)。本計画の機能は未実装。
+**Spec:** [共通設計](../specs/2026-10-29-linux-validation-next-design.md)。独立probe/資格は未実装。C0の[調査状況](../../research/c-reference-entrypoints.md)を記録。対応DLLの正常取得・署名確認が未完了のため、後続は未着手。
 
 ## Global Constraints
 

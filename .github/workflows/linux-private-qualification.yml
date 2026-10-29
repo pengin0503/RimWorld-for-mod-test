@@ -1,0 +1,33 @@
+name: Private Linux qualification experiments
+on:
+  push:
+    branches: [research/linux-d-qualification-cow-20261029]
+    paths: ['experiments/**', 'tests/**', '.github/workflows/linux-private-qualification.yml']
+permissions:
+  contents: read
+jobs:
+  cow-measurement:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Create a dedicated disposable COW filesystem
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y btrfs-progs
+          truncate -s 3G "$RUNNER_TEMP/rwmt-cow.img"
+          mkfs.btrfs -q -f "$RUNNER_TEMP/rwmt-cow.img"
+          mkdir "$RUNNER_TEMP/rwmt-cow-mount"
+          sudo mount -o loop,compress=no "$RUNNER_TEMP/rwmt-cow.img" "$RUNNER_TEMP/rwmt-cow-mount"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/rwmt-cow-mount"
+      - name: Compare verified copying with native COW on the same files
+        run: python experiments/cow-measurement/measure.py --root "$RUNNER_TEMP/rwmt-cow-mount/measurement" --summary "$RUNNER_TEMP/cow-summary.json"
+      - name: Unmount disposable filesystem
+        if: always()
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/rwmt-cow-mount"; then sudo umount "$RUNNER_TEMP/rwmt-cow-mount"; fi

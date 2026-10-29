@@ -135,7 +135,8 @@ def load_session(root):
 def publish_session(root):
     try:
         session, manifest = load_session(root)
-        raw = read_json(session / 'summary.json')
+        checkpoint = session / 'execution/summary.json'
+        raw = read_json(checkpoint if manifest.get('executionAttempted') and checkpoint.is_file() else session / 'summary.json')
         if not isinstance(raw, dict) or raw.get('selection') != manifest['selection']:
             raw = {}
     except ValueError:
@@ -179,9 +180,16 @@ def run_command(command, log, *, timeout=900):
     started=time.monotonic(); interrupted=False
     if not native_process_available():
         return {'exitCode':None,'interrupted':True,'seconds':0}
+    log=log.resolve()
     log.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    status=log.with_suffix('.guardian.json')
+    if status.exists() or Path(str(status)+'.inner').exists():
+        raise ValueError('guardian status already exists')
+    # The existing Linux subreaper pins descendants by pidfd, including helpers
+    # that call setsid. Killing only this wrapper's process group leaks Workers.
+    wrapped=[sys.executable,str(REPO/'tools/gui_linux_supervisor.py'),str(status),'-1',*command]
     with log.open('xb') as stream:
-        process=subprocess.Popen(command,stdout=stream,stderr=subprocess.STDOUT,
+        process=subprocess.Popen(wrapped,stdout=stream,stderr=subprocess.STDOUT,
                                  env=child_environment(log.parent/'environment'),start_new_session=True,cwd=REPO)
         try:
             while process.poll() is None:
@@ -190,10 +198,18 @@ def run_command(command, log, *, timeout=900):
                     interrupted=True; break
                 time.sleep(.05)
         finally:
+            # Give the subreaper ownership of cleanup; do not kill it before it
+            # has recovered nested sessions. Kernel I/O may delay actual exit.
             if process.poll() is None:
-                os.killpg(process.pid,signal.SIGKILL)
+                process.terminate()
             process.wait()
-    return {'exitCode':process.returncode,'interrupted':interrupted,'seconds':round(time.monotonic()-started,3)}
+    evidence=read_json(status)
+    evidence=evidence if isinstance(evidence,dict) else {}
+    code=evidence.get('exitCode')
+    valid=(process.returncode==0 and type(code) is int and -255<=code<=255
+           and type(evidence.get('strayProcessesKilled')) is bool)
+    interrupted |= not valid or evidence.get('strayProcessesKilled') is True
+    return {'exitCode':code if valid else None,'interrupted':interrupted,'seconds':round(time.monotonic()-started,3)}
 
 
 def install_stop_handlers():

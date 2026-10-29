@@ -22,10 +22,6 @@ jobs:
     if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    env:
-      PRIVATE_ROOT: ${{ runner.temp }}/rwmt-private
-      HARMONY_DLL: ${{ runner.temp }}/harmony/lib/net10.0/0Harmony.dll
-      COW_ROOT: ${{ runner.temp }}/rwmt-cow-mount
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,7 +36,10 @@ jobs:
           SELECTED_SUITE: ${{ inputs.suite }}
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python tools/private_validation.py init --suite "$SELECTED_SUITE" --private-root "$PRIVATE_ROOT"
+          python tools/private_validation.py init --suite "$SELECTED_SUITE" --private-root "$RUNNER_TEMP/rwmt-private"
+          echo "PRIVATE_ROOT=$RUNNER_TEMP/rwmt-private" >> "$GITHUB_ENV"
+          echo "HARMONY_DLL=$RUNNER_TEMP/harmony/lib/net10.0/0Harmony.dll" >> "$GITHUB_ENV"
+          echo "COW_ROOT=$RUNNER_TEMP/rwmt-cow-mount" >> "$GITHUB_ENV"
       - uses: actions/setup-dotnet@v5
         id: runtime
         if: steps.session.outputs.needsGame == 'true'

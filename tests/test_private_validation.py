@@ -93,3 +93,17 @@ class SummaryTests(unittest.TestCase):
             root=Path(d); session=pv.init_session(root,'cow')
             pv.write_json(session/'summary.json',raw())
             self.assertFalse(pv.publish_session(root)['acceptancePassed'])
+
+
+class CheckpointPublicationTests(unittest.TestCase):
+    def test_publisher_uses_latest_partial_execution_checkpoint(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True):
+            root=Path(d); session=pv.init_session(root,'all')
+            manifest=pv.read_json(session/'session.json'); manifest['executionAttempted']=True
+            pv.write_json(session/'session.json',manifest)
+            (session/'execution').mkdir()
+            data=raw('all'); data['suites']=data['suites'][:1]
+            pv.write_json(session/'execution/summary.json',data)
+            public=pv.publish_session(root)
+            self.assertEqual(public['suites'][0]['validationStatus'],'passed')
+            self.assertFalse(public['acceptancePassed'])

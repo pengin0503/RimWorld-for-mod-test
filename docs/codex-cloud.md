@@ -133,6 +133,9 @@ Btrfs準備が失敗してもゲームsuiteを、ゲーム準備が失敗して�
 不足した前提のsuiteはblocked、途中停止はincompleteとし、先に完了したsuiteを保存する。
 親監督はhelperごと15分、実行合計40分、workflow全体45分。ログ8 MiB・合計RSS4 GiBはポーリングであり強制メモリ上限ではない。
 Linux PIDとprocfsが一致し、pidfdが利用できる環境のみを受け付ける。
+既存Linux subreaperをhelperの外側で使用し、setsidしたWorker/公式比較の子も回収する。
+timeout/cancel時はguardianへ停止を依頼し、実際の子終了を待つ。kernel I/OでSIGKILLが遅れる場合は回収も遅れる。
+helper終了後に生存した子を回収した場合も成功にしない。
 
 公開は固定suite名・実行状態・判定状態・資格状態・終了コード・時間だけを再構築する。
 `acceptancePassed` は固定回帰試験の期待どおりの動作を意味する。C/Dの受入成功でも

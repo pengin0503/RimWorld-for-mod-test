@@ -125,6 +125,7 @@ prepare はゲーム本体を新たな私有スナップショットへコピー
 `d-regression`（自作有限tick10）、`d-compare`（公式との独立比較60/600/600）、`cow`、`all`。
 allは個別5suiteを順に試す。ゲームsnapshotは同一job内で一度だけ準備し、R2資格情報はその準備stepのみに渡す。
 実行子環境は許可したランタイム変数だけを引き継ぎ、HOME/TMP/XDGを私有領域に分ける。
+自作fixtureのbuildにも `UseSharedCompilation=false` を渡し、常駐コンパイラーを起動しない。
 smoke/独立比較用の開発ライブラリは従来の実験と同じLib.Harmony 2.4.3を使用する。
 これは第三者MODの選定・取得ではない。実MODを扱う後続P4では私有索引の照合を先に行う。
 

@@ -163,7 +163,7 @@ def child_environment(private):
         (private/name).mkdir(parents=True,exist_ok=True,mode=0o700)
     env.update(HOME=str(private/'home'), TMPDIR=str(private/'tmp'), XDG_CONFIG_HOME=str(private/'config'),
                XDG_CACHE_HOME=str(private/'cache'), DOTNET_CLI_TELEMETRY_OPTOUT='1',
-               DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1', MSBUILDDISABLENODEREUSE='1', DOTNET_CLI_USE_MSBUILD_SERVER='0')
+               DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1', UseSharedCompilation='false', MSBUILDDISABLENODEREUSE='1', DOTNET_CLI_USE_MSBUILD_SERVER='0')
     return env
 
 

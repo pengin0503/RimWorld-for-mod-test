@@ -4,12 +4,12 @@
 
 2026-10-29、基準main `f223c514e4ee9c768cb0f819cfd8d9089e2450ff`。
 P2の運用受入後、C材料候補と自作イベントの独立参照経路を調査した。
-**現在は両ケースともC0未通過。取得経路がblockedであり、公式APIの不成立を実証した意味ではない。**
+**10月29日時点では両ケースともC0未通過。取得経路がblockedであり、公式APIの不成立を実証した意味ではない。**
 C/Dの資格、Controller、cache、Workerの動作は変更していない。
 
 ## 確認した範囲と取得記録
 
-- 現在のcheckout外に再利用可能なAssembly-CSharp.dll/snapshotは見つからず、dotnet/ilspycmdも未導入。ローカルのR2資格情報も未設定。
+- 当時のcheckout外に再利用可能なAssembly-CSharp.dll/snapshotは見つからず、dotnet/ilspycmdも未導入。ローカルのR2資格情報も未設定。
 - Cloudflareコネクターで、`rimworld-17/Game-Linux/Version.txt` を読み取り、`1.7.4985 rev1269` を確認した。対象サイズ18 bytes。
 - 同じprefixのAssembly-CSharp.dllメタデータは15,632,896 bytes、ETag `35242f1a2f872909bb394181c5658cac`。ETagの存在を、ローカルDLLのhash照合成功とは扱わない。
 - API署名と呼出順序を調べる目的で、このDLL単体のGETを1回試したが、コネクターが `Worker exceeded memory limit` で失敗した。正常保存0件、実転送量は未確認。15,632,896 bytesは要求対象サイズであり、取得完了量ではない。
@@ -52,12 +52,12 @@ D要求がある場合のTickApi.Initializeは、その後の別キューにあ�
 
 ## ケース別ゲートと停止条件
 
-| ケース | 確認できたこと | 未確認の必須条件 | 現在の状態 |
+| ケース | 確認できたこと | 未確認の必須条件 | 10月29日時点の状態 |
 |---|---|---|---|
 | bill-ingredient-options.v1 | 製品のfreshGameNewBillと観測部品、公式UIの過去の経路候補 | 対応DLLの正確な署名、実ツリー到達、独立採取、有限停止 | C0 blocked：調査資材の正常取得待ち |
 | event-choice.v1 | 製品のFinalizeInit前のキュー位置、実map差分、自作fixtureのaction | 公式生成完了点の署名・キュー順序、同じ文脈への到達、独立採取、有限停止 | C0 blocked：調査資材の正常取得待ち |
 
-次の作業は、main限定の私有静的調査入口を設け、既存の準備済みsnapshotから対応DLLとCLRのhashを検証し、対象メソッドの署名・呼出関係だけを取り出せるようにすること。
+当時の次の作業は、main限定の私有静的調査入口を設け、既存の準備済みsnapshotから対応DLLとCLRのhashを検証し、対象メソッドの署名・呼出関係だけを取り出せるようにすること。
 ゲームを実行しない調査では、runtime全件の再取得を前提にせず、必要DLLとビルド識別情報だけを対象にする。
 逆コンパイル本文・DLL・生ログは私有領域に残し、公開はAPI名と確認結果だけにする。
 branchへsecretを渡すpreview、公開ダウンロード用proxy、R2の公開化・権限変更で取得失敗を迂回しない。

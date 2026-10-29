@@ -2,15 +2,16 @@
 
 **最新の目標は [独立した検証専用ホスト](superpowers/specs/2026-10-25-test-only-host-design.md) です。** iPad から AI に依頼して Linux で検証する用途と、Windows で自分がプレイ前に検証する用途を同じ処理・判定で扱います。ゲームとして遊べる機能は持たせません。
 
-主用途は、ユーザーが PC を操作できなくても、iPad から依頼した AI が Linux 上で検証・MOD 修正・再検証を進め、後で導入して遊ぶための MOD と報告を受け取れることです。Windows PC の起動や遠隔接続、手動のゲーム内確認を通常フローの必須条件にはしません。Windows 版は利用者が自分で検証する追加用途です。
+主用途は、ユーザーが PC を操作できなくても、iPad から依頼した AI が Linux 上で検証・MOD 修正・再検証を進め、後で導入して遊ぶための MOD と報告を受け取れることです。Windows PC の起動や遠隔接続、手動のゲーム内確認を通常フローの必須条件にはしません。Windows版の開発は2026-10-27に中止・凍結しました。今後の対象はLinuxです。
 
-## 現在使える範囲（2026-10-25）
+## 現在使えるLinux範囲（2026-10-29。Windows列は旧記録）
 
 | 機能 | Linux x86_64 | Windows |
 |---|---|---|
 | 実ゲーム処理による検証（A：実ローダー、B：DLL・Harmony）。[使い方](validation-host.md) | 実装済み。1.7.4985 rev1269＋WaylithClr で `qualified` | 未対応（`run` は `blocked`） |
 | 静的な事前検査（`mod_preflight.py check`） | 実装済み | 実装済み |
-| C：指定動作テスト | 未実装（`blocked`） | 未実装 |
+| C：指定動作テスト | 材料候補/許可状態・自作イベント選択肢を実装（experimental、独立適格化未完了） | 開発凍結 |
+| D：有限tick | bounded-tick.v1を実装（自作fixture限定・experimental、独立適格化未完了） | 開発凍結 |
 
 以下は静的な事前検査の説明です。静的検査はゲームコードを実行せず、DLL は識別用にハッシュするだけです。結果は常に `gameVerification=notRun` で、実ゲーム処理による検証の代わりにはなりません。
 
@@ -65,6 +66,6 @@ hash は検査対象の変更検出用であり、全リソースの完全性や
 
 ## これから作るもの
 
-Windows での Worker 実行と画面からの実ゲーム検証、C の指定動作テストは [製品計画](superpowers/plans/test-only-host-product.md) の残りタスクです。遊べる画面、対話入力、無期限 tick、通常起動は提供しません。
+Linuxの残作業は[現行計画](superpowers/plans/2026-10-29-linux-validation-next.md)にまとめています。C/Dは固定ケースを実装済みですが、独立適格化は未完了です。Windowsの新規開発は対象外です。遊べる画面、対話入力、無期限 tick、通常起動は提供しません。
 
 「標準 .NET で実行できた」「Linux で通った」「ロードできた」は、それぞれゲームとの CLR 同等性、Windows 固有挙動、未実行のプレイ中機能を保証しません。

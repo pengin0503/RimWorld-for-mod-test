@@ -194,3 +194,5 @@ python tests/integration/run_bounded_tick.py --snapshot /private/rw-snapshot --o
 検証結果そのものは独立適格化までexperimental/incompleteです。未知ID・未到達・例外・上限停止を
 「問題なし」へ読み替えず、到達した観測値と理由を確認してください。時間経過を要求しないA/B/C/マップは
 従来どおりで、Cの独立適格化やCOW対応FSの性能実測は別作業です。
+
+2026-10-29：PR27/28をmainへ統合済み。Cの2ケースとDの有限tickは実装済みですが独立適格化は未完了です。[Dの不合格条件](research/2026-10-29-bounded-tick-independent-comparison.md)を保持し、次は[文書整合と共通検証基盤](superpowers/plans/2026-10-29-linux-validation-next.md)から進めます。

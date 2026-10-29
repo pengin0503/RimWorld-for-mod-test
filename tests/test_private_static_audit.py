@@ -219,6 +219,13 @@ class AuditTests(unittest.TestCase):
         self.assertNotIn('secrets.', text.replace(prepare, ''))
         self.assertNotIn('upload-artifact', text)
 
+    def test_absent_type_cannot_claim_found_methods(self):
+        identity = a.pv.current_identity(ENV)
+        types = [{'id': target, 'found': False, 'methods': [{'name': name, 'overloads': []} for name in names]} for target, names in a.TARGETS.items()]
+        types[0]['methods'][0]['overloads'] = [{'return': {'kind': 'primitive', 'name': 'Void'}, 'parameters': [], 'genericCount': 0, 'static': False, 'visibility': 'Public', 'calls': []}]
+        result = a.public_summary({**identity, 'verified': True, 'types': types}, identity)
+        self.assertEqual(result['staticAuditStatus'], 'incomplete')
+
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):
             with self.assertRaises(ValueError): a.prepare(Path(d))

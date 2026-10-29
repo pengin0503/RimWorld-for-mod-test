@@ -139,6 +139,7 @@ def scan(root, scanner):
     pv.write_json(result_path, {**identity, 'verified': False})
     start = time.monotonic()
     results = []
+    total_output = 0
     for index, name in enumerate(ADAPTER['sha256']):
         remaining = 120 - (time.monotonic() - start)
         if remaining <= 0: raise ValueError('scanner timeout')
@@ -149,6 +150,8 @@ def scan(root, scanner):
             raise ValueError('scanner did not finish')
         if output.is_symlink() or not output.is_file() or output.stat().st_size > 4*1024*1024:
             raise ValueError('invalid scanner output')
+        total_output += output.stat().st_size
+        if total_output > 4*1024*1024: raise ValueError('scanner output budget exceeded')
         result = pv.read_json(output)
         if not isinstance(result, dict) or result.get('sha256') != EXPECTED[name] or not isinstance(result.get('types'), list):
             raise ValueError('scanner identity mismatch')
@@ -224,6 +227,8 @@ def public_summary(raw, identity):
             if len(entries) != 1 or not isinstance(entries[0].get('overloads'), list) or len(entries[0]['overloads']) > 16:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
             signatures = []; edges = []; unreadable = False
+            if not target['found'] and entries[0]['overloads']:
+                complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
             for item in entries[0]['overloads']:
                 try:
                     if not isinstance(item, dict) or type(item.get('static')) is not bool or item.get('visibility') not in VISIBILITY:

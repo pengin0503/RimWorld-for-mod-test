@@ -60,13 +60,14 @@ public static class Scanner
                         foreach (var parameter in signature.ParameterTypes) parameters.Add(parameter);
                         var sites = new JsonArray();
                         var regions = new JsonArray();
+                        var branches = new JsonArray();
                         if (method.RelativeVirtualAddress != 0)
                         {
                             var body = pe.GetMethodBody(method.RelativeVirtualAddress);
                             byte[] il = body.GetILBytes() ?? throw new BadImageFormatException();
                             totalIl += il.Length;
                             if (il.Length > 65536 || totalIl > 1024 * 1024) throw new BadImageFormatException();
-                            DecodeIl(reader, il, sites, ref instructions, ref calls);
+                            DecodeIl(reader, il, sites, branches, ref instructions, ref calls);
                             foreach (var region in body.ExceptionRegions)
                                 regions.Add(new JsonObject { ["kind"] = region.Kind.ToString(), ["tryOffset"] = region.TryOffset, ["tryLength"] = region.TryLength, ["handlerOffset"] = region.HandlerOffset, ["handlerLength"] = region.HandlerLength });
                         }
@@ -74,7 +75,7 @@ public static class Scanner
                             ["parameters"] = parameters, ["genericCount"] = signature.GenericParameterCount,
                             ["static"] = (method.Attributes & MethodAttributes.Static) != 0,
                             ["visibility"] = (method.Attributes & MethodAttributes.MemberAccessMask).ToString(),
-                            ["calls"] = sites, ["exceptions"] = regions });
+                            ["calls"] = sites, ["branches"] = branches, ["exceptions"] = regions });
                     }
                 }
                 entries.Add(new JsonObject { ["name"] = methodName, ["overloads"] = overloads });
@@ -118,7 +119,7 @@ public static class Scanner
         return reader.GetString(type.Namespace) + "." + reader.GetString(type.Name);
     }
 
-    static void DecodeIl(MetadataReader reader, byte[] il, JsonArray sites, ref int instructions, ref int calls)
+    static void DecodeIl(MetadataReader reader, byte[] il, JsonArray sites, JsonArray branches, ref int instructions, ref int calls)
     {
         int pos = 0;
         while (pos < il.Length)
@@ -143,6 +144,23 @@ public static class Scanner
                 _ => throw new BadImageFormatException()
             };
             if (size < 0 || size > il.Length - pos) throw new BadImageFormatException();
+            if (op.OperandType == OperandType.ShortInlineBrTarget || op.OperandType == OperandType.InlineBrTarget)
+            {
+                int delta = size == 1 ? unchecked((sbyte)il[pos]) : BitConverter.ToInt32(il, pos);
+                long target = (long)pos + size + delta;
+                if (target < 0 || target >= il.Length) throw new BadImageFormatException();
+                branches.Add(new JsonObject { ["offset"] = offset, ["target"] = (int)target });
+            }
+            else if (op.OperandType == OperandType.InlineSwitch)
+            {
+                int count = BitConverter.ToInt32(il, pos);
+                for (int i = 0; i < count; i++)
+                {
+                    long target = (long)pos + size + BitConverter.ToInt32(il, pos + 4 + i * 4);
+                    if (target < 0 || target >= il.Length) throw new BadImageFormatException();
+                    branches.Add(new JsonObject { ["offset"] = offset, ["target"] = (int)target });
+                }
+            }
             if (op == OpCodes.Call || op == OpCodes.Callvirt || op == OpCodes.Newobj)
             {
                 if (++calls > 4096) throw new BadImageFormatException();

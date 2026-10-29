@@ -12,12 +12,23 @@ R2 Version.txtは1.7.4985 rev1269。調査のためのゲーム再取得はし�
 
 D専用の経路は、開始ポーンの思考付与、Game.FinalizeInit、単一マップの選択、Scenario.PostGameStart、
 History初期化、開始研究、GameComponent.StartedNewGameを行い、初期化のwhen-finished処理後に観測する。
-UI/環境音のマップ切替通知・カメラ移動・pause-on-loadの追加tickは省略する。対話シーンや保存は作らない。
+UI/環境音のマップ切替通知・カメラのフレーム更新/入力・pause-on-loadの追加tickは省略する。対話シーンや保存は作らない。
 ゲーム内部のPlaying状態と「ユーザーが遊べる起動入口」は別であり、製品は有限実行後に終了する。
 
 TickManager.DoSingleTickの実経路はゲームtick番号を更新し、世界・マップ・GameComponent等を処理する。
 WorkerのHost.Tickはフレーム処理なので回数を到達証拠にしない。DはTicksGameの実差分と、ゲームが呼ぶ
 fixture GameComponentのCounterを別に記録する。ゲームが捕捉してログへ変えた例外も完了にはしない。
+
+最初の私有実行では開始通知とtick0まで到達したが、1tick目の
+`GenTicks.GetCameraUpdateRate`からポーン/Thingの更新頻度計算がCameraDriverを参照して例外になった。
+ゲームDLLの実装からこの依存を確認し、D限定で実CameraDriverへ実Camera・開始地点・既定ズーム24を設定した。
+DriverはGameObjectへアタッチせず、Awake/Update/input/renderを登録しない。実際のInViewOf/CurrentZoom判定を
+使用し、成功する代用関数には置き換えない。UI.ApplyUIScaleで得たランタイムの論理画面寸法も記録する。
+この固定視点の影響を独立比較へ含めるまで、他の視点条件や任意MODの挙動を保証しない。
+
+初期化イベント内ではゲームの待機判定が変わるため、tickはlong eventとwhen-finishedが空になった後の
+メインフレームで進める。fixtureも全tickでこの前提を検査する。途中で新しいlong eventが必要なら、
+そのケースはincompleteで止め、要求外のイベント処理へ進まない。
 
 ## ローカル検証
 
@@ -40,7 +51,7 @@ fixture GameComponentのCounterを別に記録する。ゲームが捕捉して�
 
 - 公式Linuxの同じ開始条件と独立比較するまではDをexperimental/incompleteに保つ。
 - 比較方法は、同じ自作probeを公式headless quicktestで読み、StartedNewGame直後を相対0とし、
-  同じ0/60/600でprobe状態・実tick番号・開始通知を別経路で採取する。追加のpause-on-load tickを区別し、
+  同じ0/60/600でprobe状態・実tick番号・開始通知を別経路で採取する。固定視点の位置・ズーム24・寸法も合わせる。追加のpause-on-load tickを区別し、
   境界前後の余分な進行と診断も比較する。製品から公式実行ファイルを起動する機能にはしない。
 - 乱数で変わる自然物の個数を、厳密な一致や適格化の根拠にしない。
 - 必須API/資材がなければblocked。開始後の初期化不足・tick不整合・例外・上限・観測欠落はincomplete。

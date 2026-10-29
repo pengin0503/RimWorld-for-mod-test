@@ -191,14 +191,16 @@ Linux は画面を描画しません。固定ケース `bill-ingredient-options.
   ホストが値を加算せず、実ゲームのGameComponentTickがCounterを進める。対象MODは別のtargetとして指定する。
 - 既存のマップ生成完了後に、実Game.FinalizeInit、Scenario.PostGameStart、Historyの初期化、
   開始研究、GameComponent.StartedNewGameを行う。単一マップの選択はUI/環境音通知を省いて行い、
-  カメラ移動・pause-on-loadの追加tick・対話シーン・継続セーブは提供しない。
+  1.7の更新頻度判定が参照する実CameraDriverには、開始地点・既定ズーム24の固定状態を用意する。
+  driverは未アタッチで、Awake/Update・入力・描画を起動しない。UI.ApplyUIScaleでランタイムの論理画面寸法を読み、
+  正の寸法が得られなければ停止する。視点移動・pause-on-loadの追加tick・対話シーン・継続セーブは提供しない。
   ゲーム内部のProgramStateは有限実行の間Playingとなるが、通常起動や対話入口にはしない。
-- `TickManager.DoSingleTick`を1回ずつ呼び、毎回`TicksGame`の差がちょうど1であることを確認する。
-  `startTick/endTick/advanced`と、各`tick/gameTick/values`を記録し、最終点の後は進めない。
+- 初期化のlong eventとwhen-finished処理が空になってから、メインフレームで`TickManager.DoSingleTick`を1回ずつ呼び、毎回`TicksGame`の差がちょうど1であることを確認する。
+  `startTick/endTick/advanced`と、各`tick/gameTick/values`、固定視点の寸法・ズームを記録し、最終点の後は進めない。
   Controllerは実tick差分・観測順・件数・値の型を独立検査する。Workerの完了宣言だけで判定しない。
 - ゲームが内部で捕捉してログにしたtick例外も、Dの観測完了にはしない。観測点ごとにrunId/nonce付き
   `tick-evidence.json`を原子的に保存する。強制終了で最終結果がない場合、この途中証拠を回収するが、
-  最終tickまでの値があっても必ずincomplete。既存の実時間・メモリ・ログ制限と子孫回収を適用する。
+  最終tickまでの値があっても必ずincomplete。tick中に新しいlong eventが必要になったケースもincompleteで止める。既存の実時間・メモリ・ログ制限と子孫回収を適用する。
 - `stages.D`は観測完了でcompleted、確実な値の不一致でfailed／`tickObservationMismatch`、
   欠落・不明ID・例外・未到達でincomplete／`tickObservationIncomplete`。
   独立適格化は未完了のため、常に`dNotQualified`・全体experimental/incompleteを維持する。

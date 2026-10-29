@@ -19,6 +19,8 @@ namespace RWMT.TickProbe
         private readonly List<byte[]> memory = new List<byte[]>();
         public override void GameComponentTick()
         {
+            if (LongEventHandler.AnyEventNowOrWaiting)
+                throw new InvalidOperationException("RWMT tick executed before long events drained");
             if (Counter == 60)
             {
                 string mode = DefDatabase<TickProbeConfigDef>.GetNamedSilentFail("RWMT_TickConfig")?.mode;

@@ -55,6 +55,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
     private string? _tickInitialization;
     private string? _tickError;
     private int _tickErrorsBefore;
+    private bool _ticksReady;
 
     public int ExitCode { get; private set; } = 3;
 
@@ -233,18 +234,23 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
                 Finish("failed", "a scene change was requested; the worker never loads a playable scene");
                 return;
             }
-            // Only the map stage may create a Game, and it never starts play.
+            // Only the temporary map/D stages may own a Game; no interactive scene is started.
             if (_mapStage == null && api.CurrentGame.GetValue(null) != null)
             {
                 Finish("failed", "game code created a Game instance; the worker never enters play");
                 return;
+            }
+            if (_ticksReady && !api.AnyEventNowOrWaiting())
+            {
+                _ticksReady = false;
+                RunBoundedTicks();
             }
             api.AudioListenerSync();
             if (api.AudioBackendCurrent.GetValue(null) is object audio)
             {
                 api.AudioBackendUpdate.Invoke(audio, null);
             }
-            if (_markerRan && !api.AnyEventNowOrWaiting())
+            if (_markerRan && (request.Tick != null || !api.AnyEventNowOrWaiting()))
             {
                 Finish("completed", null);
                 return;
@@ -392,35 +398,40 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
                     diagnostics.Record("error", "Worker", "bounded tick initialization failed", error);
                 }
             }, async: false, handler: error => _tickError = error.ToString());
-            // The next long event runs after game-start when-finished callbacks.
-            Queue(() =>
-            {
-                Diagnostics.Stage = "tick.run";
-                try
-                {
-                    if (_tickError == null && _tickApi != null && _map?.Game is object game)
-                    {
-                        if (diagnostics.ErrorCount != _tickErrorsBefore)
-                            throw new InvalidOperationException("game initialization emitted an error");
-                        Func<long> probe = _tickApi.Probe(game);
-                        _ticks.Run(() => _tickApi.ReadTick(game), () =>
-                        {
-                            _tickApi.SingleTick(game);
-                            // The game's component utility catches exceptions and logs them.
-                            // They still invalidate completion even when the tick counter advanced.
-                            if (diagnostics.ErrorCount != _tickErrorsBefore)
-                                throw new InvalidOperationException("game tick emitted an error");
-                        }, probe, () => clock.Elapsed.TotalSeconds >= request.DeadlineSeconds
-                            || Volatile.Read(ref _finished) != 0, WriteTickCheckpoint);
-                    }
-                }
-                catch (Exception error) when (error is not OutOfMemoryException)
-                {
-                    _tickError = error.ToString();
-                }
-                _markerRan = true;
-            }, async: false, handler: error => { _tickError = error.ToString(); _markerRan = true; });
+            // Only arm execution here. Real ticks run from Host.Tick after the
+            // event queue and initialization callbacks have completely drained.
+            Queue(() => _ticksReady = true, async: false,
+                handler: error => { _tickError = error.ToString(); _markerRan = true; });
         }
+    }
+
+    private void RunBoundedTicks()
+    {
+        Diagnostics.Stage = "tick.run";
+        try
+        {
+            if (_tickError == null && _tickApi != null && _map?.Game is object game)
+            {
+                if (diagnostics.ErrorCount != _tickErrorsBefore)
+                    throw new InvalidOperationException("game initialization emitted an error");
+                Func<long> probe = _tickApi.Probe(game);
+                _ticks!.Run(() => _tickApi.ReadTick(game), () =>
+                {
+                    _tickApi.SingleTick(game);
+                    // Component exceptions may be caught and logged by the game.
+                    if (diagnostics.ErrorCount != _tickErrorsBefore)
+                        throw new InvalidOperationException("game tick emitted an error");
+                    if (api.AnyEventNowOrWaiting())
+                        throw new InvalidOperationException("tick queued a long event outside the fixed D case");
+                }, probe, () => clock.Elapsed.TotalSeconds >= request.DeadlineSeconds
+                    || Volatile.Read(ref _finished) != 0, WriteTickCheckpoint);
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _tickError = error.ToString();
+        }
+        _markerRan = true;
     }
 
     private Dictionary<string, object?> TickCheckpointEvidence()

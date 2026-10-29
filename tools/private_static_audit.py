@@ -208,6 +208,8 @@ TYPE_ATOMS = frozenset(('System.Action', 'System.Collections.Generic.List`1', 'S
 def normalized_type(node, depth=0):
     if depth >= 8 or not isinstance(node, dict): raise ValueError('unsupported type')
     kind = node.get('kind')
+    allowed = {'primitive': {'kind', 'name'}, 'named': {'kind', 'name'}, 'methodParameter': {'kind', 'index'}, 'typeParameter': {'kind', 'index'}, 'byref': {'kind', 'element'}, 'pointer': {'kind', 'element'}, 'array': {'kind', 'element', 'rank'}, 'generic': {'kind', 'element', 'arguments'}}
+    if kind not in allowed or set(node) != allowed[kind]: raise ValueError('invalid type schema')
     if kind == 'primitive' and node.get('name') in PRIMITIVES: return 'System.' + node['name']
     if kind == 'named' and node.get('name') in TYPE_ATOMS: return node['name']
     if kind in ('methodParameter', 'typeParameter') and type(node.get('index')) is int and 0 <= node['index'] < 32:
@@ -244,12 +246,13 @@ def public_summary(raw, identity):
         encoded = json.dumps(raw, allow_nan=False)
         finite = len(encoded.encode('utf-8')) <= 4*1024*1024
     except (ValueError, TypeError, RecursionError): finite = False
-    complete = binary and finite and len(source) == len(TARGETS)
+    complete = binary and finite and set(raw) == {'runId', 'commit', 'verified', 'types'} and len(source) == len(TARGETS)
     allowed_edges = {TARGET_NAMES[k] + '.' + n: (k, n) for k, values in TARGETS.items() for n in values}
     for target_id, names in TARGETS.items():
         matches = [x for x in source if isinstance(x, dict) and x.get('id') == target_id]
         if len(matches) != 1: complete = False; continue
         target = matches[0]
+        if set(target) != {'id', 'found', 'methods'}: complete = False
         if type(target.get('found')) is not bool or not isinstance(target.get('methods'), list):
             complete = False; continue
         methods = []
@@ -257,11 +260,13 @@ def public_summary(raw, identity):
             entries = [x for x in target['methods'] if isinstance(x, dict) and x.get('name') == name]
             if len(entries) != 1 or not isinstance(entries[0].get('overloads'), list) or len(entries[0]['overloads']) > 16:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
+            if set(entries[0]) != {'name', 'overloads'}: complete = False
             signatures = []; edges = []; overloads = []; unreadable = False; unreadable_tokens = []
             if not target['found'] and entries[0]['overloads']:
                 complete = False; methods.append({'name': name, 'status': 'unreadable', 'signatures': []}); continue
             for item in entries[0]['overloads']:
                 try:
+                    if isinstance(item, dict) and not set(item).issubset({'token', 'return', 'parameters', 'genericCount', 'static', 'visibility', 'calls', 'branches', 'exceptions'}): complete = False
                     if not isinstance(item, dict) or type(item.get('static')) is not bool or item.get('visibility') not in VISIBILITY:
                         raise ValueError('invalid method')
                     params = item.get('parameters'); generics = item.get('genericCount')
@@ -272,11 +277,22 @@ def public_summary(raw, identity):
                     if generics: signature += '<' + str(generics) + '>'
                     signature += ' (' + ', '.join(normalized_type(x) for x in params) + ')'
                     if len(signature) > 2048: raise ValueError('signature too long')
+                    branches = item.get('branches', [])
+                    regions = item.get('exceptions', [])
+                    if not isinstance(branches, list) or len(branches) > 100000 or not isinstance(regions, list) or len(regions) > 65536:
+                        raise ValueError('invalid control flow')
+                    for branch in branches:
+                        if not isinstance(branch, dict) or set(branch) != {'offset', 'target'} or any(type(branch[k]) is not int or not 0 <= branch[k] < 65536 for k in ('offset', 'target')):
+                            raise ValueError('invalid branch')
+                    for region in regions:
+                        keys = {'kind', 'tryOffset', 'tryLength', 'handlerOffset', 'handlerLength'}
+                        if not isinstance(region, dict) or set(region) != keys or region['kind'] not in ('Catch', 'Filter', 'Finally', 'Fault') or any(type(region[k]) is not int or not 0 <= region[k] <= 65536 for k in keys - {'kind'}):
+                            raise ValueError('invalid exception region')
                     callsites = item.get('calls')
                     if not isinstance(callsites, list) or len(callsites) > 4096: raise ValueError('invalid calls')
                     safe_edges = []
                     for call in callsites:
-                        if not isinstance(call, dict) or type(call.get('offset')) is not int or not 0 <= call['offset'] < 65536 or call.get('kind') not in ('call', 'callvirt', 'newobj'):
+                        if not isinstance(call, dict) or set(call) != {'offset', 'kind', 'target'} or type(call.get('offset')) is not int or not 0 <= call['offset'] < 65536 or call.get('kind') not in ('call', 'callvirt', 'newobj'):
                             raise ValueError('invalid call')
                         edge = allowed_edges.get(call.get('target'))
                         if edge: safe_edges.append({'typeId': edge[0], 'methodId': edge[1], 'kind': call['kind'], 'offset': call['offset']})

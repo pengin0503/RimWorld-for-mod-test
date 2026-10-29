@@ -1,0 +1,69 @@
+name: Private Linux qualification experiments
+on:
+  push:
+    branches: [research/linux-d-qualification-cow-20261029]
+    paths: ['experiments/**', 'tests/**', '.github/workflows/linux-private-qualification.yml']
+permissions:
+  contents: read
+jobs:
+  cow-measurement:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Create a dedicated disposable COW filesystem
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y btrfs-progs
+          truncate -s 3G "$RUNNER_TEMP/rwmt-cow.img"
+          mkfs.btrfs -q -f "$RUNNER_TEMP/rwmt-cow.img"
+          mkdir "$RUNNER_TEMP/rwmt-cow-mount"
+          sudo mount -o loop,compress=no "$RUNNER_TEMP/rwmt-cow.img" "$RUNNER_TEMP/rwmt-cow-mount"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/rwmt-cow-mount"
+      - name: Compare verified copying with native COW on the same files
+        run: python experiments/cow-measurement/measure.py --root "$RUNNER_TEMP/rwmt-cow-mount/measurement" --summary "$RUNNER_TEMP/cow-summary.json"
+      - name: Unmount disposable filesystem
+        if: always()
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/rwmt-cow-mount"; then sudo umount "$RUNNER_TEMP/rwmt-cow-mount"; fi
+  tick-comparison:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - run: python -m pip install -r requirements-r2-sdk.txt
+      - name: Prepare one private runtime
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: rimworld-17
+          AWS_DEFAULT_REGION: auto
+          RWMT_R2_TRANSPORT: sdk
+        run: |
+          python tools/codex_workflow.py prepare --private-root "$RUNNER_TEMP/rwmt-private" > "$RUNNER_TEMP/private-prepare.log" 2>&1 || { echo 'Private preparation failed'; exit 1; }
+      - name: Build Worker and obtain the pinned comparison library
+        run: |
+          dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+          curl --fail --silent --show-error --max-time 90 https://api.nuget.org/v3-flatcontainer/lib.harmony/2.4.3/lib.harmony.2.4.3.nupkg -o "$RUNNER_TEMP/harmony.nupkg"
+          python -c 'import zipfile,os; zipfile.ZipFile(os.environ["RUNNER_TEMP"]+"/harmony.nupkg").extract("lib/net10.0/0Harmony.dll",os.environ["RUNNER_TEMP"]+"/harmony")'
+      - name: Independent finite ticks without cloud credentials
+        run: |
+          python experiments/official-comparison/compare_ticks.py --snapshot "$RUNNER_TEMP/rwmt-private/game-snapshot" --harmony-dll "$RUNNER_TEMP/harmony/lib/net10.0/0Harmony.dll" --out "$RUNNER_TEMP/rwmt-private/comparison" > "$RUNNER_TEMP/private-comparison.log" 2>&1 || { echo 'Independent comparison did not qualify D'; exit 1; }
+      - name: Publish whitelisted comparison only
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/rwmt-private/comparison/safe-summary.json"; then cat "$RUNNER_TEMP/rwmt-private/comparison/safe-summary.json"; else echo 'No comparison summary'; fi

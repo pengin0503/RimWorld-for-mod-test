@@ -369,6 +369,15 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(result['acquisition'], {'files': 2, 'bytes': 118, 'downloadedBytes': 18, 'reusedBytes': 100, 'seconds': 1.25})
             self.assertTrue(result['binaryVerified'])
             self.assertEqual(result['staticAuditStatus'], 'incomplete')
+        self.assertFalse(result['memoryHard'])
+
+    def test_oversized_public_result_degrades_to_safe_incomplete(self):
+        identity = a.pv.current_identity(ENV)
+        rendered = a.serialize_summary({**identity, 'binaryVerified': True, 'types': ['PRIVATE' * 100000]}, identity)
+        self.assertLess(len(rendered.encode()), 512 * 1024)
+        self.assertNotIn('PRIVATE', rendered)
+        self.assertEqual(json.loads(rendered)['staticAuditStatus'], 'incomplete')
+        self.assertFalse(json.loads(rendered)['c0Passed'])
 
     def test_wrong_ref_does_not_contact_r2(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{**ENV,'GITHUB_REF':'refs/heads/other'},clear=True), patch.object(a.cw,'r2_session',side_effect=AssertionError('R2 contacted')):

@@ -292,7 +292,7 @@ def public_summary(raw, identity):
         if len(target['methods']) != len(names): complete = False
         rows.append({'id': target_id, 'status': 'found' if target['found'] else 'missing', 'methods': methods})
     return {**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269', 'binaryVerified': binary,
-            'verified': binary, 'staticAuditStatus': 'completed' if complete else 'incomplete', 'c0Passed': False, 'types': rows}
+            'verified': binary, 'staticAuditStatus': 'completed' if complete else 'incomplete', 'c0Passed': False, 'memoryHard': False, 'types': rows}
 
 
 def publish(root):
@@ -318,6 +318,17 @@ def publish(root):
     return summary
 
 
+def serialize_summary(summary, identity):
+    try:
+        text = json.dumps(summary, allow_nan=False)
+        if len(text.encode('utf-8')) <= 512*1024: return text
+    except (ValueError, TypeError, RecursionError):
+        pass
+    return json.dumps({**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269',
+                       'binaryVerified': summary.get('binaryVerified') is True if isinstance(summary, dict) else False,
+                       'staticAuditStatus': 'incomplete', 'c0Passed': False, 'memoryHard': False, 'budgetExceeded': True, 'types': []})
+
+
 def main():
     import argparse
     import json
@@ -333,8 +344,7 @@ def main():
         scan(Path(args.private_root), Path(args.scanner).resolve())
     else:
         summary = publish(Path(args.private_root))
-        text = json.dumps(summary, allow_nan=False)
-        if len(text.encode()) > 512*1024: raise ValueError('public summary budget exceeded')
+        text = serialize_summary(summary, pv.current_identity())
         print(text)
         output = os.environ.get('GITHUB_STEP_SUMMARY')
         if output:

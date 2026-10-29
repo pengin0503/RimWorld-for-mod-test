@@ -19,7 +19,7 @@ RimWorld を通常起動できない環境でも、作成した MOD を実物の
 | Windows での実ゲーム検証 | 未対応（`run` は `blocked`）。Linux の結果を Windows の保証にしない |
 | 標準 .NET での実行 | 実験扱い（常に `incomplete`）。WaylithClr との実害のある差を確認済み |
 | マップ生成（`map`） | Linux x86_64 で実装・適格化済み。ロード後に一時的なワールドとマップを 1 枚生成し、模式図の画像・内容・期待値の判定を出す。このビルドのマップ生成は同じ種でも毎回少し違う（公式も同じ）ため、公式 quick test と各 5 回の分布で比較。[マップ生成の適格化](docs/research/map-qualification.md) |
-| C：指定動作テスト | 新規 Bill の材料表示候補/許可状態のみ実装（Linux 非描画・experimental、適格化未完了）。[契約](docs/contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental) |
+| C：指定動作テスト | 新規 Bill の材料表示候補/許可状態と、自作fixture限定のイベント選択肢を実装（Linux 非描画・experimental、独立適格化未完了）。任意イベント/クエストは未対応。[契約](docs/contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental) |
 | D：ゲーム開始後・tick | Linux対応ビルドの有限tick基盤 `bounded-tick.v1` を実装（experimental）。自作fixture観測に限定、独立適格化は未完了。[契約](docs/contracts/mod-validation-v1.md#d有限-ticklinuxexperimental) |
 | 入力監査 CLI | 実装済み。ZIP・XML 構文・manifest を検査 |
 | MOD 事前検査 CLI / Windows 画面 | 実装済み。静的検査のみ（`gameVerification=notRun`） |
@@ -40,7 +40,7 @@ AI の通常の検証先は Linux、Windows 向けの新規開発は中止し、
 - [入力監査 CLI](docs/offline-input-audit.md)：Python 3.12+、外部パッケージ不要。
 - [資材の現状と必要性の確認方針](docs/linux-files-needed.md)：Linux 一式を待つことと、工程別の不足を調べることを区別。
 
-実装済みの範囲は A：Defs・XML パッチ・選択言語・参照解決・公式の Def 検査、B：DLL 初期化と期待した Harmony 登録です。C：指定動作テストは後段、D：一時世界・限定 tick はLinuxの固定fixtureでexperimentalとして実装しています。ロード成功や Harmony 登録だけで、MOD の全機能が正しいとは判定しません。
+実装済みの範囲は A：Defs・XML パッチ・選択言語・参照解決・公式の Def 検査、B：DLL 初期化と期待した Harmony 登録です。Cは材料候補と自作イベントの固定ケースをexperimentalとして実装済みです。D：一時世界・限定 tick はLinuxの固定fixtureでexperimentalとして実装しています。ロード成功や Harmony 登録だけで、MOD の全機能が正しいとは判定しません。
 
 ## 受領資料と調査記録
 
@@ -62,7 +62,7 @@ AI の通常の検証先は Linux、Windows 向けの新規開発は中止し、
 
 ## Cloudflare R2 からのオンデマンド資材取得
 
-[Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。Codex Cloud からの接続は確認済みですが、GitHub Actions 側の Secrets 設定・実接続は別途確認が必要です。
+[Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。Codex Cloudと私有GitHub Actionsからの実接続・限定取得は実測済みです。資材準備だけに認証情報を渡し、検証実行へは渡しません。
 
 ## Codex Cloud での R2 参照・MOD 検証
 
@@ -71,3 +71,5 @@ AI の通常の検証先は Linux、Windows 向けの新規開発は中止し、
 2026-10-26 にコミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified`。その後、R2 直下の `rimworld-mod-index.zip` を取得し、索引照合・1.7 向け限定取得を経た Harmony の A 検証も `passed / completed / qualified`（6ファイル・約2.55 MB、ゲーム再取得なし）。既定の索引キーも実配置へ修正しました。[Codex Cloud の実測記録](docs/research/2026-10-26-codex-cloud-a-validation.md) に成功範囲と残作業を分けて記録しています。
 
 限定取得はゲームの有効ロードフォルダ・条件・版別依存に合わせて計画し、判断できない場合は `blocked` にします。VPE と Harmony・VEF、Core＋Royalty・英語の A 検証で、限定取得と全取得のロード順・実フォルダ・Def 数・診断が一致しました。[限定取得の比較記録](docs/research/2026-10-26-limited-fetch-parity.md)を参照してください。
+
+2026-10-29：PR27のCOW実測・D独立比較、PR28の[次の5作業の計画](docs/superpowers/plans/2026-10-29-linux-validation-next.md)をmainへ統合済みです。COWは[専用Btrfsで実測](docs/research/2026-10-29-cow-filesystem-measurement.md)、Dは[公式比較の視点・診断差](docs/research/2026-10-29-bounded-tick-independent-comparison.md)が残り未適格です。

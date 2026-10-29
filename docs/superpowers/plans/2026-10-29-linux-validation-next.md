@@ -7,7 +7,11 @@
 **Tech Stack:** 現行Python/Worker/GitHub Actions/R2読取の構成を維持する。
 **Spec:** [共通設計・制約・判断理由](../specs/2026-10-29-linux-validation-next-design.md)。提案段階、実装未着手。
 
-## 現状と前提
+## 実装着手時の追記（2026-10-29）
+
+ユーザーが既存PRの全マージと実装開始を指示。PR27は2f5df30、PR28はb66bcf9でmainへ統合済み。以下の計画作成時の記述は履歴として保持する。P1から順次着手し、新規PRのマージは別途指示を待つ。
+
+## 現状と前提（計画作成時）
 
 2026-10-29のmainは6601383（PR26まで）。[PR27](https://github.com/pengin0503/RimWorld-for-mod-test/pull/27)は未マージ。
 COWの専用Btrfs実測はPR27で完了。Dの60/600/600の実tick等は一致したが視点・診断差で独立適格化は不合格。

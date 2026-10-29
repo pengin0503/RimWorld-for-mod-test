@@ -37,10 +37,9 @@ using (var pe = new PEReader(new MemoryStream(invalid)))
     var section = pe.PEHeaders.SectionHeaders[pe.PEHeaders.GetContainingSectionIndex(rva)];
     int header = section.PointerToRawData + rva - section.VirtualAddress;
     int headerSize = (invalid[header] & 3) == 2 ? 1 : (invalid[header + 1] >> 4) * 4;
-    invalid[header + headerSize] = 0xfe;
-    invalid[header + headerSize + 1] = 0xff;
+    invalid[header + headerSize] = 0xff;
 }
-try { Scanner.Scan(invalid, Hash(invalid)); throw new Exception("invalid opcode accepted"); }
+try { Scanner.Scan(invalid, Hash(invalid)); throw new Exception("reserved opcode accepted"); }
 catch (BadImageFormatException) { }
 Console.WriteLine("synthetic PE checks passed");
 

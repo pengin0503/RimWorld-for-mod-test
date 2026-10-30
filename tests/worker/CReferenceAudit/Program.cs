@@ -11,6 +11,8 @@ using (var core = new PEReader(File.OpenRead(typeof(Exception).Assembly.Location
     var metadata = core.GetMetadataReader();
     var handle = metadata.TypeDefinitions.Single(h => metadata.GetString(metadata.GetTypeDefinition(h).Namespace) == "System" && metadata.GetString(metadata.GetTypeDefinition(h).Name) == "Exception");
     Require((string?)CandidateCatalog.Match(metadata, handle)?["id"] == "exception", "core candidate missing");
+    var enumerator = metadata.TypeDefinitions.Single(h => metadata.GetString(metadata.GetTypeDefinition(h).Namespace) == "System.Collections" && metadata.GetString(metadata.GetTypeDefinition(h).Name) == "IEnumerator");
+    Require((string?)CandidateCatalog.Match(metadata, enumerator)?["id"] == "ienumerator", "enumerator candidate missing");
 }
 string path = typeof(Verse.Game).Assembly.Location;
 byte[] image = File.ReadAllBytes(path);
@@ -21,13 +23,22 @@ using (var own = new PEReader(new MemoryStream(image)))
     var metadata = own.GetMetadataReader();
     var handle = metadata.TypeDefinitions.Single(h => metadata.GetString(metadata.GetTypeDefinition(h).Namespace) == "RimWorld" && metadata.GetString(metadata.GetTypeDefinition(h).Name) == "IncidentParms");
     Require(CandidateCatalog.Match(metadata, handle) is null, "same name from wrong assembly accepted");
+    var nestedHandle = metadata.TypeDefinitions.Single(h => metadata.GetString(metadata.GetTypeDefinition(h).Name) == "UIState");
+    Require(MetadataIdentity.Read(metadata, nestedHandle).Name == "Verse.ThingFilterUI+UIState", "nested candidate identity changed");
+    Require(CandidateCatalog.Match(metadata, nestedHandle) is null, "nested candidate wrong assembly accepted");
 }
 JsonObject result = Scanner.Scan(image, Hash(image));
 Require(!File.Exists(marker), "static constructor was executed");
 var game = result["types"]!.AsArray().Single(t => (string?)t!["id"] == "game")!;
 var init = game["methods"]!.AsArray().Single(t => (string?)t!["name"] == "InitNewGame")!;
 var overloads = init["overloads"]!.AsArray();
-Require(overloads.Count == 5, "overload loss");
+Require(overloads.Count == 7, "overload loss");
+var nested = overloads.Single(o => o!["parameters"]!.AsArray().Count == 2)!["parameters"]!.AsArray();
+Require((string?)nested[0]!["name"] == "Verse.Outer+Inner", "nested definition lost declaring type");
+Require((string?)nested[1]!["name"] == "Verse.Inner", "top level name changed");
+Require((int?)nested[0]!["metadata"]!["depth"] == 1 && (string?)nested[0]!["metadata"]!["handle"] == "definition", "definition metadata missing");
+var external = overloads.SelectMany(o => o!["parameters"]!.AsArray()).Single(n => (string?)n?["name"] == "System.Environment+SpecialFolder")!;
+Require((int?)external["metadata"]!["depth"] == 1 && (string?)external["metadata"]!["scope"] == "assembly", "nested reference metadata missing");
 Require(init.ToJsonString().Contains("byref") && init.ToJsonString().Contains("array"), "signature loss");
 Require(overloads.Any(o => (int?)o!["genericCount"] == 1), "generic signature loss");
 Require(overloads.Any(o => o!["branches"]!.AsArray().Count > 0), "branch metadata missing");
@@ -65,9 +76,14 @@ namespace Verse
         public void InitNewGame<T>(T value) { Console.WriteLine(value); }
         public void InitNewGame(bool value) { if (value) Console.WriteLine(value); }
         public void InitNewGame(long value) { FinalizeInit<long>(); }
+        public void InitNewGame(Outer.Inner value, Inner other) { }
+        public void InitNewGame(Environment.SpecialFolder value) { }
         public void FinalizeInit() { }
         public void FinalizeInit<T>() { }
     }
+    public class Outer { public class Inner { } }
+    public class Inner { }
+    public class ThingFilterUI { public class UIState { } }
 }
 
 namespace RimWorld { public class IncidentParms { } }

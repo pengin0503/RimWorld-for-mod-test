@@ -217,6 +217,10 @@ TYPE_ATOMS = frozenset(('System.Action`1', 'System.Exception', 'System.Nullable`
 
 def normalized_type(node, depth=0):
     if depth >= 8 or not isinstance(node, dict): raise ValueError('unsupported type')
+    from tools.signature_diagnostics import valid_metadata
+    if node.get('kind') == 'named' and 'metadata' in node:
+        if not valid_metadata(node['metadata']): raise ValueError('invalid type metadata')
+        node = {k: v for k, v in node.items() if k != 'metadata'}
     kind = node.get('kind')
     allowed = {'primitive': {'kind', 'name'}, 'named': {'kind', 'name'}, 'methodParameter': {'kind', 'index'}, 'typeParameter': {'kind', 'index'}, 'byref': {'kind', 'element'}, 'pointer': {'kind', 'element'}, 'array': {'kind', 'element', 'rank'}, 'generic': {'kind', 'element', 'arguments'}}
     if kind not in allowed or set(node) != allowed[kind]: raise ValueError('invalid type schema')
@@ -248,7 +252,8 @@ VISIBILITY = {'Public': 'public', 'Private': 'private', 'Family': 'family', 'Ass
 
 CANDIDATES = {'action-1': ('System.Private.CoreLib.dll',1), 'exception': ('System.Private.CoreLib.dll',0),
               'nullable-1': ('System.Private.CoreLib.dll',1), 'bill': ('Assembly-CSharp.dll',0),
-              'incident-parms': ('Assembly-CSharp.dll',0), 'thing-category': ('Assembly-CSharp.dll',0)}
+              'incident-parms': ('Assembly-CSharp.dll',0), 'thing-category': ('Assembly-CSharp.dll',0),
+              'ienumerator': ('System.Private.CoreLib.dll',0), 'filter-ui-state': ('Assembly-CSharp.dll',0)}
 
 
 def valid_candidate_record(row):
@@ -273,6 +278,7 @@ def method_reasons(item):
 
 
 def public_summary(raw, identity):
+    from tools.signature_diagnostics import unsupported_positions
     raw = raw if isinstance(raw, dict) else {}
     bound = all(raw.get(k) == v for k, v in identity.items())
     binary = bound and raw.get('verified') is True
@@ -348,7 +354,8 @@ def public_summary(raw, identity):
             if reason_codes: unreadable = True
             if unreadable: complete = False
             methods.append({'name': name, 'status': 'unreadable' if unreadable else 'found' if signatures else 'missing',
-                            'signatures': signatures, 'calls': edges, 'overloads': overloads, 'unreadableTokens': unreadable_tokens, 'reasons': sorted(reason_codes)})
+                            'signatures': signatures, 'calls': edges, 'overloads': overloads, 'unreadableTokens': unreadable_tokens, 'reasons': sorted(reason_codes),
+                            'unsupportedTypes': unsupported_positions(entries[0]['overloads'], TYPE_ATOMS)})
         if len(target['methods']) != len(names): complete = False
         rows.append({'id': target_id, 'status': 'found' if target['found'] else 'missing', 'methods': methods})
     return {**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269', 'binaryVerified': binary,

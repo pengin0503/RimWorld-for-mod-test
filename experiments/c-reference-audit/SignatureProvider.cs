@@ -27,15 +27,15 @@ sealed class SignatureProvider : ISignatureTypeProvider<JsonNode, object?>
     public JsonNode GetSZArrayType(JsonNode elementType) => new JsonObject { ["kind"] = "array", ["element"] = elementType, ["rank"] = 1 };
     public JsonNode GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind)
     {
-        var t = reader.GetTypeDefinition(handle);
+        var identity = MetadataIdentity.Read(reader, handle);
         if (CandidateCatalog.Match(reader, handle) is JsonObject match) { match["kind"]="definitionUse"; Candidates.Add(match); }
-        return new JsonObject { ["kind"] = "named", ["name"] = reader.GetString(t.Namespace) + "." + reader.GetString(t.Name) };
+        return new JsonObject { ["kind"] = "named", ["name"] = identity.Name, ["metadata"] = identity.PublicShape() };
     }
     public JsonNode GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind)
     {
-        var t = reader.GetTypeReference(handle);
+        var identity = MetadataIdentity.Read(reader, handle);
         if (CandidateCatalog.Match(reader, handle) is JsonObject match) Candidates.Add(match);
-        return new JsonObject { ["kind"] = "named", ["name"] = reader.GetString(t.Namespace) + "." + reader.GetString(t.Name) };
+        return new JsonObject { ["kind"] = "named", ["name"] = identity.Name, ["metadata"] = identity.PublicShape() };
     }
     public JsonNode GetTypeFromSpecification(MetadataReader reader, object? genericContext, TypeSpecificationHandle handle, byte rawTypeKind) => reader.GetTypeSpecification(handle).DecodeSignature(this, genericContext);
 }

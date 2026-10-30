@@ -16,3 +16,8 @@ class CandidateTests(unittest.TestCase):
         base={'module':'Assembly-CSharp.dll','sha256':audit.EXPECTED['Assembly-CSharp.dll'],'id':'incident-parms','kind':'definitionUse','arity':0}
         for changes in [{'arity':1},{'module':'RimWorld.dll','sha256':audit.EXPECTED['RimWorld.dll']},{'PRIVATE':'secret'}]:
             self.assertEqual(audit.candidate_summary([{**base,**changes}]),[])
+
+    def test_duplicate_definitions_remain_unresolved(self):
+        source={'module':'Assembly-CSharp.dll','sha256':audit.EXPECTED['Assembly-CSharp.dll'],'id':'exception','kind':'reference','arity':0}
+        target={'module':'System.Private.CoreLib.dll','sha256':audit.EXPECTED['System.Private.CoreLib.dll'],'id':'exception','kind':'definition','arity':0}
+        self.assertEqual(audit.candidate_summary([source,target,target]),[{'id':'exception','status':'unresolved'}])

@@ -262,7 +262,7 @@ def candidate_summary(evidence):
         if row['kind'] in ('definitionUse','definition') and module!=CANDIDATES[ident][0]:continue
         valid.append(row)
     used={r['id'] for r in valid if r['kind']!='definition'}
-    return [{'id':ident,'status':'matched' if any(r['id']==ident and r['kind']=='definition' for r in valid) else 'unresolved'} for ident in sorted(used)]
+    return [{'id':ident,'status':'matched' if sum(r['id']==ident and r['kind']=='definition' for r in valid)==1 else 'unresolved'} for ident in sorted(used)]
 
 
 def method_reasons(item):

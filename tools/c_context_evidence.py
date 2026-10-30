@@ -9,7 +9,8 @@ STEAM_SHA256 = 'ee86ee64a1f2a1aad52ddca667ce8b7063ddaa952ce7a9c13ab5969a9d122eca
 STAGES = ('game', 'bill', 'binding', 'hooks', 'dialog', 'pane', 'complete')
 EXCEPTIONS = ('none', 'missingApi', 'ambiguousApi', 'typeInitialization', 'nullReference', 'runtimeOther')
 DIAGNOSTIC_TAGS = ('dependency', 'downloadUrl', 'description', 'packageId', 'supportedVersions',
-                   'url', 'exception', 'graphics', 'GUI', 'window', 'patch', 'Harmony')
+                   'url', 'exception', 'graphics', 'GUI', 'window', 'patch', 'Harmony',
+                   'Steam', 'NativeAllocationRuntime', 'Texture', 'camera', 'audio', 'frame', 'config')
 
 
 def diagnostic_summary(evidence):

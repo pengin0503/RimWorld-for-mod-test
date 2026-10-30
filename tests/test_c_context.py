@@ -147,6 +147,8 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(summary['errorCount'], 2)
         self.assertIn('dependency', summary['kinds'][0])
         self.assertNotIn('PRIVATE', json.dumps(summary))
+        self.assertIn('Steam', context.diagnostic_summary({'exitCode': 0, 'interrupted': False,
+            'errors': ['PRIVATE Steam startup failure']})['kinds'][0])
         row = {'phase': 'material', 'freshGame': True, 'newBill': True, 'pane': 0,
                'ui': 0, 'listing': 0, 'row': 0, 'returned': False, 'exception': True,
                'allowed': False, 'setupStage': 'dialog', 'exceptionKind': 'nullReference'}

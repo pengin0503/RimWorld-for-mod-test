@@ -25,3 +25,9 @@ class CandidateTests(unittest.TestCase):
     def test_native_runtime_is_not_a_metadata_source(self):
         row={'module':'libcoreclr.so','sha256':audit.EXPECTED['libcoreclr.so'],'id':'exception','kind':'reference','arity':0}
         self.assertEqual(audit.candidate_summary([row]),[])
+
+    def test_invalid_supplemental_evidence_prevents_audit_completion(self):
+        identity={'runId':'100-1','commit':'a'*40}
+        types=[{'id':key,'found':False,'methods':[{'name':name,'overloads':[]} for name in names]} for key,names in audit.TARGETS.items()]
+        raw={**identity,'verified':True,'types':types,'candidateEvidence':[{'id':'PRIVATE'}]}
+        self.assertEqual(audit.public_summary(raw,identity)['staticAuditStatus'],'incomplete')

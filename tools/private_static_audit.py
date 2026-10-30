@@ -250,17 +250,18 @@ CANDIDATES = {'action-1': ('System.Private.CoreLib.dll',1), 'exception': ('Syste
               'incident-parms': ('Assembly-CSharp.dll',0), 'thing-category': ('Assembly-CSharp.dll',0)}
 
 
+def valid_candidate_record(row):
+    if not isinstance(row,dict) or set(row)!={'id','kind','arity','module','sha256'}:return False
+    ident=row.get('id');module=row.get('module')
+    if not isinstance(ident,str) or ident not in CANDIDATES or not isinstance(module,str) or module not in (*MANAGED_NAMES, 'System.Private.CoreLib.dll'):return False
+    if row['sha256']!=EXPECTED[module] or type(row['arity']) is not int or row['arity']!=CANDIDATES[ident][1]:return False
+    if row['kind'] not in ('reference','definitionUse','definition'):return False
+    return row['kind']=='reference' or module==CANDIDATES[ident][0]
+
+
 def candidate_summary(evidence):
     if not isinstance(evidence,list) or len(evidence)>4096:return []
-    valid=[]
-    for row in evidence:
-        if not isinstance(row,dict) or set(row)!={'id','kind','arity','module','sha256'}:continue
-        ident=row.get('id');module=row.get('module')
-        if not isinstance(ident,str) or ident not in CANDIDATES or not isinstance(module,str) or module not in (*MANAGED_NAMES, 'System.Private.CoreLib.dll'):continue
-        if row['sha256']!=EXPECTED[module] or type(row['arity']) is not int or row['arity']!=CANDIDATES[ident][1]:continue
-        if row['kind'] not in ('reference','definitionUse','definition'):continue
-        if row['kind'] in ('definitionUse','definition') and module!=CANDIDATES[ident][0]:continue
-        valid.append(row)
+    valid=[row for row in evidence if valid_candidate_record(row)]
     used={r['id'] for r in valid if r['kind']!='definition'}
     return [{'id':ident,'status':'matched' if sum(r['id']==ident and r['kind']=='definition' for r in valid)==1 else 'unresolved'} for ident in sorted(used)]
 
@@ -281,6 +282,8 @@ def public_summary(raw, identity):
         finite = len(encoded.encode('utf-8')) <= 4*1024*1024
     except (ValueError, TypeError, RecursionError): finite = False
     complete = binary and finite and set(raw).issubset({'runId', 'commit', 'verified', 'types', 'candidateEvidence'}) and len(source) == len(TARGETS)
+    evidence=raw.get('candidateEvidence',[])
+    if not isinstance(evidence,list) or len(evidence)>4096 or not all(valid_candidate_record(row) for row in evidence):complete=False
     allowed_edges = {TARGET_NAMES[k] + '.' + n: (k, n) for k, values in TARGETS.items() for n in values}
     for target_id, names in TARGETS.items():
         matches = [x for x in source if isinstance(x, dict) and x.get('id') == target_id]

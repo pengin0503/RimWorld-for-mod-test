@@ -1,0 +1,11 @@
+# C署名公開型の許可範囲拡張
+
+2026-10-30。ユーザーは、許可範囲を広げて改善する場合の拡張を明示的に承認した。
+従来の「実物候補照合でmatchedの型だけ」という採用条件を、公開する名前が事前に決まっている一般的な型について緩和する。
+
+追加はSystem.Action`1、System.Exception、System.Nullable`1、Verse.ThingCategoryDefの4完全名だけ。
+前2型は既存WorkerのQueueLongEvent/GenerateMapのbindingでも使用している。後2型は事前定義した調査候補であり、実物署名での出現は再監査で確認する。
+名前の公開許可と、その型の参照先assemblyを実証したことは区別する。候補照合のmatched条件は変更しない。
+
+namespace全体や任意文字列は許可しない。固定8入力のhash確認、JSON構造・enum検査、深さや容量・時間の制限、秘密情報の非公開、C0=falseは維持する。
+公開型拡張で静的結果がcompletedになってもCの独立適格化を意味しない。

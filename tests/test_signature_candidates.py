@@ -32,8 +32,8 @@ class CandidateTests(unittest.TestCase):
         raw={**identity,'verified':True,'types':types,'candidateEvidence':[{'id':'PRIVATE'}]}
         self.assertEqual(audit.public_summary(raw,identity)['staticAuditStatus'],'incomplete')
 
-    def test_only_binary_matched_game_atoms_are_adopted(self):
-        for name in ('RimWorld.Bill','RimWorld.IncidentParms'):
+    def test_user_approved_fixed_atoms_and_unknown_name_rejection(self):
+        for name in ('RimWorld.Bill','RimWorld.IncidentParms','System.Action`1','System.Exception','System.Nullable`1','Verse.ThingCategoryDef'):
             self.assertEqual(audit.normalized_type({'kind':'named','name':name}),name)
-        for name in ('System.Action`1','System.Exception','System.Nullable`1','Verse.ThingCategoryDef','PRIVATE.Secret'):
+        for name in ('PRIVATE.Secret','System.PRIVATE','Verse.PRIVATE'):
             with self.assertRaises(ValueError):audit.normalized_type({'kind':'named','name':name})

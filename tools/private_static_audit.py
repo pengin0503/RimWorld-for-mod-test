@@ -207,6 +207,7 @@ def scan(root, scanner):
 
 PRIMITIVES = frozenset(('Void', 'Boolean', 'Char', 'SByte', 'Byte', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Single', 'Double', 'String', 'Object', 'IntPtr', 'UIntPtr'))
 TYPE_ATOMS = frozenset(('System.Action', 'System.Collections.Generic.List`1', 'System.Collections.Generic.IEnumerable`1',
+    'RimWorld.Bill', 'RimWorld.IncidentParms',
     'Verse.Game', 'Verse.MapGenerator', 'Verse.LongEventHandler', 'RimWorld.Dialog_BillConfig', 'Verse.ThingFilterUI',
     'Verse.Listing_TreeThingFilter', 'RimWorld.BillUtility', 'RimWorld.IncidentWorker', 'Verse.DiaOption',
     'Verse.ThingFilter', 'Verse.ThingDef', 'Verse.SpecialThingFilterDef', 'Verse.TreeNode_ThingCategory',

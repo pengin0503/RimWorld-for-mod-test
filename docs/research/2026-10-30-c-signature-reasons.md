@@ -10,3 +10,9 @@ GenerateMap、QueueLongEvent、DoThingFilterConfigWindow、MakeNewBill、TryExec
 次の照合では候補をSystem.Action`1、System.Exception、System.Nullable`1、RimWorld.Bill、RimWorld.IncidentParms、Verse.ThingCategoryDefに固定する。Action/Exception/IncidentParmsは既存WorkerのAPI binding、BillはMakeNewBillの戻り型の候補、Nullable/ThingCategoryDefはフィルターAPIの調査候補であり、実DLLで確認済みとは扱わない。
 
 照合は完全型名・assembly・generic arityを検査し、固定IDのみを記録する。参照元と定義元のmodule hashを確認し、定義欠落・重複・入替はmatchedにしない。候補一致だけでは型集合を自動追加しない。CoreLibは既存の固定8入力の一部をmetadataとして読むため、追加ダウンロードは不要。
+
+## 候補照合の実物結果
+
+[監査#3](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/40977760070)（main17a0052）は33秒で成功。固定8入力のハッシュが一致し、billとincident-parmsの2候補がmatchedとなった。これは対象署名での使用とAssembly-CSharp内の定義・arityの一致を、固定入力hashに結合した結果である。
+
+この2型だけを署名の公開atomへ追加する。他の4候補は公開atomへ追加しない。特に参照先assemblyの解決が確認できていないFramework型や未一致のフィルター型を、名前の推測だけで採用しない。候補の不一致は型が存在しない証明ではない。

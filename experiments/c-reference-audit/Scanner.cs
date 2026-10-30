@@ -18,7 +18,7 @@ public static class Scanner
         ("game", "Verse.Game", ["InitNewGame", "FinalizeInit"]),
         ("map-generator", "Verse.MapGenerator", ["GenerateMap"]),
         ("long-events", "Verse.LongEventHandler", ["ExecuteWhenFinished", "QueueLongEvent"]),
-        ("bill-dialog", "RimWorld.Dialog_BillConfig", ["DoIngredientConfigPane", "get_HiddenSpecialThingFilters"]),
+        ("bill-dialog", "RimWorld.Dialog_BillConfig", [".ctor", "DoIngredientConfigPane", "get_HiddenSpecialThingFilters"]),
         ("filter-ui", "Verse.ThingFilterUI", ["DoThingFilterConfigWindow"]),
         ("filter-listing", "Verse.Listing_TreeThingFilter", [".ctor", "Visible", "DoThingDef"]),
         ("bill-factory", "RimWorld.BillUtility", ["MakeNewBill"]),

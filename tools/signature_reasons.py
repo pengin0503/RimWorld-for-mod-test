@@ -11,6 +11,10 @@ def classify(item, normalize, primitives, atoms):
         if depth>=8: reasons.add('budgetExceeded');return
         if not isinstance(node,dict): reasons.add('invalidSignature');return
         kind=node.get('kind')
+        if kind == 'named' and 'metadata' in node:
+            from tools.signature_diagnostics import valid_metadata
+            if not valid_metadata(node['metadata']): reasons.add('invalidSignature')
+            node = {k: v for k, v in node.items() if k != 'metadata'}
         shapes={'primitive':{'kind','name'},'named':{'kind','name'},'byref':{'kind','element'},'pointer':{'kind','element'},'array':{'kind','element','rank'},'generic':{'kind','element','arguments'},'methodParameter':{'kind','index'},'typeParameter':{'kind','index'}}
         if not isinstance(kind,str) or kind not in shapes: reasons.add('unsupportedTypeForm');return
         if set(node)!=shapes[kind]: reasons.add('invalidSignature')
@@ -50,7 +54,7 @@ def classify(item, normalize, primitives, atoms):
     if not isinstance(candidates,list):reasons.add('invalidSchema')
     elif len(candidates)>4096:reasons.add('budgetExceeded')
     else:
-        ids={'action-1':1,'exception':0,'nullable-1':1,'bill':0,'incident-parms':0,'thing-category':0}
+        ids={'action-1':1,'exception':0,'nullable-1':1,'bill':0,'incident-parms':0,'thing-category':0,'ienumerator':0,'filter-ui-state':0}
         for row in candidates:
             if not isinstance(row,dict) or set(row)!={'id','kind','arity'} or not isinstance(row.get('id'),str) or row['id'] not in ids or row.get('kind') not in ('reference','definitionUse') or type(row.get('arity')) is not int or row['arity']!=ids[row['id']]:reasons.add('invalidSchema')
     calls=item.get('calls')

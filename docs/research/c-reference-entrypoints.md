@@ -1,5 +1,7 @@
 # C0：独立参照経路の確認状況
 
+> **2026-10-30 動的調査までの更新:** [初回動的実測](2026-10-30-c-context-first-measurement.md)で、製品と公式のqueued markerがFinalizeInitの異なる側にあることを確認。材料は[constructorの実署名と修正](2026-10-30-c-dialog-constructor.md)まで進めた。修正後の実ゲーム再実測、実UI行への到達、未分類のSteam/Texture診断の解決は次回へ持ち越す。C0は両ケース未通過、資格は変更していない。
+
 > **2026-10-30 13:12更新:** PR #40反映後の[監査 #5](2026-10-30-c-expanded-atoms-audit.md)でGenerateMapとQueueLongEventの2 overloadを読取。未読はQueueLongEventの1 overloadとフィルターUIの2メソッド群。取得は成功しており、現在の停止理由は残る署名・同一文脈・独立採取の未実証。両ケースともC0未通過。以下の10月29日の取得blockedは履歴として残す。
 
 > **2026-10-30初回追記:** 以下は10月29日の調査時点の記録。main限定の[静的監査受入](2026-10-30-c-static-audit-main-acceptance.md)では固定8入力の取得・ハッシュ確認に成功したが、一部署名が未読のため静的調査は未完了で、両ケースともC0未通過のまま。

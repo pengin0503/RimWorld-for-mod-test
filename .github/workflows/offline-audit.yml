@@ -76,6 +76,8 @@ jobs:
         run: dotnet run --project tests/worker/BoundedTick -c Release
       - name: Private C metadata scanner (synthetic only)
         run: dotnet run --project tests/worker/CReferenceAudit -c Release
+      - name: Verified C dialog constructor binding (synthetic only)
+        run: dotnet run --project tests/worker/CContextBinding -c Release
       - name: Windows build has the apphost the Controller starts
         if: runner.os == 'Windows'
         shell: bash

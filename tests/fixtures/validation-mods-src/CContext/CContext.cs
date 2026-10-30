@@ -61,7 +61,7 @@ namespace RWMT.CContext
                 harmony.Patch(ctor, prefix: new HarmonyMethod(typeof(ProbeMod), nameof(OnListing)));
                 harmony.Patch(row, prefix: new HarmonyMethod(typeof(ProbeMod), nameof(OnRow)));
                 setupStage = "dialog";
-                object dialog = Activator.CreateInstance(dialogType, new object[] { bill });
+                object dialog = DialogConstructor.Create(dialogType, typeof(Bill_Production), typeof(IntVec3), bill, IntVec3.Invalid);
                 setupStage = "pane";
                 pane.Invoke(dialog, new object[] { 0f, 0f, 400f, 400f });
                 returned = true;

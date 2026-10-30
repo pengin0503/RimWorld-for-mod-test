@@ -8,6 +8,11 @@ LOG = re.compile(r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+(ERROR|WARN|INFO)\s+\[
 STEAM_SHA256 = 'ee86ee64a1f2a1aad52ddca667ce8b7063ddaa952ce7a9c13ab5969a9d122eca'
 STAGES = ('game', 'bill', 'binding', 'hooks', 'dialog', 'pane', 'complete')
 EXCEPTIONS = ('none', 'missingApi', 'ambiguousApi', 'typeInitialization', 'nullReference', 'runtimeOther')
+PHASES = ('init', 'generated', 'finalize', 'marker')
+PROGRAM_STATES = ('Entry', 'MapInitializing', 'Playing')
+# Execution context of each event phase, compared between product and official traces.
+CONTEXT_FIELDS = ('mainThread', 'programState', 'inLongEvent', 'pendingWhenFinished', 'currentMap')
+EVENT_KEYS = {'phase', 'seq', 'sameGame', 'sameMap', 'finalizeCalls', *CONTEXT_FIELDS}
 DIAGNOSTIC_TAGS = ('dependency', 'downloadUrl', 'description', 'packageId', 'supportedVersions',
                    'url', 'exception', 'graphics', 'GUI', 'window', 'patch', 'Harmony',
                    'Steam', 'NativeAllocationRuntime', 'Texture', 'camera', 'audio', 'frame', 'config')
@@ -22,6 +27,31 @@ def diagnostic_summary(evidence):
             'errorCount': min(len(errors), 10000),
             'kinds': [[tag for tag in DIAGNOSTIC_TAGS if isinstance(error, str) and tag.lower() in error.lower()]
                       for error in errors[:16]]}
+
+
+def _context_valid(row):
+    return (isinstance(row, dict) and row.get('phase') in PHASES
+            and all(type(row.get(k)) is bool for k in ('mainThread', 'inLongEvent', 'currentMap'))
+            and row.get('programState') in PROGRAM_STATES
+            and type(row.get('pendingWhenFinished')) is int and 0 <= row['pendingWhenFinished'] <= 10000)
+
+
+def _event_row_valid(row, seq=None):
+    return (isinstance(row, dict) and set(row) == EVENT_KEYS and _context_valid(row)
+            and type(row.get('seq')) is int and (row['seq'] == seq if seq else 1 <= row['seq'] <= 16)
+            and type(row.get('sameGame')) is bool and type(row.get('sameMap')) is bool
+            and type(row.get('finalizeCalls')) is int and 0 <= row['finalizeCalls'] <= 16)
+
+
+def _context_mismatch(contexts):
+    """True when no official pre-FinalizeInit hook ran in the context of the product observer."""
+    key = ('mainThread', 'programState', 'currentMap', 'inLongEvent')
+    markers = [c for c in contexts['product'] if c['phase'] == 'marker']
+    official = contexts['official']
+    first = next((i for i, c in enumerate(official) if c['phase'] == 'finalize'), len(official))
+    # The FinalizeInit prefix itself still precedes its body, so it is a candidate point.
+    candidates = [c for c in official[:first+1] if c['phase'] in ('generated', 'finalize')]
+    return len(markers) != 1 or not any(all(c[k] == markers[0][k] for k in key) for c in candidates)
 
 
 def parse_lines(lines, *, worker=False):
@@ -63,10 +93,7 @@ def parse_lines(lines, *, worker=False):
             break
         rows.append(row)
         if isinstance(row, dict) and row.get('phase') == 'marker':
-            keys = {'phase', 'seq', 'sameGame', 'sameMap', 'finalizeCalls'}
-            observed |= (set(row) == keys and type(row.get('seq')) is int and 1 <= row['seq'] <= 16
-                         and type(row.get('finalizeCalls')) is int and 0 <= row['finalizeCalls'] <= 16
-                         and all(type(row.get(k)) is bool for k in ('sameGame', 'sameMap')))
+            observed |= _event_row_valid(row)
         elif isinstance(row, dict) and row.get('phase') == 'material':
             observed |= 'official.traceMalformed' not in material_gate(
                 {'rows': [row], 'exitCode': 0, 'interrupted': False, 'errors': []})['stopReasons']
@@ -81,19 +108,15 @@ def _execution(evidence):
 
 def event_gate(product, official):
     faults = set()
-    phases = {}
+    phases, contexts = {}, {}
     for label, evidence in (('product', product), ('official', official)):
         if not _execution(evidence):
             faults.add(label + '.diagnosticsOrExit')
         rows = evidence.get('rows') if isinstance(evidence, dict) else None
-        valid = (isinstance(rows, list) and 2 <= len(rows) <= 16 and all(
-            isinstance(r, dict) and set(r) == {'phase', 'seq', 'sameGame', 'sameMap', 'finalizeCalls'}
-            and r.get('phase') in ('init', 'generated', 'finalize', 'marker')
-            and type(r.get('seq')) is int and r['seq'] == i+1
-            and type(r.get('sameGame')) is bool and type(r.get('sameMap')) is bool
-            and type(r.get('finalizeCalls')) is int and 0 <= r['finalizeCalls'] <= 16
-            for i, r in enumerate(rows)))
+        valid = (isinstance(rows, list) and 2 <= len(rows) <= 16
+                 and all(_event_row_valid(r, i+1) for i, r in enumerate(rows)))
         phases[label] = [r['phase'] for r in rows] if valid else []
+        contexts[label] = [{'phase': r['phase'], **{k: r[k] for k in CONTEXT_FIELDS}} for r in rows] if valid else []
         if not valid:
             faults.add(label + '.traceMalformed')
             continue
@@ -108,8 +131,10 @@ def event_gate(product, official):
             faults.add(label + '.finalizedBeforeMarker')
         if not all(r['sameGame'] and r['sameMap'] for r in rows[generated:marker+1]):
             faults.add(label + '.contextChanged')
+    if all(contexts.values()) and _context_mismatch(contexts):
+        faults.add('official.noMatchingPreFinalizeContext')
     return {'case': 'event', 'gatePassed': not faults, 'c0Passed': False,
-            'stopReasons': sorted(faults), 'phases': phases}
+            'stopReasons': sorted(faults), 'phases': phases, 'contexts': contexts}
 
 
 def material_gate(evidence):
@@ -121,8 +146,10 @@ def material_gate(evidence):
     row = rows[0] if valid else {}
     keys = {'phase', 'freshGame', 'newBill', 'pane', 'ui', 'listing', 'row', 'returned', 'exception', 'allowed'}
     extra = {'setupStage', 'exceptionKind'} if 'setupStage' in row or 'exceptionKind' in row else set()
-    valid = (valid and set(row) == keys | extra and row.get('phase') == 'material'
+    gui = {'guiEvent', 'windowStack'} if 'guiEvent' in row or 'windowStack' in row else set()
+    valid = (valid and set(row) == keys | extra | gui and row.get('phase') == 'material'
              and (not extra or row.get('setupStage') in STAGES and row.get('exceptionKind') in EXCEPTIONS)
+             and all(type(row.get(k)) is bool for k in gui)
              and all(type(row.get(k)) is bool for k in ('freshGame', 'newBill', 'returned', 'exception', 'allowed'))
              and all(type(row.get(k)) is int and 0 <= row[k] <= 20000 for k in ('pane', 'ui', 'listing', 'row')))
     if not valid:
@@ -134,10 +161,13 @@ def material_gate(evidence):
             faults.add('official.paneDidNotReturn')
         if not all(row[k] > 0 for k in ('pane', 'ui', 'listing', 'row')):
             faults.add('official.treeRowNotReached')
+        if gui and not row['guiEvent']:
+            faults.add('official.noGuiEvent')
     result = {'case': 'material', 'gatePassed': not faults, 'c0Passed': False,
             'stopReasons': sorted(faults), 'reachability': {k: row[k] for k in ('pane', 'ui', 'listing', 'row')}
             if valid else {}}
     if valid and extra: result.update(setupStage=row['setupStage'], exceptionKind=row['exceptionKind'])
+    if valid and gui: result.update(guiEvent=row['guiEvent'], windowStack=row['windowStack'])
     return result
 
 
@@ -148,10 +178,10 @@ def safe_cases(rows):
     safe = []
     faults = {side + '.' + reason for side in ('product', 'official') for reason in
               ('diagnosticsOrExit', 'traceMalformed', 'traceOrder', 'finalizedBeforeMarker', 'contextChanged')}
-    faults |= {'official.paneDidNotReturn', 'official.treeRowNotReached',
+    faults |= {'official.noMatchingPreFinalizeContext', 'official.noGuiEvent', 'official.paneDidNotReturn', 'official.treeRowNotReached',
                'privatePreparationOrExecutionFailed', 'fixtureBuildFailed', 'product.observationIncomplete'}
     for expected, row in zip(('material', 'event'), rows):
-        keys = {'case', 'gatePassed', 'c0Passed', 'stopReasons', 'executionStatus', 'phases', 'reachability', 'buildErrors', 'setupStage', 'exceptionKind', 'diagnostics'}
+        keys = {'case', 'gatePassed', 'c0Passed', 'stopReasons', 'executionStatus', 'phases', 'reachability', 'buildErrors', 'setupStage', 'exceptionKind', 'diagnostics', 'contexts', 'guiEvent', 'windowStack'}
         if (not isinstance(row, dict) or not set(row) <= keys or row.get('case') != expected
                 or row.get('c0Passed') is not False or type(row.get('gatePassed')) is not bool
                 or row.get('executionStatus') not in ('completed', 'interrupted', 'notStarted')
@@ -163,6 +193,13 @@ def safe_cases(rows):
             if expected != 'material' or row.get('setupStage') not in STAGES or row.get('exceptionKind') not in EXCEPTIONS:
                 return []
             result.update(setupStage=row['setupStage'], exceptionKind=row['exceptionKind'])
+        if 'guiEvent' in row or 'windowStack' in row:
+            if (expected != 'material' or type(row.get('guiEvent')) is not bool or type(row.get('windowStack')) is not bool
+                    or (not row['guiEvent']) != ('official.noGuiEvent' in row['stopReasons'])):
+                return []
+            result.update(guiEvent=row['guiEvent'], windowStack=row['windowStack'])
+        elif 'official.noGuiEvent' in row['stopReasons']:
+            return []
         if 'diagnostics' in row:
             diagnostics = row['diagnostics']
             if not isinstance(diagnostics, dict) or set(diagnostics) != {'product', 'official'}: return []
@@ -189,6 +226,16 @@ def safe_cases(rows):
                     or any(not isinstance(p, list) or len(p) > 16 or any(x not in ('init', 'generated', 'finalize', 'marker') for x in p) for p in phases.values())):
                 return []
             result['phases'] = phases
+            if 'contexts' in row:
+                contexts = row['contexts']
+                if (not isinstance(contexts, dict) or set(contexts) != {'product', 'official'}
+                        or any(not isinstance(c, list) or len(c) != len(phases[side])
+                               or any(not _context_valid(x) or set(x) != {'phase', *CONTEXT_FIELDS} or x['phase'] != phase
+                                      for x, phase in zip(c, phases[side])) for side, c in contexts.items())):
+                    return []
+                if all(contexts.values()) and _context_mismatch(contexts) != ('official.noMatchingPreFinalizeContext' in row['stopReasons']):
+                    return []
+                result['contexts'] = contexts
             proof = all(p.count('generated') == p.count('marker') == 1
                         and p.index('generated') < p.index('marker')
                         and 'finalize' not in p[:p.index('marker')] for p in phases.values())
@@ -201,5 +248,41 @@ def safe_cases(rows):
             proof = bool(counts) and all(x > 0 for x in counts.values())
         if row['gatePassed'] and (row['stopReasons'] or row['executionStatus'] != 'completed' or not proof):
             return []
+        if not _consistent(expected, result):
+            return []
         safe.append(result)
     return safe
+
+
+def _clean(item):
+    return item == {'exitCode': 0, 'interrupted': False, 'errorCount': 0, 'kinds': []}
+
+
+def _consistent(case, row):
+    """Reject published rows whose fixed fields contradict how probe_c_context derived them."""
+    reasons = set(row['stopReasons'])
+    diagnostics = row.get('diagnostics')
+    if row['gatePassed'] and (diagnostics is None or not all(_clean(v) for v in diagnostics.values())):
+        return False
+    if diagnostics is not None:
+        if any(len(v['kinds']) != min(v['errorCount'], 16) for v in diagnostics.values()):
+            return False
+        if (row['executionStatus'] == 'completed') == any(v['interrupted'] for v in diagnostics.values()):
+            return False
+        # Official evidence always feeds the gate; product evidence feeds only the event gate.
+        for side in ('official', 'product') if case == 'event' else ('official',):
+            if _clean(diagnostics[side]) == (side + '.diagnosticsOrExit' in reasons):
+                return False
+    if case == 'material':
+        stage, kind = row.get('setupStage'), row.get('exceptionKind')
+        if row['gatePassed'] and (stage != 'complete' or kind != 'none'):
+            return False
+        if stage is not None:
+            if (stage == 'complete') == (kind != 'none'):
+                return False
+            if (kind != 'none') != ('official.paneDidNotReturn' in reasons):
+                return False
+            counts = row.get('reachability') or {}
+            if STAGES.index(stage) < STAGES.index('pane') and any(counts.values()):
+                return False
+    return True

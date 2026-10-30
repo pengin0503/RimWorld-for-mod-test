@@ -22,10 +22,16 @@ namespace RWMT.CContext
             new Harmony("rwmodtest.ccontext.event").PatchAll(typeof(ProbeMod).Assembly);
         }
         internal static void Emit(object value) => Log.Message("[RWMT-CONTEXT] " + JsonSerializer.Serialize(value));
+        // Execution context is read, never changed: thread, program state and the official long event queue.
         internal static void Phase(string phase) => Emit(new { phase, seq = ++Sequence,
             sameGame = SavedGame != null && ReferenceEquals(Current.Game, SavedGame),
             sameMap = SavedMap != null && Current.Game != null && Current.Game.Maps.Contains(SavedMap),
-            finalizeCalls = FinalizeCalls });
+            finalizeCalls = FinalizeCalls, mainThread = UnityData.IsInMainThread,
+            programState = Current.ProgramState.ToString(),
+            inLongEvent = AccessTools.Field(typeof(LongEventHandler), "currentEvent").GetValue(null) != null,
+            pendingWhenFinished = ((System.Collections.ICollection)AccessTools.Field(typeof(LongEventHandler), "toExecuteWhenFinished").GetValue(null)).Count,
+            currentMap = Current.Game != null && Current.Game.CurrentMap != null });
+        internal static bool GuiEvent() => AccessTools.Property(AccessTools.TypeByName("UnityEngine.Event"), "current").GetValue(null) != null;
         internal static void Quit() => AccessTools.Method(AccessTools.TypeByName("UnityEngine.Application"), "Quit", Type.EmptyTypes).Invoke(null, null);
         internal static void OnPane() { Pane++; }
         internal static void OnUI() { UI++; }
@@ -37,6 +43,8 @@ namespace RWMT.CContext
             Game previous = Current.Game;
             bool freshGame = false, newBill = false, returned = false, exception = false, allowed = false;
             string setupStage = "game", exceptionKind = "none";
+            // The pane's widgets read the current GUI event; record whether the game provided one here.
+            bool guiEvent = GuiEvent(), windowStack = Find.WindowStack != null;
             try
             {
                 var game = new Game();
@@ -80,7 +88,7 @@ namespace RWMT.CContext
             }
             finally { Current.Game = previous; }
             Emit(new { phase = "material", freshGame, newBill, pane = Pane, ui = UI,
-                listing = Listing, row = Row, returned, exception, allowed, setupStage, exceptionKind });
+                listing = Listing, row = Row, returned, exception, allowed, setupStage, exceptionKind, guiEvent, windowStack });
         }
     }
 

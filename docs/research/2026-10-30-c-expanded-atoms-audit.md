@@ -12,12 +12,14 @@
 
 | 対象 | 監査 #5の観測 |
 |---|---|
-| MapGenerator.GenerateMap | found。Action<Map>を含む1署名を読取 |
+| MapGenerator.GenerateMap | found。`Action<Map>`を含む1署名を読取 |
 | LongEventHandler.QueueLongEvent | 2 overloadの署名を読取。残る1 overloadはunsupportedTypeAtom、token 100664992 |
 | ThingFilterUI.DoThingFilterConfigWindow | unsupportedTypeAtom、token 100678184。読取済み署名なし |
 
 GenerateMapの署名は ``static public Verse.Map (Verse.IntVec3, RimWorld.Planet.MapParent, Verse.MapGeneratorDef, System.Collections.Generic.IEnumerable`1<Verse.GenStepWithParams>, System.Action`1<Verse.Map>, System.Boolean, System.Boolean)``。
-QueueLongEventの読取済み2署名はAction<Exception>を含む。これらの完全名を公開できることと、参照assemblyの解決確認は区別する。固定候補照合は今回もbill/incident-parmsだけがmatchedであり、他候補の不在を証明しない。Nullable/ThingCategoryDefが残る署名に出現するかは今回も未確認。
+QueueLongEventの読取済み2署名は`Action<Exception>`を含む。これらの完全名を公開できることと、参照assemblyの解決確認は区別する。固定候補照合は今回もbill/incident-parmsだけがmatchedであり、他候補の不在を証明しない。Nullable/ThingCategoryDefが残る署名に出現するかは今回も未確認。
+
+製品のGameApi.Bindが選ぶQueueLongEventは、読取済みの `(Action, String, Boolean, Action<Exception>, Boolean, Boolean, Action)` と一致する（GameApi.cs/Host.cs）。未読の別overloadがあることだけを、イベントケース全体の不成立理由にしない。一方、使用overloadの署名一致はqueued処理の順序や動的到達を証明しないため、イベントのC0未通過は変わらない。
 
 ## 次に調べること
 

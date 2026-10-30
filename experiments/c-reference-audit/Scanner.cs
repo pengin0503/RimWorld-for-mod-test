@@ -20,7 +20,7 @@ public static class Scanner
         ("long-events", "Verse.LongEventHandler", ["ExecuteWhenFinished", "QueueLongEvent"]),
         ("bill-dialog", "RimWorld.Dialog_BillConfig", ["DoIngredientConfigPane", "get_HiddenSpecialThingFilters"]),
         ("filter-ui", "Verse.ThingFilterUI", ["DoThingFilterConfigWindow"]),
-        ("filter-listing", "Verse.Listing_TreeThingFilter", [".ctor", "Visible"]),
+        ("filter-listing", "Verse.Listing_TreeThingFilter", [".ctor", "Visible", "DoThingDef"]),
         ("bill-factory", "RimWorld.BillUtility", ["MakeNewBill"]),
         ("incident", "RimWorld.IncidentWorker", ["TryExecute"]),
         ("dialog-choice", "Verse.DiaOption", ["Activate"])

@@ -1,5 +1,7 @@
 # C0：独立参照経路の確認状況
 
+> **2026-10-30 継続調査の更新:** [継続実測](2026-10-30-c-context-continuation.md)で、材料は公式headlessに自然なGUIパス（OnGUI配信・Event.current）がないこと、イベントは公式のFinalizeInit前の自然な観測点がすべて非同期スレッド・MapInitializing中で製品の観測文脈と一致しないことを確認し、両ケースとも停止した。C0は両ケース未通過、資格は変更していない。
+
 > **2026-10-30 動的調査までの更新:** [初回動的実測](2026-10-30-c-context-first-measurement.md)で、製品と公式のqueued markerがFinalizeInitの異なる側にあることを確認。材料は[constructorの実署名と修正](2026-10-30-c-dialog-constructor.md)まで進めた。修正後の実ゲーム再実測、実UI行への到達、未分類のSteam/Texture診断の解決は次回へ持ち越す。C0は両ケース未通過、資格は変更していない。
 
 > **2026-10-30 13:12更新:** PR #40反映後の[監査 #5](2026-10-30-c-expanded-atoms-audit.md)でGenerateMapとQueueLongEventの2 overloadを読取。未読はQueueLongEventの1 overloadとフィルターUIの2メソッド群。取得は成功しており、現在の停止理由は残る署名・同一文脈・独立採取の未実証。両ケースともC0未通過。以下の10月29日の取得blockedは履歴として残す。

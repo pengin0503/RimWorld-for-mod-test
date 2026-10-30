@@ -1,5 +1,7 @@
 # C署名の未読理由：実物確認
 
+> 後続更新：末尾の「2型だけを採用」は監査 #3時点の判断。PR #40でユーザー承認により[固定4完全名の公開範囲を拡張](2026-10-30-c-atom-scope-expansion.md)した。[監査 #5の結果](2026-10-30-c-expanded-atoms-audit.md)を現在の状態として参照する。候補のassembly照合条件は変更していない。
+
 2026-10-30、日本時間。main `94533150210b52075b4cca3f20b1726ec5faeb09` の[監査#2](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/40976428615)は成功した。
 8入力42811570 bytesのversion/hashが一致し、準備は6.167秒、workflowは29秒。取得対象や権限は変更していない。
 

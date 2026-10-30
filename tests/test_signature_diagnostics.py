@@ -60,10 +60,15 @@ class SignatureDiagnosticTests(unittest.TestCase):
         self.assertEqual(self.summary(item)['types'][0]['methods'][0]['unsupportedTypes']['items'], [])
 
     def test_fixed_hypotheses_report_ids_without_adopting_atoms(self):
-        for name, ident in [('System.Collections.IEnumerator', 'ienumerator'),
-                            ('Verse.ThingFilterUI+UIState', 'filter-ui-state')]:
+        for name, ident in [('System.Collections.IEnumerator', 'ienumerator')]:
             item = self.item(); item['return'] = {'kind': 'named', 'name': name}
             row = self.summary(item)['types'][0]['methods'][0]['unsupportedTypes']['items'][0]
             self.assertEqual(row.get('candidate'), ident)
             with self.assertRaises(ValueError):
                 audit.normalized_type(item['return'])
+
+    def test_verified_nested_ui_state_is_adopted_but_parentless_name_is_not(self):
+        self.assertEqual(audit.normalized_type({'kind': 'named', 'name': 'Verse.ThingFilterUI+UIState'}),
+                         'Verse.ThingFilterUI+UIState')
+        with self.assertRaises(ValueError):
+            audit.normalized_type({'kind': 'named', 'name': '.UIState'})

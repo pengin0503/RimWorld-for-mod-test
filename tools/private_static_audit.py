@@ -207,7 +207,7 @@ def scan(root, scanner):
 
 PRIMITIVES = frozenset(('Void', 'Boolean', 'Char', 'SByte', 'Byte', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Single', 'Double', 'String', 'Object', 'IntPtr', 'UIntPtr'))
 TYPE_ATOMS = frozenset(('System.Action`1', 'System.Exception', 'System.Nullable`1', 'Verse.ThingCategoryDef', 'System.Action', 'System.Collections.Generic.List`1', 'System.Collections.Generic.IEnumerable`1',
-    'RimWorld.Bill', 'RimWorld.IncidentParms',
+    'RimWorld.Bill', 'RimWorld.IncidentParms', 'Verse.ThingFilterUI+UIState',
     'Verse.Game', 'Verse.MapGenerator', 'Verse.LongEventHandler', 'RimWorld.Dialog_BillConfig', 'Verse.ThingFilterUI',
     'Verse.Listing_TreeThingFilter', 'RimWorld.BillUtility', 'RimWorld.IncidentWorker', 'Verse.DiaOption',
     'Verse.ThingFilter', 'Verse.ThingDef', 'Verse.SpecialThingFilterDef', 'Verse.TreeNode_ThingCategory',
@@ -240,7 +240,7 @@ def normalized_type(node, depth=0):
 TARGETS = {'game': ('InitNewGame', 'FinalizeInit'), 'map-generator': ('GenerateMap',),
            'long-events': ('ExecuteWhenFinished', 'QueueLongEvent'),
            'bill-dialog': ('DoIngredientConfigPane', 'get_HiddenSpecialThingFilters'),
-           'filter-ui': ('DoThingFilterConfigWindow',), 'filter-listing': ('.ctor', 'Visible'),
+           'filter-ui': ('DoThingFilterConfigWindow',), 'filter-listing': ('.ctor', 'Visible', 'DoThingDef'),
            'bill-factory': ('MakeNewBill',), 'incident': ('TryExecute',), 'dialog-choice': ('Activate',)}
 TARGET_NAMES = {'game': 'Verse.Game', 'map-generator': 'Verse.MapGenerator', 'long-events': 'Verse.LongEventHandler',
                 'bill-dialog': 'RimWorld.Dialog_BillConfig', 'filter-ui': 'Verse.ThingFilterUI',

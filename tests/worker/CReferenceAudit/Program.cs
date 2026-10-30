@@ -28,6 +28,8 @@ using (var own = new PEReader(new MemoryStream(image)))
     Require(CandidateCatalog.Match(metadata, nestedHandle) is null, "nested candidate wrong assembly accepted");
 }
 JsonObject result = Scanner.Scan(image, Hash(image));
+var listingTarget = result["types"]!.AsArray().Single(t => (string?)t!["id"] == "filter-listing")!;
+Require(listingTarget["methods"]!.AsArray().Any(m => (string?)m!["name"] == "DoThingDef" && m["overloads"]!.AsArray().Count == 1), "actual row entrypoint not scanned");
 Require(!File.Exists(marker), "static constructor was executed");
 var game = result["types"]!.AsArray().Single(t => (string?)t!["id"] == "game")!;
 var init = game["methods"]!.AsArray().Single(t => (string?)t!["name"] == "InitNewGame")!;
@@ -84,6 +86,8 @@ namespace Verse
     public class Outer { public class Inner { } }
     public class Inner { }
     public class ThingFilterUI { public class UIState { } }
+    public class ThingDef { }
+    public class Listing_TreeThingFilter { public void DoThingDef(ThingDef def, int indent) { } }
 }
 
 namespace RimWorld { public class IncidentParms { } }

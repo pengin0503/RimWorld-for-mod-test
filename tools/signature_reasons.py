@@ -3,7 +3,7 @@
 def classify(item, normalize, primitives, atoms):
     reasons=set()
     if not isinstance(item,dict): return ['invalidSchema']
-    allowed={'token','return','parameters','genericCount','static','visibility','calls','branches','exceptions'}
+    allowed={'token','return','parameters','genericCount','static','visibility','calls','branches','exceptions','candidateReferences'}
     if not set(item).issubset(allowed): reasons.add('invalidSchema')
     if type(item.get('token')) is not int or not 0x06000001<=item['token']<=0x06ffffff: reasons.add('invalidMethodToken')
     if type(item.get('static')) is not bool or item.get('visibility') not in ('Public','Private','Family','Assembly','FamANDAssem','FamORAssem','PrivateScope'): reasons.add('invalidVisibility')
@@ -46,6 +46,13 @@ def classify(item, normalize, primitives, atoms):
         keys={'kind','tryOffset','tryLength','handlerOffset','handlerLength'}
         for row in regions:
             if not isinstance(row,dict) or set(row)!=keys or row.get('kind') not in ('Catch','Filter','Finally','Fault') or not all(integer(row[k],65536) for k in keys-{'kind'}):reasons.add('invalidControlFlow')
+    candidates=item.get('candidateReferences',[])
+    if not isinstance(candidates,list):reasons.add('invalidSchema')
+    elif len(candidates)>4096:reasons.add('budgetExceeded')
+    else:
+        ids={'action-1':1,'exception':0,'nullable-1':1,'bill':0,'incident-parms':0,'thing-category':0}
+        for row in candidates:
+            if not isinstance(row,dict) or set(row)!={'id','kind','arity'} or not isinstance(row.get('id'),str) or row['id'] not in ids or row.get('kind') not in ('reference','definitionUse') or type(row.get('arity')) is not int or row['arity']!=ids[row['id']]:reasons.add('invalidSchema')
     calls=item.get('calls')
     if not isinstance(calls,list):reasons.add('invalidCallsite')
     elif len(calls)>4096:reasons.add('budgetExceeded')

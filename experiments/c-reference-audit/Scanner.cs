@@ -56,6 +56,7 @@ public static class Scanner
                         var method = reader.GetMethodDefinition(handle);
                         if (reader.GetString(method.Name) != methodName) continue;
                         if (++methods > 128 || overloads.Count >= 16) throw new BudgetExceededException();
+                        provider.Candidates = new JsonArray();
                         var signature = method.DecodeSignature(provider, null);
                         CheckDepth(signature.ReturnType, 0);
                         foreach (var parameter in signature.ParameterTypes) CheckDepth(parameter, 0);
@@ -79,14 +80,14 @@ public static class Scanner
                             ["parameters"] = parameters, ["genericCount"] = signature.GenericParameterCount,
                             ["static"] = (method.Attributes & MethodAttributes.Static) != 0,
                             ["visibility"] = (method.Attributes & MethodAttributes.MemberAccessMask).ToString(),
-                            ["calls"] = sites, ["branches"] = branches, ["exceptions"] = regions });
+                            ["calls"] = sites, ["branches"] = branches, ["exceptions"] = regions, ["candidateReferences"] = provider.Candidates });
                     }
                 }
                 entries.Add(new JsonObject { ["name"] = methodName, ["overloads"] = overloads });
             }
             output.Add(new JsonObject { ["id"] = target.Id, ["found"] = definitions.Length == 1, ["methods"] = entries });
         }
-        return new JsonObject { ["sha256"] = digest, ["types"] = output, ["metrics"] = new JsonObject { ["methods"] = methods, ["ilBytes"] = totalIl, ["instructions"] = instructions, ["calls"] = calls } };
+        return new JsonObject { ["sha256"] = digest, ["types"] = output, ["candidateDefinitions"] = CandidateCatalog.Definitions(reader), ["metrics"] = new JsonObject { ["methods"] = methods, ["ilBytes"] = totalIl, ["instructions"] = instructions, ["calls"] = calls } };
     }
 
     static void CheckDepth(JsonNode node, int depth)

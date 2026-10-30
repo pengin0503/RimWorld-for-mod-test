@@ -16,6 +16,12 @@ string path = typeof(Verse.Game).Assembly.Location;
 byte[] image = File.ReadAllBytes(path);
 string marker = Path.Combine(Path.GetTempPath(), "rwmt-static-audit-" + Guid.NewGuid().ToString("N"));
 Environment.SetEnvironmentVariable("RWMT_AUDIT_MARKER", marker);
+using (var own = new PEReader(new MemoryStream(image)))
+{
+    var metadata = own.GetMetadataReader();
+    var handle = metadata.TypeDefinitions.Single(h => metadata.GetString(metadata.GetTypeDefinition(h).Namespace) == "RimWorld" && metadata.GetString(metadata.GetTypeDefinition(h).Name) == "IncidentParms");
+    Require(CandidateCatalog.Match(metadata, handle) is null, "same name from wrong assembly accepted");
+}
 JsonObject result = Scanner.Scan(image, Hash(image));
 Require(!File.Exists(marker), "static constructor was executed");
 var game = result["types"]!.AsArray().Single(t => (string?)t!["id"] == "game")!;
@@ -63,3 +69,5 @@ namespace Verse
         public void FinalizeInit<T>() { }
     }
 }
+
+namespace RimWorld { public class IncidentParms { } }

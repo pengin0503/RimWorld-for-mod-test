@@ -6,6 +6,7 @@ namespace CReferenceAudit;
 
 sealed class SignatureProvider : ISignatureTypeProvider<JsonNode, object?>
 {
+    public JsonArray Candidates { get; set; } = new();
     static JsonObject Node(string kind, JsonNode? element = null) => new() { ["kind"] = kind, ["element"] = element };
     public JsonNode GetArrayType(JsonNode elementType, ArrayShape shape) => new JsonObject { ["kind"] = "array", ["element"] = elementType, ["rank"] = shape.Rank };
     public JsonNode GetByReferenceType(JsonNode elementType) => Node("byref", elementType);
@@ -27,11 +28,13 @@ sealed class SignatureProvider : ISignatureTypeProvider<JsonNode, object?>
     public JsonNode GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind)
     {
         var t = reader.GetTypeDefinition(handle);
+        if (CandidateCatalog.Match(reader, handle) is JsonObject match) { match["kind"]="definitionUse"; Candidates.Add(match); }
         return new JsonObject { ["kind"] = "named", ["name"] = reader.GetString(t.Namespace) + "." + reader.GetString(t.Name) };
     }
     public JsonNode GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind)
     {
         var t = reader.GetTypeReference(handle);
+        if (CandidateCatalog.Match(reader, handle) is JsonObject match) Candidates.Add(match);
         return new JsonObject { ["kind"] = "named", ["name"] = reader.GetString(t.Namespace) + "." + reader.GetString(t.Name) };
     }
     public JsonNode GetTypeFromSpecification(MetadataReader reader, object? genericContext, TypeSpecificationHandle handle, byte rawTypeKind) => reader.GetTypeSpecification(handle).DecodeSignature(this, genericContext);

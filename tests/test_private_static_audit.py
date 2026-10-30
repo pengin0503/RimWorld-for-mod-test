@@ -313,7 +313,7 @@ class AuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, ENV, clear=True), patch.object(a, 'load_session', return_value={'verified': True}), patch.object(a.pv, 'run_command', side_effect=run) as runner:
             root = Path(d); (a.session_path(root) / 'input').mkdir(parents=True)
             output = a.scan(root, Path('/synthetic/scanner.dll'))
-            self.assertEqual(runner.call_count, 5)
+            self.assertEqual(runner.call_count, 6)
             self.assertEqual(a.public_summary(output, a.pv.current_identity())['staticAuditStatus'], 'completed')
             with self.assertRaises(ValueError): a.scan(root, Path('/synthetic/scanner.dll'))
             self.assertFalse(json.loads((a.session_path(root) / 'scan.json').read_text())['verified'])

@@ -3,7 +3,7 @@
 def classify(item, normalize, primitives, atoms):
     reasons=set()
     if not isinstance(item,dict): return ['invalidSchema']
-    allowed={'token','return','parameters','genericCount','static','visibility','calls','branches','exceptions'}
+    allowed={'token','return','parameters','genericCount','static','visibility','calls','branches','exceptions','candidateReferences'}
     if not set(item).issubset(allowed): reasons.add('invalidSchema')
     if type(item.get('token')) is not int or not 0x06000001<=item['token']<=0x06ffffff: reasons.add('invalidMethodToken')
     if type(item.get('static')) is not bool or item.get('visibility') not in ('Public','Private','Family','Assembly','FamANDAssem','FamORAssem','PrivateScope'): reasons.add('invalidVisibility')

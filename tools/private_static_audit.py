@@ -156,11 +156,12 @@ def scan(root, scanner):
         raise ValueError('scanner budget exceeded')
     start = time.monotonic()
     results = []
+    evidence = []
     total_output = 0
     total_logs = 0
     limits = {'methods': 128, 'ilBytes': 1024*1024, 'instructions': 100000, 'calls': 4096}
     totals = {name: 0 for name in limits}
-    for index, name in enumerate(ADAPTER['sha256']):
+    for index, name in enumerate([*ADAPTER['sha256'], 'System.Private.CoreLib.dll']):
         remaining = 120 - (time.monotonic() - start)
         if remaining <= 0: raise ValueError('scanner timeout')
         output = session / ('scan-' + str(index) + '.json')
@@ -185,6 +186,11 @@ def scan(root, scanner):
             if type(value) is not int or value < 0: raise ValueError('invalid scanner metric')
             totals[metric] += value
             if totals[metric] > limit: budget_exceeded()
+        definitions = result.get('candidateDefinitions', [])
+        references = [c for row in result['types'] if isinstance(row,dict) for method in row.get('methods',[]) if isinstance(method,dict) for overload in method.get('overloads',[]) if isinstance(overload,dict) for c in overload.get('candidateReferences',[])]
+        if not isinstance(definitions,list) or len(definitions)+len(references)>4096: raise ValueError('invalid candidate evidence')
+        for entry in [*definitions,*references]:
+            if isinstance(entry,dict): evidence.append({**entry,'module':name,'sha256':EXPECTED[name]})
         results.append(result)
     load_session(root)
     types = []
@@ -194,7 +200,7 @@ def scan(root, scanner):
         if len(rows) != len(results) or len(found) > 1: raise ValueError('ambiguous scanner output')
         if found: types.append(found[0])
         elif rows: types.append(rows[0])
-    combined = {**identity, 'verified': True, 'types': types}
+    combined = {**identity, 'verified': True, 'types': types, 'candidateEvidence': evidence}
     pv.write_json(result_path, combined)
     return combined
 
@@ -239,6 +245,26 @@ VISIBILITY = {'Public': 'public', 'Private': 'private', 'Family': 'family', 'Ass
               'FamANDAssem': 'family-and-assembly', 'FamORAssem': 'family-or-assembly', 'PrivateScope': 'private-scope'}
 
 
+CANDIDATES = {'action-1': ('System.Private.CoreLib.dll',1), 'exception': ('System.Private.CoreLib.dll',0),
+              'nullable-1': ('System.Private.CoreLib.dll',1), 'bill': ('Assembly-CSharp.dll',0),
+              'incident-parms': ('Assembly-CSharp.dll',0), 'thing-category': ('Assembly-CSharp.dll',0)}
+
+
+def candidate_summary(evidence):
+    if not isinstance(evidence,list) or len(evidence)>4096:return []
+    valid=[]
+    for row in evidence:
+        if not isinstance(row,dict) or set(row)!={'id','kind','arity','module','sha256'}:continue
+        ident=row.get('id');module=row.get('module')
+        if not isinstance(ident,str) or ident not in CANDIDATES or not isinstance(module,str) or module not in EXPECTED:continue
+        if row['sha256']!=EXPECTED[module] or type(row['arity']) is not int or row['arity']!=CANDIDATES[ident][1]:continue
+        if row['kind'] not in ('reference','definitionUse','definition'):continue
+        if row['kind'] in ('definitionUse','definition') and module!=CANDIDATES[ident][0]:continue
+        valid.append(row)
+    used={r['id'] for r in valid if r['kind']!='definition'}
+    return [{'id':ident,'status':'matched' if any(r['id']==ident and r['kind']=='definition' for r in valid) else 'unresolved'} for ident in sorted(used)]
+
+
 def method_reasons(item):
     from tools.signature_reasons import classify
     return classify(item, normalized_type, PRIMITIVES, TYPE_ATOMS)
@@ -254,7 +280,7 @@ def public_summary(raw, identity):
         encoded = json.dumps(raw, allow_nan=False)
         finite = len(encoded.encode('utf-8')) <= 4*1024*1024
     except (ValueError, TypeError, RecursionError): finite = False
-    complete = binary and finite and set(raw) == {'runId', 'commit', 'verified', 'types'} and len(source) == len(TARGETS)
+    complete = binary and finite and set(raw).issubset({'runId', 'commit', 'verified', 'types', 'candidateEvidence'}) and len(source) == len(TARGETS)
     allowed_edges = {TARGET_NAMES[k] + '.' + n: (k, n) for k, values in TARGETS.items() for n in values}
     for target_id, names in TARGETS.items():
         matches = [x for x in source if isinstance(x, dict) and x.get('id') == target_id]
@@ -276,7 +302,7 @@ def public_summary(raw, identity):
                 item_reasons = method_reasons(item)
                 reason_codes.update(item_reasons)
                 try:
-                    if isinstance(item, dict) and not set(item).issubset({'token', 'return', 'parameters', 'genericCount', 'static', 'visibility', 'calls', 'branches', 'exceptions'}): complete = False
+                    if isinstance(item, dict) and not set(item).issubset({'token', 'return', 'parameters', 'genericCount', 'static', 'visibility', 'calls', 'branches', 'exceptions', 'candidateReferences'}): complete = False
                     if not isinstance(item, dict) or type(item.get('static')) is not bool or item.get('visibility') not in VISIBILITY:
                         raise ValueError('invalid method')
                     token = item.get('token')
@@ -322,7 +348,7 @@ def public_summary(raw, identity):
         if len(target['methods']) != len(names): complete = False
         rows.append({'id': target_id, 'status': 'found' if target['found'] else 'missing', 'methods': methods})
     return {**identity, 'schemaVersion': 1, 'adapterId': 'rimworld-1.7.4985-rev1269', 'binaryVerified': binary,
-            'verified': binary, 'staticAuditStatus': 'completed' if complete else 'incomplete', 'c0Passed': False, 'memoryHard': False, 'types': rows}
+            'verified': binary, 'staticAuditStatus': 'completed' if complete else 'incomplete', 'c0Passed': False, 'memoryHard': False, 'types': rows, 'candidates': candidate_summary(raw.get('candidateEvidence', [])) if bound else []}
 
 
 def publish(root):

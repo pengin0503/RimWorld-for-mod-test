@@ -50,3 +50,7 @@ class ReasonTests(unittest.TestCase):
         raw={**identity,'verified':True,'types':[{'id':'game','found':True,'methods':[{'name':'InitNewGame','overloads':[first,second]},{'name':'FinalizeInit','overloads':[]}]}]}
         result=audit.public_summary(raw,identity)
         self.assertEqual(result['types'][0]['methods'][0]['reasons'], ['invalidSignature','unsupportedTypeAtom'])
+
+    def test_candidate_evidence_cannot_inject_private_schema(self):
+        item=self.item();item['candidateReferences']=[{'id':'PRIVATE','kind':'definitionUse','arity':0}]
+        self.assertEqual(audit.method_reasons(item), ['invalidSchema'])

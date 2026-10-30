@@ -37,3 +37,6 @@ class CandidateTests(unittest.TestCase):
             self.assertEqual(audit.normalized_type({'kind':'named','name':name}),name)
         for name in ('PRIVATE.Secret','System.PRIVATE','Verse.PRIVATE'):
             with self.assertRaises(ValueError):audit.normalized_type({'kind':'named','name':name})
+
+    def test_existing_production_bill_api_name_can_describe_dialog_constructor(self):
+        self.assertEqual(audit.normalized_type({'kind':'named','name':'RimWorld.Bill_Production'}), 'RimWorld.Bill_Production')

@@ -30,6 +30,8 @@ using (var own = new PEReader(new MemoryStream(image)))
 JsonObject result = Scanner.Scan(image, Hash(image));
 var listingTarget = result["types"]!.AsArray().Single(t => (string?)t!["id"] == "filter-listing")!;
 Require(listingTarget["methods"]!.AsArray().Any(m => (string?)m!["name"] == "DoThingDef" && m["overloads"]!.AsArray().Count == 1), "actual row entrypoint not scanned");
+var dialogTarget = result["types"]!.AsArray().Single(t => (string?)t!["id"] == "bill-dialog")!;
+Require(dialogTarget["methods"]!.AsArray().Any(m => (string?)m!["name"] == ".ctor" && m["overloads"]!.AsArray().Count == 1), "dialog constructor not scanned");
 Require(!File.Exists(marker), "static constructor was executed");
 var game = result["types"]!.AsArray().Single(t => (string?)t!["id"] == "game")!;
 var init = game["methods"]!.AsArray().Single(t => (string?)t!["name"] == "InitNewGame")!;
@@ -90,4 +92,9 @@ namespace Verse
     public class Listing_TreeThingFilter { public void DoThingDef(ThingDef def, int indent) { } }
 }
 
-namespace RimWorld { public class IncidentParms { } }
+namespace RimWorld
+{
+    public class IncidentParms { }
+    public class Bill_Production { }
+    public class Dialog_BillConfig { public Dialog_BillConfig(Bill_Production bill) { } }
+}

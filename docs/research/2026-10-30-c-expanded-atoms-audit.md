@@ -16,7 +16,7 @@
 | LongEventHandler.QueueLongEvent | 2 overloadの署名を読取。残る1 overloadはunsupportedTypeAtom、token 100664992 |
 | ThingFilterUI.DoThingFilterConfigWindow | unsupportedTypeAtom、token 100678184。読取済み署名なし |
 
-GenerateMapの署名は `static public Verse.Map (Verse.IntVec3, RimWorld.Planet.MapParent, Verse.MapGeneratorDef, System.Collections.Generic.IEnumerable`1<Verse.GenStepWithParams>, System.Action`1<Verse.Map>, System.Boolean, System.Boolean)`。
+GenerateMapの署名は ``static public Verse.Map (Verse.IntVec3, RimWorld.Planet.MapParent, Verse.MapGeneratorDef, System.Collections.Generic.IEnumerable`1<Verse.GenStepWithParams>, System.Action`1<Verse.Map>, System.Boolean, System.Boolean)``。
 QueueLongEventの読取済み2署名はAction<Exception>を含む。これらの完全名を公開できることと、参照assemblyの解決確認は区別する。固定候補照合は今回もbill/incident-parmsだけがmatchedであり、他候補の不在を証明しない。Nullable/ThingCategoryDefが残る署名に出現するかは今回も未確認。
 
 ## 次に調べること

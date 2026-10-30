@@ -140,3 +140,20 @@ class ContextTests(unittest.TestCase):
     def test_build_diagnostics_expose_only_our_source_id_line_and_compiler_code(self):
         text = '/PRIVATE/CContext.cs(12,4): error CS0012: PRIVATE.secret\n/PRIVATE/Secret.cs(1,1): error CS1234: PRIVATE\n'
         self.assertEqual(self.helper().build_diagnostics(text), [{'source': 'CContext', 'line': 12, 'code': 'CS0012'}])
+
+    def test_fixed_diagnostic_tags_and_setup_stage_do_not_expose_private_text(self):
+        summary = context.diagnostic_summary({'exitCode': 0, 'interrupted': False,
+            'errors': ['PRIVATE dependency downloadUrl missing', 'PRIVATE graphics exception']})
+        self.assertEqual(summary['errorCount'], 2)
+        self.assertIn('dependency', summary['kinds'][0])
+        self.assertNotIn('PRIVATE', json.dumps(summary))
+        self.assertIn('Steam', context.diagnostic_summary({'exitCode': 0, 'interrupted': False,
+            'errors': ['PRIVATE Steam startup failure']})['kinds'][0])
+        row = {'phase': 'material', 'freshGame': True, 'newBill': True, 'pane': 0,
+               'ui': 0, 'listing': 0, 'row': 0, 'returned': False, 'exception': True,
+               'allowed': False, 'setupStage': 'dialog', 'exceptionKind': 'nullReference'}
+        result = context.material_gate({'rows': [row], 'exitCode': 0, 'interrupted': False, 'errors': []})
+        self.assertEqual(result.get('setupStage'), 'dialog')
+        self.assertEqual(result.get('exceptionKind'), 'nullReference')
+        row['exceptionKind'] = 'PRIVATE'
+        self.assertNotIn('PRIVATE', json.dumps(context.material_gate({'rows': [row], 'exitCode': 0, 'interrupted': False, 'errors': []})))

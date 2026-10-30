@@ -6,6 +6,22 @@ import re
 MARKER = '[RWMT-CONTEXT] '
 LOG = re.compile(r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+(ERROR|WARN|INFO)\s+\[([^\]]+)\] (.*)$')
 STEAM_SHA256 = 'ee86ee64a1f2a1aad52ddca667ce8b7063ddaa952ce7a9c13ab5969a9d122eca'
+STAGES = ('game', 'bill', 'binding', 'hooks', 'dialog', 'pane', 'complete')
+EXCEPTIONS = ('none', 'missingApi', 'ambiguousApi', 'typeInitialization', 'nullReference', 'runtimeOther')
+DIAGNOSTIC_TAGS = ('dependency', 'downloadUrl', 'description', 'packageId', 'supportedVersions',
+                   'url', 'exception', 'graphics', 'GUI', 'window', 'patch', 'Harmony',
+                   'Steam', 'NativeAllocationRuntime', 'Texture', 'camera', 'audio', 'frame', 'config')
+
+
+def diagnostic_summary(evidence):
+    errors = evidence.get('errors') if isinstance(evidence, dict) else None
+    errors = errors if isinstance(errors, list) else ['invalid evidence']
+    code = evidence.get('exitCode') if isinstance(evidence, dict) else None
+    return {'exitCode': code if type(code) is int and -255 <= code <= 255 else None,
+            'interrupted': not isinstance(evidence, dict) or evidence.get('interrupted') is not False,
+            'errorCount': min(len(errors), 10000),
+            'kinds': [[tag for tag in DIAGNOSTIC_TAGS if isinstance(error, str) and tag.lower() in error.lower()]
+                      for error in errors[:16]]}
 
 
 def parse_lines(lines, *, worker=False):
@@ -104,7 +120,9 @@ def material_gate(evidence):
     valid = isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict)
     row = rows[0] if valid else {}
     keys = {'phase', 'freshGame', 'newBill', 'pane', 'ui', 'listing', 'row', 'returned', 'exception', 'allowed'}
-    valid = (valid and set(row) == keys and row.get('phase') == 'material'
+    extra = {'setupStage', 'exceptionKind'} if 'setupStage' in row or 'exceptionKind' in row else set()
+    valid = (valid and set(row) == keys | extra and row.get('phase') == 'material'
+             and (not extra or row.get('setupStage') in STAGES and row.get('exceptionKind') in EXCEPTIONS)
              and all(type(row.get(k)) is bool for k in ('freshGame', 'newBill', 'returned', 'exception', 'allowed'))
              and all(type(row.get(k)) is int and 0 <= row[k] <= 20000 for k in ('pane', 'ui', 'listing', 'row')))
     if not valid:
@@ -116,9 +134,11 @@ def material_gate(evidence):
             faults.add('official.paneDidNotReturn')
         if not all(row[k] > 0 for k in ('pane', 'ui', 'listing', 'row')):
             faults.add('official.treeRowNotReached')
-    return {'case': 'material', 'gatePassed': not faults, 'c0Passed': False,
+    result = {'case': 'material', 'gatePassed': not faults, 'c0Passed': False,
             'stopReasons': sorted(faults), 'reachability': {k: row[k] for k in ('pane', 'ui', 'listing', 'row')}
             if valid else {}}
+    if valid and extra: result.update(setupStage=row['setupStage'], exceptionKind=row['exceptionKind'])
+    return result
 
 
 def safe_cases(rows):
@@ -131,7 +151,7 @@ def safe_cases(rows):
     faults |= {'official.paneDidNotReturn', 'official.treeRowNotReached',
                'privatePreparationOrExecutionFailed', 'fixtureBuildFailed', 'product.observationIncomplete'}
     for expected, row in zip(('material', 'event'), rows):
-        keys = {'case', 'gatePassed', 'c0Passed', 'stopReasons', 'executionStatus', 'phases', 'reachability', 'buildErrors'}
+        keys = {'case', 'gatePassed', 'c0Passed', 'stopReasons', 'executionStatus', 'phases', 'reachability', 'buildErrors', 'setupStage', 'exceptionKind', 'diagnostics'}
         if (not isinstance(row, dict) or not set(row) <= keys or row.get('case') != expected
                 or row.get('c0Passed') is not False or type(row.get('gatePassed')) is not bool
                 or row.get('executionStatus') not in ('completed', 'interrupted', 'notStarted')
@@ -139,6 +159,21 @@ def safe_cases(rows):
                 or any(not isinstance(x, str) or x not in faults for x in row['stopReasons'])):
             return []
         result = {k: row[k] for k in ('case', 'gatePassed', 'c0Passed', 'stopReasons', 'executionStatus')}
+        if 'setupStage' in row or 'exceptionKind' in row:
+            if expected != 'material' or row.get('setupStage') not in STAGES or row.get('exceptionKind') not in EXCEPTIONS:
+                return []
+            result.update(setupStage=row['setupStage'], exceptionKind=row['exceptionKind'])
+        if 'diagnostics' in row:
+            diagnostics = row['diagnostics']
+            if not isinstance(diagnostics, dict) or set(diagnostics) != {'product', 'official'}: return []
+            for item in diagnostics.values():
+                if (not isinstance(item, dict) or set(item) != {'exitCode', 'interrupted', 'errorCount', 'kinds'}
+                        or item['exitCode'] is not None and (type(item['exitCode']) is not int or not -255 <= item['exitCode'] <= 255)
+                        or type(item['interrupted']) is not bool or type(item['errorCount']) is not int
+                        or not 0 <= item['errorCount'] <= 10000 or not isinstance(item['kinds'], list)
+                        or len(item['kinds']) > 16 or any(not isinstance(k, list) or len(k) > len(DIAGNOSTIC_TAGS)
+                            or any(tag not in DIAGNOSTIC_TAGS for tag in k) for k in item['kinds'])): return []
+            result['diagnostics'] = diagnostics
         if 'buildErrors' in row:
             errors = row['buildErrors']
             if (not isinstance(errors, list) or len(errors) > 16 or any(not isinstance(e, dict)

@@ -63,9 +63,16 @@ fixtureの各phaseに、スレッド・ProgramState・long event実行中か・w
 
 `safe_cases()` は、`gatePassed=true` に両側の診断情報が揃い、exitCode=0、interrupted=false、errorCount=0、kinds=[] であることを要求する。材料の成功は段階 `complete`・例外 `none` も要求する。失敗記録でも、診断と停止理由（diagnosticsOrExit）、実行状態と中断、kinds件数とerrorCount、段階と例外分類、例外とpaneDidNotReturn、pane前の段階と入口回数、文脈と停止理由の矛盾を拒否する。診断情報のない古い失敗記録は失敗として公開を保ち、成功や資格へ昇格させない。probeと同じ導出をした行が拒否されないことも試験している。
 
+## マージ後のmain実測
+
+[Private Linux validation #10](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/41042238650)：runId `41042238650-1`、commit `ff40256`（PR #48）、suite `c-context`。2ケースを83.885秒で完了、中断なし、validationStatus=incomplete、qualificationStatus=experimental。追加した固定項目は私有ローカル調査と同じ値だった。
+
+- material：`guiEvent=false`、`windowStack=false`、段階 `pane`・`nullReference`、pane=1/ui=1/listing=0/row=0。停止理由に `official.noGuiEvent`。
+- event：製品markerはメインスレッド・Entry・CurrentMapなし。公式のgenerated/finalizeは非メインスレッド・MapInitializing、公式markerはメインスレッド・Playing・CurrentMapあり。停止理由に `official.noMatchingPreFinalizeContext`。
+- 診断はSteam/Textureの件数・分類とも#9と同じ。
+
 ## 未実施
 
-- 追加した固定項目（guiEvent/windowStack、event文脈）のmain限定workflowでの実測。PRのマージ後に1回実行する。
 - 描画ありの公式processでの材料観測、イベントの別参照方式の設計。
 - D（独立比較：3独立process・mutation・不在例）とE（資格/cache）。両ケース停止のため対象外。
 - Steam/Texture診断の完全一致規則化。

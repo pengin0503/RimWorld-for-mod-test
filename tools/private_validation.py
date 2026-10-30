@@ -14,12 +14,13 @@ from types import SimpleNamespace
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 SUITES = ('smoke', 'c-regression', 'd-regression', 'd-compare', 'cow')
+AVAILABLE_SUITES = (*SUITES, 'c-context')  # Research is explicit; existing all remains unchanged.
 
 
 def resolve_suites(name):
     if name == 'all':
         return SUITES
-    if name not in SUITES:
+    if name not in AVAILABLE_SUITES:
         raise ValueError('unknown suite')
     return (name,)
 
@@ -74,6 +75,10 @@ def public_summary(raw, identity):
                          'seconds': seconds if type(seconds) in (int, float) and math.isfinite(seconds)
                          and 0 <= seconds <= 2700 else None})
         checks = r.get('checks') if isinstance(r.get('checks'), dict) else {}
+        context_cases = []
+        if name == 'c-context':
+            from tools.c_context_evidence import safe_cases
+            context_cases = safe_cases(checks.get('contextCases'))
         expected_processes = 2 if name == 'c-regression' else 1
         started = r.get('started') is True
         blocked = r.get('blocked') is True and not started and not processes
@@ -81,6 +86,9 @@ def public_summary(raw, identity):
                     and all(p['exitCode'] is not None and not p['interrupted'] for p in safe)
                     and checks.get('complete') is True)
         accepted = complete and all(p['exitCode'] == 0 for p in safe) and checks.get('accepted') is True
+        if name == 'c-context':
+            complete = complete and len(context_cases) == 2
+            accepted = accepted and complete and all(row['gatePassed'] for row in context_cases)
         qualified = accepted and name == 'smoke' and checks.get('qualified') is True
         failed = complete and r.get('demonstratedFailure') is True
         status = 'blocked' if blocked else 'failed' if failed else 'passed' if qualified or (accepted and name == 'cow') else 'incomplete'
@@ -88,6 +96,7 @@ def public_summary(raw, identity):
                      'validationStatus': status, 'qualificationStatus': 'qualified' if qualified else
                      'experimental' if name != 'cow' else 'notRequested', 'acceptancePassed': accepted,
                      'processes': safe})
+        if name == 'c-context': rows[-1]['contextCases'] = context_cases
     accepted = bool(rows) and order == list(selected) and all(r['acceptancePassed'] for r in rows)
     status = ('failed' if any(r['validationStatus'] == 'failed' for r in rows) else
               'blocked' if any(r['validationStatus'] == 'blocked' for r in rows) else
@@ -117,7 +126,7 @@ def init_session(root, selection):
         raise ValueError('session already initialized')
     session.mkdir(parents=True, mode=0o700)
     write_json(session / 'session.json', {**identity, 'selection': selection,
-        'needsGame': any(s != 'cow' for s in suites), 'needsHarmony': any(s in ('smoke','d-compare') for s in suites),
+        'needsGame': any(s != 'cow' for s in suites), 'needsHarmony': any(s in ('smoke','d-compare','c-context') for s in suites),
         'needsCow': 'cow' in suites})
     write_json(session / 'summary.json', {**identity, 'selection': selection, 'suites': []})
     return session
@@ -176,12 +185,18 @@ def tree_rss(pid):
     return total
 
 
-def run_command(command, log, *, timeout=900, memory_limit=4*1024**3):
+def run_command(command, log, *, timeout=900, memory_limit=4*1024**3, watch_paths=()):
     started=time.monotonic(); interrupted=False
     if not native_process_available():
         return {'exitCode':None,'interrupted':True,'seconds':0}
     log=log.resolve()
     log.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    def log_bytes():
+        total = 0
+        for path in (log, *watch_paths):
+            try: total += path.stat().st_size
+            except FileNotFoundError: pass
+        return total
     status=log.with_suffix('.guardian.json')
     if status.exists() or Path(str(status)+'.inner').exists():
         raise ValueError('guardian status already exists')
@@ -193,7 +208,7 @@ def run_command(command, log, *, timeout=900, memory_limit=4*1024**3):
                                  env=child_environment(log.parent/'environment'),start_new_session=True,cwd=REPO)
         try:
             while process.poll() is None:
-                if (time.monotonic()-started>=timeout or log.stat().st_size>8*1024*1024
+                if (time.monotonic()-started>=timeout or log_bytes()>8*1024*1024
                         or tree_rss(process.pid)>memory_limit):
                     interrupted=True; break
                 time.sleep(.05)
@@ -203,7 +218,7 @@ def run_command(command, log, *, timeout=900, memory_limit=4*1024**3):
             if process.poll() is None:
                 process.terminate()
             process.wait()
-    if log.stat().st_size > 8*1024*1024 or time.monotonic()-started >= timeout:
+    if log_bytes() > 8*1024*1024 or time.monotonic()-started >= timeout:
         interrupted=True
     evidence=read_json(status)
     evidence=evidence if isinstance(evidence,dict) else {}
@@ -246,6 +261,7 @@ def suite_commands(name, snapshot, out, worker, harmony=None, cow=None):
                 helper('tests/integration/run_event_choice.py',out/'events')]
     if name=='d-regression': return [helper('tests/integration/run_bounded_tick.py',out/'ticks')]
     if name=='d-compare': return [helper('experiments/official-comparison/compare_ticks.py',out/'comparison','--harmony-dll',str(harmony))]
+    if name=='c-context': return [helper('experiments/official-comparison/probe_c_context.py',out/'context','--harmony-dll',str(harmony))]
     if name=='cow':
         return [([sys.executable,str(REPO/'experiments/cow-measurement/measure.py'),
                   '--root',str(cow/'measurement'),'--summary',str(out/'summary.json')],out)]
@@ -254,14 +270,14 @@ def suite_commands(name, snapshot, out, worker, harmony=None, cow=None):
 
 def run_suites(suites, snapshot, out, worker, *, harmony=None, cow=None, prerequisites=None, identity=None, selection=None):
     from tools.private_validation_evidence import inspect
-    if any(n not in SUITES for n in suites) or len(set(suites))!=len(suites): raise ValueError('invalid suites')
+    if any(n not in AVAILABLE_SUITES for n in suites) or len(set(suites))!=len(suites): raise ValueError('invalid suites')
     out.mkdir(parents=True,exist_ok=True,mode=0o700)
     identity = identity or {}; prerequisites = prerequisites if prerequisites is not None else {'game':True,'harmony':True,'cow':True}
     data={**identity,'selection':selection,'suites':[{'suite':n,'started':False,'blocked':False,'processes':[],'checks':{}} for n in suites]}
     def checkpoint(): write_json(out/'summary.json',data)
     checkpoint(); deadline=time.monotonic()+2400
     for row in data['suites']:
-        name=row['suite']; required=('cow',) if name=='cow' else ('game','harmony') if name in ('smoke','d-compare') else ('game',)
+        name=row['suite']; required=('cow',) if name=='cow' else ('game','harmony') if name in ('smoke','d-compare','c-context') else ('game',)
         if not all(prerequisites.get(k) is True for k in required):
             row['blocked']=True; checkpoint(); continue
         if time.monotonic()>=deadline: continue
@@ -279,6 +295,7 @@ def run_suites(suites, snapshot, out, worker, *, harmony=None, cow=None, prerequ
             row['checks']={'complete':len(results)==len(commands) and all(r['complete'] for r in results),
                            'accepted':len(results)==len(commands) and all(r['accepted'] for r in results),
                            'qualified':name=='smoke' and bool(results) and results[0]['qualified']}
+            if name == 'c-context' and results: row['checks']['contextCases'] = results[0].get('contextCases', [])
             row['demonstratedFailure']=any(r['failed'] for r in results)
         except (OSError,ValueError,RuntimeError):
             row['checks']={}
@@ -311,7 +328,7 @@ def execute_session(root, worker, harmony=None, cow=None):
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('phase',choices=('init','prepare','run','publish'))
-    parser.add_argument('--suite',default='smoke',choices=(*SUITES,'all'))
+    parser.add_argument('--suite',default='smoke',choices=(*AVAILABLE_SUITES,'all'))
     parser.add_argument('--private-root',type=Path,required=True)
     parser.add_argument('--worker',type=Path,default=REPO/'worker/bin')
     parser.add_argument('--harmony-dll',type=Path)

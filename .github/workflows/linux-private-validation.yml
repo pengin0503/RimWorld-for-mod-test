@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: smoke
-        options: [smoke, c-regression, d-regression, d-compare, cow, all]
+        options: [smoke, c-regression, c-context, d-regression, d-compare, cow, all]
 
 permissions:
   contents: read

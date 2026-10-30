@@ -256,7 +256,7 @@ def candidate_summary(evidence):
     for row in evidence:
         if not isinstance(row,dict) or set(row)!={'id','kind','arity','module','sha256'}:continue
         ident=row.get('id');module=row.get('module')
-        if not isinstance(ident,str) or ident not in CANDIDATES or not isinstance(module,str) or module not in EXPECTED:continue
+        if not isinstance(ident,str) or ident not in CANDIDATES or not isinstance(module,str) or module not in (*MANAGED_NAMES, 'System.Private.CoreLib.dll'):continue
         if row['sha256']!=EXPECTED[module] or type(row['arity']) is not int or row['arity']!=CANDIDATES[ident][1]:continue
         if row['kind'] not in ('reference','definitionUse','definition'):continue
         if row['kind'] in ('definitionUse','definition') and module!=CANDIDATES[ident][0]:continue

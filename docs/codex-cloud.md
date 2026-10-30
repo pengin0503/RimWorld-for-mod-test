@@ -124,6 +124,9 @@ prepare はゲーム本体を新たな私有スナップショットへコピー
 選択肢は `smoke`（既定: ok/harmony-ok/map-ok）、`c-regression`（材料6＋自作イベント4）、
 `d-regression`（自作有限tick10）、`d-compare`（公式との独立比較60/600/600）、`cow`、`all`。
 allは個別5suiteを順に試す。ゲームsnapshotは同一job内で一度だけ準備し、R2資格情報はその準備stepのみに渡す。
+別途 `c-context` はC0参照経路の開発専用調査。明示選択だけで実行し、既存allには含めない。
+材料の実UI行への到達と、製品/公式の生成後キューマーカー・FinalizeInitの前後を別々に測る。
+正常終了やgatePassedだけでCを適格化しない。固定の停止理由と到達回数/phaseだけを公開し、私有ログはアップロードしない。
 実行子環境は許可したランタイム変数だけを引き継ぎ、HOME/TMP/XDGを私有領域に分ける。
 自作fixtureのbuildにも `UseSharedCompilation=false` を渡し、常駐コンパイラーを起動しない。
 smoke/独立比較用の開発ライブラリは従来の実験と同じLib.Harmony 2.4.3を使用する。

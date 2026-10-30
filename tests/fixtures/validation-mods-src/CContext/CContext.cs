@@ -36,36 +36,51 @@ namespace RWMT.CContext
         {
             Game previous = Current.Game;
             bool freshGame = false, newBill = false, returned = false, exception = false, allowed = false;
+            string setupStage = "game", exceptionKind = "none";
             try
             {
                 var game = new Game();
                 Current.Game = game;
                 freshGame = !ReferenceEquals(previous, game);
+                setupStage = "bill";
                 var recipe = DefDatabase<RecipeDef>.GetNamed("RWMT_BillOptions");
                 Target = DefDatabase<ThingDef>.GetNamed("RWMT_BillGrain");
                 Bill bill = BillUtility.MakeNewBill(recipe, null);
                 newBill = bill is Bill_Production;
+                setupStage = "binding";
                 var dialogType = typeof(Dialog_BillConfig);
                 var pane = AccessTools.Method(dialogType, "DoIngredientConfigPane", new[] { typeof(float), typeof(float).MakeByRefType(), typeof(float), typeof(float) });
                 var ui = AccessTools.GetDeclaredMethods(typeof(ThingFilterUI)).Single(m => m.Name == "DoThingFilterConfigWindow");
                 var ctor = AccessTools.GetDeclaredConstructors(typeof(Listing_TreeThingFilter)).Single(c => c.GetParameters().Length == 6);
                 var row = AccessTools.Method(typeof(Listing_TreeThingFilter), "DoThingDef", new[] { typeof(ThingDef), typeof(int), typeof(Map) });
                 if (row == null) throw new MissingMethodException();
+                setupStage = "hooks";
                 var harmony = new Harmony("rwmodtest.ccontext.material");
                 harmony.Patch(pane, prefix: new HarmonyMethod(typeof(ProbeMod), nameof(OnPane)));
                 harmony.Patch(ui, prefix: new HarmonyMethod(typeof(ProbeMod), nameof(OnUI)));
                 harmony.Patch(ctor, prefix: new HarmonyMethod(typeof(ProbeMod), nameof(OnListing)));
                 harmony.Patch(row, prefix: new HarmonyMethod(typeof(ProbeMod), nameof(OnRow)));
+                setupStage = "dialog";
                 object dialog = Activator.CreateInstance(dialogType, new object[] { bill });
+                setupStage = "pane";
                 pane.Invoke(dialog, new object[] { 0f, 0f, 400f, 400f });
                 returned = true;
                 var filter = (ThingFilter)AccessTools.Field(bill.GetType(), "ingredientFilter").GetValue(bill);
                 allowed = filter.Allows(Target);
+                setupStage = "complete";
             }
-            catch (Exception error) { exception = true; Log.Message("[RWMT-CONTEXT-PRIVATE] " + error); }
+            catch (Exception error)
+            {
+                exception = true;
+                Log.Message("[RWMT-CONTEXT-PRIVATE] " + error);
+                Exception cause = error;
+                for (int n = 0; n < 8 && cause is TargetInvocationException && cause.InnerException != null; n++) cause = cause.InnerException;
+                exceptionKind = cause is MissingMemberException ? "missingApi" : cause is AmbiguousMatchException ? "ambiguousApi"
+                    : cause is TypeInitializationException ? "typeInitialization" : cause is NullReferenceException ? "nullReference" : "runtimeOther";
+            }
             finally { Current.Game = previous; }
             Emit(new { phase = "material", freshGame, newBill, pane = Pane, ui = UI,
-                listing = Listing, row = Row, returned, exception, allowed });
+                listing = Listing, row = Row, returned, exception, allowed, setupStage, exceptionKind });
         }
     }
 

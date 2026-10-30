@@ -131,6 +131,7 @@ def run_case(mode, args):
     official = read_evidence(player_log, process, worker=False)
     pv.write_json(out/'private-evidence.json', {'product': product, 'official': official})
     row = evidence.event_gate(product, official) if mode == 'event' else evidence.material_gate(official)
+    row['diagnostics'] = {label: evidence.diagnostic_summary(value) for label, value in (('product', product), ('official', official))}
     if not ready:
         row['gatePassed'] = False
         row['stopReasons'] = sorted(set([*row['stopReasons'], 'product.observationIncomplete']))

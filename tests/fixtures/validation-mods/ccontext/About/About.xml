@@ -1,0 +1,9 @@
+<ModMetaData>
+  <name>RWMT development C context observer</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <packageId>rwmodtest.ccontext</packageId>
+  <description>Finite development-only C0 reachability research. Does not grant qualification.</description>
+  <supportedVersions><li>1.7</li></supportedVersions>
+  <modDependencies><li><packageId>rwmodtest.harmonylib</packageId><displayName>RWMT Harmony fixture</displayName></li></modDependencies>
+  <loadAfter><li>rwmodtest.harmonylib</li></loadAfter>
+</ModMetaData>

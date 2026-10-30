@@ -49,6 +49,13 @@ def inspect(kind, out):
                             and all(type(r.get('count')) is int and type(r.get('equivalent')) is bool
                                     and type(r.get('sensitivity')) is bool and r.get('productD')=='completed' for r in rows))
         result['accepted']=result['complete'] and data.get('ok') is True and all(r['equivalent'] and r['sensitivity'] for r in rows)
+    elif kind=='c-context':
+        from tools.c_context_evidence import safe_cases
+        data = read(out/'safe-summary.json')
+        rows = safe_cases(data.get('cases')) if isinstance(data, dict) and type(data.get('schemaVersion')) is int and data['schemaVersion'] == 1 and data.get('c0Passed') is False else []
+        result['contextCases'] = rows
+        result['complete'] = len(rows) == 2 and all(r['executionStatus'] == 'completed' for r in rows)
+        result['accepted'] = result['complete'] and all(r['gatePassed'] for r in rows)
     elif kind=='cow':
         data=read(out/'summary.json'); data=data if isinstance(data,dict) else {}
         rows=data.get('rows'); rows=rows if isinstance(rows,list) else []

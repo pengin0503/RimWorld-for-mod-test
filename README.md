@@ -42,34 +42,9 @@ AI の通常の検証先は Linux、Windows 向けの新規開発は中止し、
 
 実装済みの範囲は A：Defs・XML パッチ・選択言語・参照解決・公式の Def 検査、B：DLL 初期化と期待した Harmony 登録です。Cは材料候補と自作イベントの固定ケースをexperimentalとして実装済みです。D：一時世界・限定 tick はLinuxの固定fixtureでexperimentalとして実装しています。ロード成功や Harmony 登録だけで、MOD の全機能が正しいとは判定しません。
 
-## 受領資料と調査記録
 
-- [受領ファイルの調査](docs/research/2026-10-25-input-audit.md)と[識別メタデータ](docs/research/input-inventory.json)。
-- [分割 Data の追加調査](docs/research/2026-10-25-split-data-audit.md)。Core・Royalty・Ideology・Biotech・Odyssey のデータ、DLC アセット 4 個を確認。元の大 ZIP の再送は不要。
-- [Core の管理情報](docs/research/2026-10-25-core-asset-metadata-audit.md)と[小容量リソース](docs/research/2026-10-25-core-small-resources-audit.md)。Core アセット本体を完全に受領した結果ではない。
-- [起動・読み込みの静的調査](notes/2026-10-25-source-audit.md)と[調査 JSON](notes/2026-10-25-source-audit.json)。MOD 自動回復、DLC の追加・ソート、遅延初期化、言語、ログ上限等。
-- [以前の引き継ぎ](notes/handoff-2026-10-25.md)と[以前の試運転報告](notes/headless-spike-report.md)。今回の成功実績として扱わない。
+## English
 
-2026-10-25 に Linux 版一式（WaylithClr、native 依存、Data、Assets.zip、GLSL を含む）を受領し、依存を確認しました（[依存と必要資材](docs/research/test-host-dependencies.md)）。以前の Windows 版とはゲーム DLL がバイト単位で同一です。資材不足を MOD の失敗や検証成功に変換しません。
+This project is a test-only host for exercising RimWorld mod loading and selected game logic in a Linux x86_64 environment. It is not a playable game and does not launch the official game executable. It requires legally supplied RimWorld files; the game is not distributed here. See the [validation host guide](docs/validation-host.md) for setup and use.
 
-`RimWorld by Ludeon Studios.zip` は設定・セーブ・キャッシュなどのユーザーデータで、インストール一式の代わりにはなりません。
-
-## ゲームファイルの扱いと旧資料
-
-ゲーム DLL、実行ファイル、ランタイム、Data、アセット、逆コンパイル本文、個人設定・セーブ・生ログは公開しません。正規の利用者が用意したファイルを私有領域で使います。Anomaly は対象外。公開 CI は自作 fixture に限定します。
-
-[旧 headless 設計](docs/superpowers/specs/2026-10-25-headless-validation-design.md)と[旧二用途設計](docs/superpowers/specs/2026-10-25-dual-use-design.md)は経緯の記録です。公式実行ファイルを製品から起動する方針と、通常起動の入口を作る方針は最新仕様で取り消しています。旧資料の判断を新しい要件として復活させないでください。
-
-## Cloudflare R2 からのオンデマンド資材取得
-
-[Cloudflare R2 のオンデマンド取得](docs/r2-on-demand.md) を参照してください。`tools/r2_assets.py` は読み取り専用で、`Game-Linux/` の必要なファイルと `Workshop/<ID>/` の指定 MOD だけを取得します。既存の検証ホストおよび判定契約は変更しません。GitHub Actions の手動ワークフローはプレビュー／限定取得のみを行い、ゲームファイルをログや Artifacts には出力しません。Codex Cloudと私有GitHub Actionsからの実接続・限定取得は実測済みです。資材準備だけに認証情報を渡し、検証実行へは渡しません。
-
-## Codex Cloud での R2 参照・MOD 検証
-
-[Codex Cloud の接続・実行手順](docs/codex-cloud.md) と [Codex 向け作業規約](AGENTS.md) を追加しました。ユーザーの非公開 MOD 索引（ZIP）は公開リポジトリに置かず、Codex の私有領域で Workshop ID の解決に利用します。`tools/codex_workflow.py` は索引検索、指定 MOD の R2 取得、Linux ゲームスナップショットの準備、既存検証ホストの実行を補助します。
-
-2026-10-26 にコミット `5ff1a52` で Harmony の A 検証が `passed / completed / qualified`。その後、R2 直下の `rimworld-mod-index.zip` を取得し、索引照合・1.7 向け限定取得を経た Harmony の A 検証も `passed / completed / qualified`（6ファイル・約2.55 MB、ゲーム再取得なし）。既定の索引キーも実配置へ修正しました。[Codex Cloud の実測記録](docs/research/2026-10-26-codex-cloud-a-validation.md) に成功範囲と残作業を分けて記録しています。
-
-限定取得はゲームの有効ロードフォルダ・条件・版別依存に合わせて計画し、判断できない場合は `blocked` にします。VPE と Harmony・VEF、Core＋Royalty・英語の A 検証で、限定取得と全取得のロード順・実フォルダ・Def 数・診断が一致しました。[限定取得の比較記録](docs/research/2026-10-26-limited-fetch-parity.md)を参照してください。
-
-2026-10-29：PR27のCOW実測・D独立比較、PR28の[次の5作業の計画](docs/superpowers/plans/2026-10-29-linux-validation-next.md)をmainへ統合済みです。COWは[専用Btrfsで実測](docs/research/2026-10-29-cow-filesystem-measurement.md)、Dは[公式比較の視点・診断差](docs/research/2026-10-29-bounded-tick-independent-comparison.md)が残り未適格です。
+On RimWorld 1.7.4985 rev1269 with WaylithClr, the host has been qualified for loading, XML patches, references, Def checks and selected Harmony checks. Map generation is qualified separately. Selected bill/event checks and bounded ticks are experimental and not independently qualified. A successful load does not prove all mod behavior. Static checks report `gameVerification=notRun`. Linux results do not guarantee Windows behavior; Windows game validation is unsupported.

@@ -44,11 +44,11 @@ jobs:
           git -C "$RUNNER_TEMP/qol-mods/Animals" checkout -q --detach FETCH_HEAD
           git init -q "$RUNNER_TEMP/qol-mods/Apparel"
           git -C "$RUNNER_TEMP/qol-mods/Apparel" remote add origin https://github.com/pengin0503/rimworld-Smart-Apparel-Upgrade
-          git -C "$RUNNER_TEMP/qol-mods/Apparel" fetch -q --depth 1 origin d940c1debe4f720aa8279d44ea2d69701fc6f5f6
+          git -C "$RUNNER_TEMP/qol-mods/Apparel" fetch -q --depth 1 origin fbdf46139f672d591f780956b2f2eed56a7ec693
           git -C "$RUNNER_TEMP/qol-mods/Apparel" checkout -q --detach FETCH_HEAD
           test "$(git -C "$RUNNER_TEMP/qol-mods/Task" rev-parse HEAD)" = 68a86152a198b9869d4fa1272c35e8afe7a620f8
           test "$(git -C "$RUNNER_TEMP/qol-mods/Animals" rev-parse HEAD)" = c8551b477cbfb984721b2ffb5676d5dd6e8090f7
-          test "$(git -C "$RUNNER_TEMP/qol-mods/Apparel" rev-parse HEAD)" = d940c1debe4f720aa8279d44ea2d69701fc6f5f6
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Apparel" rev-parse HEAD)" = fbdf46139f672d591f780956b2f2eed56a7ec693
           dotnet build "$RUNNER_TEMP/qol-mods/Task/Source/ColonyTaskAuditor.csproj" -c Release
           dotnet build "$RUNNER_TEMP/qol-mods/Animals/Source/AnimalManagement.csproj" -c Release
           dotnet build "$RUNNER_TEMP/qol-mods/Apparel/Source/SmartApparelUpgrade.csproj" -c Release

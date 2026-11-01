@@ -1,0 +1,125 @@
+name: Private A-load validation - three QoL mods
+
+on:
+  push:
+    branches:
+      - feat/qol-three-mod-load-smoke-20261101
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-qol-three-mod-load
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install private R2 SDK
+        run: python3 -m pip install -r requirements-r2-sdk.txt
+      - name: Prepare private validated game snapshot once
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+          R2_BUCKET: rimworld-17
+          RWMT_R2_TRANSPORT: sdk
+        run: |
+          set -euo pipefail
+          python3 tools/codex_workflow.py prepare --private-root "$RUNNER_TEMP/rw-qol-private" > "$RUNNER_TEMP/qol-private-prepare.log" 2>&1 || {
+            echo '::error::Private game preparation failed. No raw game or credentials are published.'
+            exit 1
+          }
+      - name: Build isolated game validation worker
+        run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+      - name: Check exact source revisions and compile three mods
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/qol-mods"
+          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Colony-Task-Auditor "$RUNNER_TEMP/qol-mods/Task"
+          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Animal-Management "$RUNNER_TEMP/qol-mods/Animals"
+          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Smart-Apparel-Upgrade "$RUNNER_TEMP/qol-mods/Apparel"
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Task" rev-parse HEAD)" = 7748e3fc553f9d3056fe62f5962f3e6933c594b3
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Animals" rev-parse HEAD)" = b1c220346e04a97218003fb4beaebf2b6a538ce1
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Apparel" rev-parse HEAD)" = a8736703ad0791ab062e00e207c78c366af7fdf4
+          dotnet build "$RUNNER_TEMP/qol-mods/Task/Source/ColonyTaskAuditor.csproj" -c Release
+          dotnet build "$RUNNER_TEMP/qol-mods/Animals/Source/AnimalManagement.csproj" -c Release
+          dotnet build "$RUNNER_TEMP/qol-mods/Apparel/Source/SmartApparelUpgrade.csproj" -c Release
+          test -s "$RUNNER_TEMP/qol-mods/Task/1.7/Assemblies/ColonyTaskAuditor.dll"
+          test -s "$RUNNER_TEMP/qol-mods/Animals/1.7/Assemblies/AnimalManagement.dll"
+          test -s "$RUNNER_TEMP/qol-mods/Apparel/1.7/Assemblies/SmartApparelUpgrade.dll"
+      - name: Run independent level-A mod load checks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          private = temp / "rw-qol-private"
+          mod_root = temp / "qol-mods"
+          snapshot = private / "game-snapshot"
+          assert snapshot.is_dir(), "Private game snapshot was not created"
+          results = []
+          failed = False
+          for name, folder in (
+              ("ColonyTaskAuditor", "Task"),
+              ("AnimalManagement", "Animals"),
+              ("SmartApparelUpgrade", "Apparel"),
+          ):
+              mod = mod_root / folder
+              out = private / "results" / name
+              request = {
+                  "recordType": "modValidationRequest",
+                  "schemaVersion": 1,
+                  "levels": ["A"],
+                  "official": ["Core"],
+                  "mods": [{"path": str(mod), "target": True}],
+                  "language": "Japanese",
+                  "expectations": {},
+              }
+              request_path = private / f"{name}.json"
+              request_path.write_text(json.dumps(request), encoding="utf-8")
+              log = temp / f"qol-private-{name}.log"
+              with log.open("w", encoding="utf-8") as stream:
+                  proc = subprocess.run([
+                      sys.executable, "tools/validation_host.py", "run",
+                      "--snapshot", str(snapshot), "--request", str(request_path),
+                      "--out", str(out), "--baseline-cache", str(private / "baseline-cache"),
+                  ], stdout=stream, stderr=subprocess.STDOUT, timeout=600)
+              verdict_path = out / "result.json"
+              if verdict_path.exists():
+                  data = json.loads(verdict_path.read_text(encoding="utf-8"))
+                  status = data.get("status", "unknown")
+                  codes = [
+                      x.get("code") for x in data.get("reasons", [])[:8]
+                      if isinstance(x, dict) and isinstance(x.get("code"), str)
+                  ]
+              else:
+                  status = "noResult"
+                  codes = []
+              results.append({"mod": name, "status": status, "reasonCodes": codes, "exitCode": proc.returncode})
+              if status != "passed" or proc.returncode != 0:
+                  failed = True
+          print(json.dumps({"scope": "A-load-only", "results": results}, ensure_ascii=False))
+          if failed:
+              print("::error::One or more mods did not pass the qualified load-only check.")
+              raise SystemExit(1)
+          PY

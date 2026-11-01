@@ -1,50 +1,17 @@
 # RimWorld-for-mod-test
 
-RimWorld を通常起動できない環境でも、作成した MOD を実物のゲーム処理で検証するための**検証専用ツール**を目指すプロジェクトです。ゲームとして遊べる機能は提供しません。
+**日本語** | [English](README.en.md)
 
-> **2026-10-27：Windows 版（W1 の Worker 実行・W2 の画面）の作業はユーザーの決定で中止・凍結しました。** 目標は AI がクラウドの Linux で使う検証ホストの完成です。Windows のコードには新しい機能を足さず、既存のテストと CI が通る状態だけを保ちます。W2 の実機確認は 1 回目のみ（起動・MOD 一覧の操作は動作、検証の完了は未確認）。
+RimWorld MODの読み込みや一部のゲーム処理をLinux環境で検証するためのツールです。ゲームとして遊ぶことはできず、公式ゲーム実行ファイルも起動しません。正規に用意したゲームファイルが必要で、ゲーム本体は配布していません。
 
-- **主用途：iPad → AI → Linux**：ユーザーが PC を操作できなくても、AI が Linux 環境のツールで実物のゲーム処理による検証・MOD 修正・再検証を進め、後でゲームへ導入して遊べる状態を目指す。ユーザーの Windows PC の起動・遠隔接続・手動テストを通常の検証フローの前提にしない。
-- **中止・凍結：Windows で自分で検証**：同じ検証を自分で実行し、問題を直してからゲームは別途通常の方法で起動して遊ぶ。検証の待ち時間短縮を目指す。
+## 利用方法
 
-## 最新の仕様と現在の状態
+セットアップと実行は[実ゲーム処理によるMOD検証ガイド](docs/validation-host.md)を参照してください。Cloudflare R2から必要なファイルを取得する方法は[R2ガイド](docs/r2-on-demand.md)、検証結果の意味は[結果契約](docs/contracts/mod-validation-v1.md)に記載しています。
 
-**最新の方針は [検証専用ホストの仕様・設計案](docs/superpowers/specs/2026-10-25-test-only-host-design.md) です。** 独立したホストからゲーム DLL の必要な処理を呼ぶ方式で、公式ゲーム実行ファイルは起動しません。2026-10-25 に Linux で成立を確認し、A（実ローダー）と B（DLL・Harmony）を実装しました。**使い方は [実ゲーム処理による MOD 検証](docs/validation-host.md)** です。
+## 対応範囲
 
-| 項目 | 現状 |
-|---|---|
-| 実ゲーム処理による検証（`tools/validation_host.py` と C# Worker） | **Linux x86_64 で実装済み**。RimWorld 1.7.4985 rev1269＋同梱 WaylithClr で `qualified`。XML パッチ失敗、未解決参照、Mod 初期化例外、期待した Harmony パッチの欠落、パッチの副作用（公式の Def 検査エラー）を実物の処理で検出 |
-| 公式 headless との比較（開発用） | 自作 fixture 9 ケースで、エラー・警告と読込結果（Def 値、翻訳、MOD 順序、Harmony 登録）が一致。[適格化の記録](docs/research/test-host-qualification.md) |
-| 実際の MOD | Harmony 3.0.1 と Vanilla Expanded Framework で実行。VEF は Core・全 DLC 英語で passed、全 DLC 日本語では公式翻訳の注入先を消すパッチのため翻訳エラーの警告が 3 件増えて failed。公式 headless と同じ結果。2026-10-26 に索引から選んだ Vanilla Psycasts Expanded（VEF 依存、Harmony 登録 86 件）と TD Enhancement Pack（登録 180 件、うち transpiler 27 件）も Core・全 DLC 英語・全 DLC 日本語で passed、公式 headless と一致。[実 MOD 検証](docs/research/real-mod-validation.md) |
-| Windows での実ゲーム検証 | 未対応（`run` は `blocked`）。Linux の結果を Windows の保証にしない |
-| 標準 .NET での実行 | 実験扱い（常に `incomplete`）。WaylithClr との実害のある差を確認済み |
-| マップ生成（`map`） | Linux x86_64 で実装・適格化済み。ロード後に一時的なワールドとマップを 1 枚生成し、模式図の画像・内容・期待値の判定を出す。このビルドのマップ生成は同じ種でも毎回少し違う（公式も同じ）ため、公式 quick test と各 5 回の分布で比較。[マップ生成の適格化](docs/research/map-qualification.md) |
-| C：指定動作テスト | 新規 Bill の材料表示候補/許可状態と、自作fixture限定のイベント選択肢を実装（Linux 非描画・experimental、独立適格化未完了）。任意イベント/クエストは未対応。[契約](docs/contracts/mod-validation-v1.md#c製造指示の材料候補非描画experimental) |
-| D：ゲーム開始後・tick | Linux対応ビルドの有限tick基盤 `bounded-tick.v1` を実装（experimental）。自作fixture観測に限定、独立適格化は未完了。[契約](docs/contracts/mod-validation-v1.md#d有限-ticklinuxexperimental) |
-| 入力監査 CLI | 実装済み。ZIP・XML 構文・manifest を検査 |
-| MOD 事前検査 CLI / Windows 画面 | 実装済み。静的検査のみ（`gameVerification=notRun`） |
-| 既存の通常起動機能 | **削除済み**。CLI `play` は移行エラーを返すだけ。画面の起動ボタンも削除 |
-| 速度 | 準備込みの実測あり（[性能](docs/research/test-host-performance.md)）。公式の通常（GUI）起動との比較は未計測 |
+Linux x86_64、RimWorld 1.7.4985 rev1269、同梱WaylithClrの組み合わせで、MODのロード、XMLパッチ、参照解決、Def検査、指定したHarmonyパッチの確認を適格化しています。マップ生成も別途適格化済みです。
 
-AI の通常の検証先は Linux、Windows 向けの新規開発は中止し、既存テストと CI は維持します。ユーザーの Windows PC への遠隔接続を製品方式には採用しません。成果物は修正した MOD と検証結果です。「遊べる状態」は MOD 側の目標であり、ツール自体を遊べる形にすることではありません。
+製造指示の材料候補と限定的なイベント選択肢、有限tickの検証は実験段階で、独立した適格化は未完了です。任意のMOD機能全体を検証するものではありません。単なる静的検査では `gameVerification=notRun` となり、実ゲーム処理の検証成功を意味しません。
 
-現在の静的検査は `gameVerification=notRun` を返します。これを MOD の実動作検証成功に読み替えません。Linux で検証できた結果も、Windows 固有の動作保証にはなりません。
-
-## 仕様・使い方・次の計画
-
-- [検証専用ホストの仕様・設計案](docs/superpowers/specs/2026-10-25-test-only-host-design.md)：原意、方式比較、プレイ不可、検証範囲、OS/CLR の同等性、判定、速度測定。
-- [実ゲーム処理による MOD 検証の使い方](docs/validation-host.md) と [要求・結果契約](docs/contracts/mod-validation-v1.md)。
-- [製品実装計画と実施状況](docs/superpowers/plans/test-only-host-product.md)、[成立性調査の計画](docs/superpowers/plans/2026-10-25-test-only-host.md)。
-- 調査：[依存と必要資材](docs/research/test-host-dependencies.md)、[呼出し経路と終了点](docs/research/test-host-entrypoints.md)、[適格化](docs/research/test-host-qualification.md)、[性能](docs/research/test-host-performance.md)。
-- [二つの用途と現在使える静的検査](docs/dual-use.md)：現在の実装と将来の仕様を区別。
-- [入力監査 CLI](docs/offline-input-audit.md)：Python 3.12+、外部パッケージ不要。
-- [資材の現状と必要性の確認方針](docs/linux-files-needed.md)：Linux 一式を待つことと、工程別の不足を調べることを区別。
-
-実装済みの範囲は A：Defs・XML パッチ・選択言語・参照解決・公式の Def 検査、B：DLL 初期化と期待した Harmony 登録です。Cは材料候補と自作イベントの固定ケースをexperimentalとして実装済みです。D：一時世界・限定 tick はLinuxの固定fixtureでexperimentalとして実装しています。ロード成功や Harmony 登録だけで、MOD の全機能が正しいとは判定しません。
-
-
-## English
-
-This project is a test-only host for exercising RimWorld mod loading and selected game logic in a Linux x86_64 environment. It is not a playable game and does not launch the official game executable. It requires legally supplied RimWorld files; the game is not distributed here. See the [validation host guide](docs/validation-host.md) for setup and use.
-
-On RimWorld 1.7.4985 rev1269 with WaylithClr, the host has been qualified for loading, XML patches, references, Def checks and selected Harmony checks. Map generation is qualified separately. Selected bill/event checks and bounded ticks are experimental and not independently qualified. A successful load does not prove all mod behavior. Static checks report `gameVerification=notRun`. Linux results do not guarantee Windows behavior; Windows game validation is unsupported.
+Windowsでの実ゲーム検証は未対応です。Linuxで成功した結果はWindowsでの動作を保証しません。

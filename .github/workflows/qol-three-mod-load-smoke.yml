@@ -1,0 +1,176 @@
+name: Private A and bounded-tick smoke - three QoL mods
+
+on:
+  push:
+    branches:
+      - work/three-mod-verification-20261101
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-qol-three-mod-load
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install private R2 SDK
+        run: python3 -m pip install -r requirements-r2-sdk.txt
+      - name: Check exact source revisions and compile three mods
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/qol-mods"
+          git init -q "$RUNNER_TEMP/qol-mods/Task"
+          git -C "$RUNNER_TEMP/qol-mods/Task" remote add origin https://github.com/pengin0503/rimworld-Colony-Task-Auditor
+          git -C "$RUNNER_TEMP/qol-mods/Task" fetch -q --depth 1 origin 68a86152a198b9869d4fa1272c35e8afe7a620f8
+          git -C "$RUNNER_TEMP/qol-mods/Task" checkout -q --detach FETCH_HEAD
+          git init -q "$RUNNER_TEMP/qol-mods/Animals"
+          git -C "$RUNNER_TEMP/qol-mods/Animals" remote add origin https://github.com/pengin0503/rimworld-Animal-Management
+          git -C "$RUNNER_TEMP/qol-mods/Animals" fetch -q --depth 1 origin c8551b477cbfb984721b2ffb5676d5dd6e8090f7
+          git -C "$RUNNER_TEMP/qol-mods/Animals" checkout -q --detach FETCH_HEAD
+          git init -q "$RUNNER_TEMP/qol-mods/Apparel"
+          git -C "$RUNNER_TEMP/qol-mods/Apparel" remote add origin https://github.com/pengin0503/rimworld-Smart-Apparel-Upgrade
+          git -C "$RUNNER_TEMP/qol-mods/Apparel" fetch -q --depth 1 origin d940c1debe4f720aa8279d44ea2d69701fc6f5f6
+          git -C "$RUNNER_TEMP/qol-mods/Apparel" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Task" rev-parse HEAD)" = 68a86152a198b9869d4fa1272c35e8afe7a620f8
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Animals" rev-parse HEAD)" = c8551b477cbfb984721b2ffb5676d5dd6e8090f7
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Apparel" rev-parse HEAD)" = d940c1debe4f720aa8279d44ea2d69701fc6f5f6
+          dotnet build "$RUNNER_TEMP/qol-mods/Task/Source/ColonyTaskAuditor.csproj" -c Release
+          dotnet build "$RUNNER_TEMP/qol-mods/Animals/Source/AnimalManagement.csproj" -c Release
+          dotnet build "$RUNNER_TEMP/qol-mods/Apparel/Source/SmartApparelUpgrade.csproj" -c Release
+          test -s "$RUNNER_TEMP/qol-mods/Task/1.7/Assemblies/ColonyTaskAuditor.dll"
+          test -s "$RUNNER_TEMP/qol-mods/Animals/1.7/Assemblies/AnimalManagement.dll"
+          test -s "$RUNNER_TEMP/qol-mods/Apparel/1.7/Assemblies/SmartApparelUpgrade.dll"
+      - name: Prepare private validated game snapshot once
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+          R2_BUCKET: rimworld-17
+          RWMT_R2_TRANSPORT: sdk
+        run: |
+          set -euo pipefail
+          python3 tools/codex_workflow.py prepare --private-root "$RUNNER_TEMP/rw-qol-private" > "$RUNNER_TEMP/qol-private-prepare.log" 2>&1 || {
+            echo '::error::Private game preparation failed. No raw game or credentials are published.'
+            exit 1
+          }
+      - name: Build isolated game validation worker
+        run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+      - name: Run independent level-A mod load checks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          private = temp / "rw-qol-private"
+          mod_root = temp / "qol-mods"
+          snapshot = private / "game-snapshot"
+          assert snapshot.is_dir(), "Private game snapshot was not created"
+          results = []
+          failed = False
+          for name, folder in (
+              ("ColonyTaskAuditor", "Task"),
+              ("AnimalManagement", "Animals"),
+              ("SmartApparelUpgrade", "Apparel"),
+          ):
+              mod = mod_root / folder
+              out = private / "results" / name
+              request = {
+                  "recordType": "modValidationRequest",
+                  "schemaVersion": 1,
+                  "levels": ["A"],
+                  "official": ["Core"],
+                  "mods": [{"path": str(mod), "target": True}],
+                  "language": "Japanese",
+                  "expectations": {},
+              }
+              request_path = private / f"{name}.json"
+              request_path.write_text(json.dumps(request), encoding="utf-8")
+              log = temp / f"qol-private-{name}.log"
+              with log.open("w", encoding="utf-8") as stream:
+                  proc = subprocess.run([
+                      sys.executable, "tools/validation_host.py", "run",
+                      "--snapshot", str(snapshot), "--request", str(request_path),
+                      "--out", str(out), "--baseline-cache", str(private / "baseline-cache"),
+                  ], stdout=stream, stderr=subprocess.STDOUT, timeout=600)
+              verdict_path = out / "result.json"
+              if verdict_path.exists():
+                  data = json.loads(verdict_path.read_text(encoding="utf-8"))
+                  status = data.get("status", "unknown")
+                  codes = [
+                      x.get("code") for x in data.get("reasons", [])[:8]
+                      if isinstance(x, dict) and isinstance(x.get("code"), str)
+                  ]
+              else:
+                  status = "noResult"
+                  codes = []
+              results.append({"mod": name, "status": status, "reasonCodes": codes, "exitCode": proc.returncode})
+              if status != "passed" or proc.returncode != 0:
+                  failed = True
+          print(json.dumps({"scope": "A-load-only", "results": results}, ensure_ascii=False))
+          if failed:
+              print("::error::One or more mods did not pass the qualified load-only check.")
+              raise SystemExit(1)
+          PY
+
+      - name: Bounded game ticks with registered fixture (experimental smoke only)
+        if: success()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, shutil, subprocess, sys
+          from pathlib import Path
+          from tools import validation_host as vh
+          temp=Path(os.environ["RUNNER_TEMP"])
+          private=temp/"rw-qol-private"
+          snapshot=private/"game-snapshot"
+          probe=private/"tickprobe"
+          shutil.copytree("tests/fixtures/validation-mods/tickprobe",probe)
+          with (temp/"private-probe-build.log").open("w") as log:
+              subprocess.run(["dotnet","build","tests/fixtures/validation-mods-src/TickProbe","-c","Release","-o",str(probe/"Assemblies"),f"-p:GameManagedDir={snapshot/'game'}"],stdout=log,stderr=subprocess.STDOUT,check=True)
+          summaries=[]
+          bad=False
+          for name,folder in (("ColonyTaskAuditor","Task"),("AnimalManagement","Animals"),("SmartApparelUpgrade","Apparel")):
+              request={"recordType":"modValidationRequest","schemaVersion":1,"levels":["A","D"],
+                  "official":["Core"],"language":"Japanese",
+                  "mods":[{"path":str(probe)},{"path":str(temp/"qol-mods"/folder),"target":True}],
+                  "map":{"seed":"RWMT-qol-smoke"},"tests":["bounded-tick.v1"],
+                  "tick":{"count":12000,"observeAt":[0,60,600,12000]},
+                  "expectations":{"tickObservations":[{"tick":12000,"id":"fixture.counter","equals":12000}]},
+                  "limits":{"timeoutSeconds":300}}
+              req=private/(name+"-ticks.json");req.write_text(json.dumps(request))
+              with (temp/("private-"+name+"-ticks.log")).open("w") as log:
+                  # Host and game raw output stays private; publish only whitelisted summary.
+                  import contextlib
+                  with contextlib.redirect_stdout(log),contextlib.redirect_stderr(log):
+                      result=vh.run_validation(snapshot,req,private/(name+"-ticks"),"worker/bin",baseline_cache=private/"tick-baseline-cache")
+              stage=result.get("stages",{}).get("D",{})
+              codes=[x.get("code") for x in result.get("reasons",[]) if isinstance(x,dict)]
+              evidence=stage.get("evidence") or {}
+              observations=[{"tick":o.get("tick"),"value":o.get("value"),"id":o.get("id")} for o in evidence.get("observations",[]) if isinstance(o,dict)]
+              ok=stage.get("status")=="completed" and "dNotQualified" in codes and not set(codes).intersection({"newErrors","newWarnings","baselineIncomplete","tickObservationIncomplete"})
+              summaries.append({"mod":name,"Dstage":stage.get("status"),"overall":result.get("status"),"reasonCodes":codes[:12],"registeredFixtureTicksOnly":observations,"ok":ok})
+              bad|=not ok
+          print(json.dumps({"scope":"experimental bounded-tick smoke, no task/feeding/wear/save-load acceptance","results":summaries}))
+          if bad: raise SystemExit("Bounded-tick smoke did not satisfy its limited expectations")
+          PY

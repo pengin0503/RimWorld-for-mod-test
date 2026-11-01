@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: private-qol-three-mod-load
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   verify:
@@ -167,7 +167,7 @@ jobs:
               stage=result.get("stages",{}).get("D",{})
               codes=[x.get("code") for x in result.get("reasons",[]) if isinstance(x,dict)]
               evidence=stage.get("evidence") or {}
-              observations=[{"tick":o.get("tick"),"value":o.get("value"),"id":o.get("id")} for o in evidence.get("observations",[]) if isinstance(o,dict)]
+              observations=[{"tick":o.get("tick"),"gameTick":o.get("gameTick"),"fixtureCounter":(o.get("values") or {}).get("fixture.counter")} for o in evidence.get("observations",[]) if isinstance(o,dict)]
               ok=stage.get("status")=="completed" and "dNotQualified" in codes and not set(codes).intersection({"newErrors","newWarnings","baselineIncomplete","tickObservationIncomplete"})
               summaries.append({"mod":name,"Dstage":stage.get("status"),"overall":result.get("status"),"reasonCodes":codes[:12],"registeredFixtureTicksOnly":observations,"ok":ok})
               bad|=not ok

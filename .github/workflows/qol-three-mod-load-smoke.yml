@@ -30,6 +30,22 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Install private R2 SDK
         run: python3 -m pip install -r requirements-r2-sdk.txt
+      - name: Check exact source revisions and compile three mods
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/qol-mods"
+          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Colony-Task-Auditor "$RUNNER_TEMP/qol-mods/Task"
+          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Animal-Management "$RUNNER_TEMP/qol-mods/Animals"
+          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Smart-Apparel-Upgrade "$RUNNER_TEMP/qol-mods/Apparel"
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Task" rev-parse HEAD)" = 46ad2d3197c409d1fc2db287b6d3a764c4a6ffb0
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Animals" rev-parse HEAD)" = b253272dafbdb3dcb8e748646bd08064925dc9cc
+          test "$(git -C "$RUNNER_TEMP/qol-mods/Apparel" rev-parse HEAD)" = d0f18e4e62456fc27c5b2f459beaf89d321643c5
+          dotnet build "$RUNNER_TEMP/qol-mods/Task/Source/ColonyTaskAuditor.csproj" -c Release
+          dotnet build "$RUNNER_TEMP/qol-mods/Animals/Source/AnimalManagement.csproj" -c Release
+          dotnet build "$RUNNER_TEMP/qol-mods/Apparel/Source/SmartApparelUpgrade.csproj" -c Release
+          test -s "$RUNNER_TEMP/qol-mods/Task/1.7/Assemblies/ColonyTaskAuditor.dll"
+          test -s "$RUNNER_TEMP/qol-mods/Animals/1.7/Assemblies/AnimalManagement.dll"
+          test -s "$RUNNER_TEMP/qol-mods/Apparel/1.7/Assemblies/SmartApparelUpgrade.dll"
       - name: Prepare private validated game snapshot once
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -46,22 +62,6 @@ jobs:
           }
       - name: Build isolated game validation worker
         run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
-      - name: Check exact source revisions and compile three mods
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/qol-mods"
-          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Colony-Task-Auditor "$RUNNER_TEMP/qol-mods/Task"
-          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Animal-Management "$RUNNER_TEMP/qol-mods/Animals"
-          git clone -q --depth 1 https://github.com/pengin0503/rimworld-Smart-Apparel-Upgrade "$RUNNER_TEMP/qol-mods/Apparel"
-          test "$(git -C "$RUNNER_TEMP/qol-mods/Task" rev-parse HEAD)" = 7748e3fc553f9d3056fe62f5962f3e6933c594b3
-          test "$(git -C "$RUNNER_TEMP/qol-mods/Animals" rev-parse HEAD)" = b1c220346e04a97218003fb4beaebf2b6a538ce1
-          test "$(git -C "$RUNNER_TEMP/qol-mods/Apparel" rev-parse HEAD)" = a8736703ad0791ab062e00e207c78c366af7fdf4
-          dotnet build "$RUNNER_TEMP/qol-mods/Task/Source/ColonyTaskAuditor.csproj" -c Release
-          dotnet build "$RUNNER_TEMP/qol-mods/Animals/Source/AnimalManagement.csproj" -c Release
-          dotnet build "$RUNNER_TEMP/qol-mods/Apparel/Source/SmartApparelUpgrade.csproj" -c Release
-          test -s "$RUNNER_TEMP/qol-mods/Task/1.7/Assemblies/ColonyTaskAuditor.dll"
-          test -s "$RUNNER_TEMP/qol-mods/Animals/1.7/Assemblies/AnimalManagement.dll"
-          test -s "$RUNNER_TEMP/qol-mods/Apparel/1.7/Assemblies/SmartApparelUpgrade.dll"
       - name: Run independent level-A mod load checks
         run: |
           set -euo pipefail

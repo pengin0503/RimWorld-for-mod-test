@@ -30,6 +30,7 @@ for project in sources.rglob("*.csproj"):
     text = text.replace("<TargetFramework>net472</TargetFramework>", "<TargetFramework>net10.0</TargetFramework>")
     text = text.replace("<TargetFramework>net48</TargetFramework>", "<TargetFramework>net10.0</TargetFramework>")
     text = text.replace("<TreatWarningsAsErrors>true</TreatWarningsAsErrors>", "<TreatWarningsAsErrors>false</TreatWarningsAsErrors>")
+    text = re.sub(r'<ItemGroup>\s*<Reference Include="0ColourPicker">.*?</Reference>\s*</ItemGroup>', '', text, flags=re.S)
     if text != before:
         project.write_text(text, encoding="utf-8")
         count += 1
@@ -41,6 +42,68 @@ bfm_target = sources / "AnimationMod" / "EpicUtils" / "BetterFloatMenu.cs"
 bfm_target.parent.mkdir(parents=True, exist_ok=True)
 bfm_target.write_bytes(bfm_file.read_bytes())
 print("Vendored BetterFloatMenu source (MIT) for consistent type identity")
+# The old 0ColourPicker binary also binds UnityEngine.CoreModule; use a tiny
+# 1.7-native replacement for only the API this mod actually calls.
+picker = sources / "AnimationMod" / "ColourPicker" / "Dialog_ColourPicker.cs"
+picker.parent.mkdir(parents=True, exist_ok=True)
+picker.write_text(r"""
+using System;
+using UnityEngine;
+using Verse;
+namespace ColourPicker
+{
+    public sealed class Dialog_ColourPicker : Window
+    {
+        private readonly Action<Color> onSelected;
+        private Color selected;
+        public bool autoApply = true;
+
+        public Dialog_ColourPicker(Color initial, Action<Color> onColor)
+        {
+            selected = initial;
+            onSelected = onColor;
+            doCloseX = true;
+            closeOnCancel = true;
+            closeOnAccept = false;
+            absorbInputAroundWindow = true;
+            draggable = true;
+        }
+
+        public override Vector2 InitialSize => new Vector2(440f, 300f);
+
+        public override void DoWindowContents(Rect rect)
+        {
+            var top = new Rect(rect.x, rect.y, rect.width, 42f);
+            Widgets.DrawBoxSolid(top, selected);
+            float y = top.yMax + 8f;
+            selected.r = Channel("Red", selected.r, ref y, rect);
+            selected.g = Channel("Green", selected.g, ref y, rect);
+            selected.b = Channel("Blue", selected.b, ref y, rect);
+            selected.a = Channel("Alpha", selected.a, ref y, rect);
+            if (autoApply) onSelected?.Invoke(selected);
+            var buttons = new Rect(rect.x, rect.yMax-32f,rect.width, 28f);
+            if (Widgets.ButtonText(buttons.LeftHalf(), "Apply"))
+            {
+                onSelected?.Invoke(selected);
+                Close();
+            }
+            if (Widgets.ButtonText(buttons.RightHalf(), "Cancel"))
+                Close();
+        }
+
+        private static float Channel(string label, float value, ref float y, Rect rect)
+        {
+            var labelRect = new Rect(rect.x, y, 65f, 26f);
+            Widgets.Label(labelRect,label);
+            var sliderRect = new Rect(rect.x+70f,y,rect.width-72f,24f);
+            float result = Widgets.HorizontalSlider(sliderRect,value,0f,1f);
+            y += 36f;
+            return result;
+        }
+    }
+}
+""", encoding="utf-8")
+print("Replaced .NET Framework-only 0ColourPicker dependency with a native 1.7 dialog")
 
 def amend(relative, old, new, expected=1):
     target=sources/relative

@@ -102,7 +102,7 @@ jobs:
           set +e
           root="$RUNNER_TEMP/kas-private"
           dotnet build "$root/source/Source/KeepAimNShoot/KeepAimNShoot.csproj" \
-            --configuration Release --no-restore:false \
+            --configuration Release \
             -p:GameDir="$root/refs" -p:HarmonyDll="$root/refs/0Harmony.dll" \
             -o "$root/compiled" > "$RUNNER_TEMP/kas-build.log" 2>&1
           status=$?

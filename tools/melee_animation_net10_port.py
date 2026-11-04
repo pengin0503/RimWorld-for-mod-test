@@ -19,6 +19,7 @@ count = 0
 for project in sources.rglob("*.csproj"):
     text = project.read_text(encoding="utf-8-sig")
     before = text
+    text = text.replace('Include="BetterFloatMenu" Version="16.0.0"', 'Include="BetterFloatMenu" Version="17.0.0"')
     for old in ["1.6.4871","1.6.4870"]:
         text = text.replace(old, "1.7.4995-unstable")
     text = re.sub(r'(<PackageReference Include="Lib\.Harmony" Version=")[^"]+(")',r'\g<1>3.0.0-rc.3\2',text)

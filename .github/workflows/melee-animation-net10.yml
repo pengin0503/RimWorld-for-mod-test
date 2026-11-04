@@ -21,13 +21,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Epicguru/Melee-Animation
-          ref: master
+          ref: 8381fdab489d18453469c2ffc865e5035cede718
           path: upstream
           persist-credentials: false
       - name: Checkout BetterFloatMenu MIT source
         uses: actions/checkout@v4
         with:
           repository: Epicguru/BetterFloatMenu
+          ref: e4d51d35c1e840fc6adff3fe6b6ff9edb5e15a4b
           path: better-float-menu
           persist-credentials: false
       - name: Install .NET 10

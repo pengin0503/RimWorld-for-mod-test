@@ -1,0 +1,70 @@
+name: ImmersiveFilter 1.7 compile (temporary)
+on:
+  push:
+    branches: [build/immersive-filter-1-7]
+    paths:
+      - 'ci/immersive-filter/**'
+      - '.github/workflows/immersive-filter-compile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Extract sources and generate standalone reference project
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci/immersive-filter/src
+          base64 --decode ci/immersive-filter/source.tar.gz.b64 | tar -xz -C ci/immersive-filter/src
+          cat > ci/immersive-filter/src/ImmersiveFilter.csproj <<'CSPROJ'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net10.0</TargetFramework>
+              <LangVersion>latest</LangVersion>
+              <AssemblyName>ImmersiveFilter</AssemblyName>
+              <RootNamespace>Og_ImmersiveFilter</RootNamespace>
+              <OutputType>Library</OutputType>
+              <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+              <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+              <GenerateDependencyFile>false</GenerateDependencyFile>
+              <Nullable>disable</Nullable>
+              <NoWarn>$(NoWarn);CS0649</NoWarn>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Krafs.Rimworld.Ref" Version="1.7.4990-unstable" />
+              <PackageReference Include="Lib.Harmony" Version="3.0.0-rc.3" ExcludeAssets="runtime" />
+            </ItemGroup>
+          </Project>
+          CSPROJ
+      - name: Build
+        run: dotnet build ci/immersive-filter/src/ImmersiveFilter.csproj -c Release -o ci/immersive-filter/out --nologo
+      - name: Check artifact
+        run: |
+          file ci/immersive-filter/out/ImmersiveFilter.dll
+          sha256sum ci/immersive-filter/out/ImmersiveFilter.dll
+      - name: Publish compiled DLL in branch
+        run: |
+          set -euo pipefail
+          mkdir -p ci/immersive-filter/compiled
+          cp ci/immersive-filter/out/ImmersiveFilter.dll ci/immersive-filter/compiled/ImmersiveFilter.dll
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci/immersive-filter/compiled/ImmersiveFilter.dll
+          if ! git diff --staged --quiet; then
+            git commit -m "ci: compile ImmersiveFilter for 1.7 [skip ci]"
+            git push origin HEAD:build/immersive-filter-1-7
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ImmersiveFilter-1.7-compiled
+          path: ci/immersive-filter/out/ImmersiveFilter.dll
+          if-no-files-found: error

@@ -288,3 +288,85 @@ amend("AnimationMod/AnimRenderer.cs",
     private void DrawCore(float? atTime, float dt, Action<AnimRenderer, EventBase> eventOutput, bool cullDraw, Action<Pawn, Vector2> labelDraw = null)
     {""")
 print("Integrated defensive pre-render results and exception-safe animation cleanup")
+
+
+# Cache lasso sight lines while keeping the tooltip and range visualization.
+# Offsets are immutable snapshots for queued draw callbacks; they do not alias
+# the mutable scratch array when hovering multiple menu options in one frame.
+ui_file = sources / "AnimationMod/UI/DraftedFloatMenuOptionsUI.cs"
+ui_code = ui_file.read_text(encoding="utf-8-sig")
+begin = ui_code.index("    private static void HoverAction(Pawn pawn, string tt)")
+end = ui_code.index("    private static FloatMenuOption GetDisabledExecutionOption(", begin)
+replacement = r"""    private static Pawn cachedRangePawn;
+    private static Map cachedRangeMap;
+    private static IntVec3 cachedRangeCenter;
+    private static float cachedRangeRadius = -1f;
+    private static int cachedRangeFrame = -1000;
+    private static IntVec3[] cachedRangeOffsets = Array.Empty<IntVec3>();
+    private static readonly List<IntVec3> rangeDrawScratch = new List<IntVec3>();
+
+    private static void HoverAction(Pawn pawn, string tt)
+    {
+        if (pawn is not { Spawned: true }) return;
+
+        if (Event.current.type == EventType.Repaint && pawn.TryGetLasso() != null)
+        {
+            var map = pawn.Map;
+            var center = pawn.Position;
+            float radius = pawn.GetStatValue(AM_DefOf.AM_GrappleRadius);
+            if (radius > 0f && radius <= GenRadial.MaxRadialPatternRadius)
+            {
+                int elapsed = Time.frameCount - cachedRangeFrame;
+                bool keyMatches = cachedRangePawn == pawn && cachedRangeMap == map
+                                  && cachedRangeRadius == radius;
+                bool moved = cachedRangeCenter != center;
+                int maxAge = moved ? 15 : 60;
+                if (!keyMatches || elapsed >= maxAge || elapsed < 0)
+                {
+                    var offsets = new List<IntVec3>();
+                    Func<IntVec3, bool> valid = c => ActionController.LOSValidator(c, map);
+                    int count = GenRadial.NumCellsInRadius(radius);
+                    for (int i = 0; i < count; i++)
+                    {
+                        var offset = GenRadial.RadialPattern[i];
+                        if (GenSight.LineOfSight(center, center + offset, map, false, valid))
+                            offsets.Add(offset);
+                    }
+                    cachedRangeOffsets = offsets.ToArray();
+                    cachedRangePawn = pawn;
+                    cachedRangeMap = map;
+                    cachedRangeCenter = center;
+                    cachedRangeRadius = radius;
+                    cachedRangeFrame = Time.frameCount;
+                }
+
+                IntVec3[] drawOffsets = cachedRangeOffsets;
+                pawn.GetAnimManager().AddPostDraw(() =>
+                {
+                    rangeDrawScratch.Clear();
+                    for (int i = 0; i < drawOffsets.Length; i++)
+                        rangeDrawScratch.Add(center + drawOffsets[i]);
+                    if (rangeDrawScratch.Count > 0)
+                        GenDraw.DrawFieldEdges(rangeDrawScratch, Color.yellow);
+                });
+            }
+            else
+            {
+                // Nonstandard extreme radii retain the game's original behavior.
+                pawn.GetAnimManager().AddPostDraw(() =>
+                    GenDraw.DrawRadiusRing(center, radius, Color.yellow,
+                        c => GenSight.LineOfSight(center, c, map, false,
+                            c2 => ActionController.LOSValidator(c2, map))));
+            }
+        }
+
+        if (tt != null)
+        {
+            Vector2 mouse = Event.current.mousePosition;
+            TooltipHandler.TipRegion(new Rect(mouse.x-1f,mouse.y-1f,3f,3f),tt);
+        }
+    }
+
+"""
+ui_file.write_text(ui_code[:begin] + replacement + ui_code[end:], encoding="utf-8")
+print("Integrated bounded 1.7 lasso LOS range cache")

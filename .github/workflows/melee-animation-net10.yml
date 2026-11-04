@@ -24,12 +24,18 @@ jobs:
           ref: master
           path: upstream
           persist-credentials: false
+      - name: Checkout BetterFloatMenu MIT source
+        uses: actions/checkout@v4
+        with:
+          repository: Epicguru/BetterFloatMenu
+          path: better-float-menu
+          persist-credentials: false
       - name: Install .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
       - name: Prepare .NET 10 source changes
-        run: python3 tools/melee_animation_net10_port.py upstream
+        run: python3 tools/melee_animation_net10_port.py upstream better-float-menu
       - name: Build 1.7 core
         shell: bash
         run: |

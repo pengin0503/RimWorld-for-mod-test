@@ -135,28 +135,58 @@ jobs:
           assert raw[:2] == b"MZ" and len(raw) > 4096
           print("Compiled DLL sanity check passed; DLL is held in runner temp until private transfer")
           PY
-      - name: Save compiled DLL to private R2 for delivery
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
-          AWS_DEFAULT_REGION: auto
+      # Encrypted output only. No game binaries or unencrypted MOD DLLs are uploaded.
+      - name: Encrypt built DLL for private assembly
         run: |
+          python -m pip install -q cryptography==46.0.4
           python - <<'PY'
+          import base64
           import hashlib
+          import json
           import os
           from pathlib import Path
-          import botocore.session
-          dll = Path(os.environ["RUNNER_TEMP"]) / "kas-private/compiled/KeepAimNShoot.dll"
-          raw = dll.read_bytes()
-          client = botocore.session.get_session().create_client(
-              "s3", region_name="auto", endpoint_url=os.environ["R2_ENDPOINT"])
-          client.put_object(
-              Bucket="rimworld-17",
-              Key="PrivateBuildInputs/keepaimnshoot-20261104/KeepAimNShoot.dll",
-              Body=raw,
-              ContentType="application/octet-stream"
-          )
-          print("Private compiled DLL saved; size:", len(raw),
-                "SHA256:", hashlib.sha256(raw).hexdigest())
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          from cryptography.hazmat.primitives import serialization, hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          root = Path(os.environ["RUNNER_TEMP"]) / "kas-private"
+          raw = (root / "compiled" / "KeepAimNShoot.dll").read_bytes()
+          if len(raw) < 4096 or raw[:2] != b"MZ":
+              raise RuntimeError("Invalid DLL")
+          public = serialization.load_pem_public_key(b"""-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAyaCLBkGAM3gnGDtZUC2Y
+cf0KfV0wfSKmnH/Cw8HpLrulhl+HgKplOlMA9aw0HZ5bJ/UP97SnfWzHkG4dAh0T
+fvcRsSTEY4wVTfHGIGQITh9YP6IgM471XpQkQVX5Orz+7bcIu/ct12d3grvvfqXi
+vZv9iuGQ0PNKbJ5Wl1HKGRSR4GK8sPVTSwEUV65GSNjKzTM3L2zGGPtvx4Qs0Jw1
+jmx+TXybKqiW6jAUO4MVsgc7AXML0hzHrVQT6G5twcoyWtlOkk694VmkeZdF+ikS
+IUpgFTjtgcVoZqtzpTIkQt0VXXqCOnnwgnRm6eKNbHlY2aYA+1QX+sh1TLbKYVPr
+rgBT/WgSw/cjWj+g5xEkcTdFqbYiLBYup4fG1MW0XTQZmLvF2xyi68UNhfNrwLHL
+DCy/5Ebbz/5fAtW2aK0aGH3SWqUpQwr9OFoxB/zw95hlSzvCL3neO64crjq9+Vc4
+dALCnmgAr0TmTETsInvwew5P55U5/2Ve9HoU6TlxMK5ZAgMBAAE=
+-----END PUBLIC KEY-----
+""")
+          key = os.urandom(32)
+          nonce = os.urandom(12)
+          aad = b"RimWorld-KeepAimNShoot-1.7-20261104"
+          payload = {
+              "version": 1,
+              "algorithm": "RSA-OAEP-SHA256+AES-256-GCM",
+              "sha256": hashlib.sha256(raw).hexdigest(),
+              "bytes": len(raw),
+              "wrapped_key": base64.b64encode(public.encrypt(
+                  key, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                    algorithm=hashes.SHA256(), label=None))).decode(),
+              "nonce": base64.b64encode(nonce).decode(),
+              "ciphertext": base64.b64encode(AESGCM(key).encrypt(nonce, raw, aad)).decode()
+          }
+          delivery = root / "delivery"
+          delivery.mkdir()
+          (delivery / "keepaimnshoot.enc.json").write_text(json.dumps(payload))
+          print("Encrypted output prepared; SHA256:", payload["sha256"])
           PY
+      - name: Upload encrypted output only
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepaimnshoot-encrypted-dll-20261104
+          path: ${{ runner.temp }}/kas-private/delivery/keepaimnshoot.enc.json
+          retention-days: 1
+          if-no-files-found: error

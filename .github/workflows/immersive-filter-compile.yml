@@ -41,7 +41,7 @@ jobs:
               <NoWarn>$(NoWarn);CS0649</NoWarn>
             </PropertyGroup>
             <ItemGroup>
-              <PackageReference Include="Krafs.Rimworld.Ref" Version="1.7.4990-unstable" />
+              <PackageReference Include="Krafs.Rimworld.Ref" Version="1.7.4995-unstable" />
               <PackageReference Include="Lib.Harmony" Version="3.0.0-rc.3" ExcludeAssets="runtime" />
             </ItemGroup>
           </Project>

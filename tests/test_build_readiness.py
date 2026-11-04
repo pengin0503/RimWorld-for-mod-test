@@ -50,8 +50,9 @@ class ReadinessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ValueError):
                 br.inspect(FakeR2(b"1.7.4995 rev1300\n"), Path(d), "1.7.6000")
-            with self.assertRaises(ValueError):
-                br.inspect(FakeR2(b"1.7.4995 rev1300\nEXTRA"), Path(d), "1.7.4995")
+            self.assertEqual(
+                br.inspect(FakeR2(b"1.7.4995 rev1300\nEXTRA"), Path(d), "1.7.4995")["state"],
+                "invalidVersion")
 
     def test_version_not_present_requires_zero_gets(self):
         with tempfile.TemporaryDirectory() as d:

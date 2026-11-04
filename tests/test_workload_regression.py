@@ -1,6 +1,12 @@
 """P4 workload regression contracts; all fixtures are synthetic."""
 import math
+import json
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
+from zipfile import ZipFile
 from tools import codex_workflow as cw
 from tools import workload_regression as wr
 
@@ -38,6 +44,49 @@ class WorkloadProfileTests(unittest.TestCase):
             ("oskarpotocki.vanillapsycastsexpanded", "uuugggg.td.enhancement.pack")))
         with self.assertRaises(ValueError):
             wr.explicit_root_ids([resolved[0], ("Again", "OSKARPOTOCKI.VANILLAPSYCASTSEXPANDED")])
+
+
+class PayloadPreflightTests(unittest.TestCase):
+    def test_dependency_plan_budget_stops_before_any_payload_get(self):
+        xml = b"<ModMetaData><name>Example</name><packageId>author.example</packageId></ModMetaData>"
+        prefix = "Workshop/1234567890/"
+        about = prefix + "About/About.xml"
+        payload = prefix + "1.7/Defs/Large.xml"
+
+        class FakeR2:
+            def __init__(self):
+                self.downloads = []
+            def list_prefix(self, value):
+                if value != prefix:
+                    raise AssertionError("unexpected MOD prefix")
+                return [{"key": about, "size": len(xml)}, {"key": payload, "size": 2048}]
+            def get(self, key, dest, size, *, refresh=False):
+                self.downloads.append(key)
+                if key != about:
+                    raise AssertionError("payload GET occurred before workload budget")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(xml)
+                return "downloaded"
+            def close(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            index = root / "index.zip"
+            with ZipFile(index, "w") as archive:
+                archive.writestr("mods.json", json.dumps({"schema_version": 1, "mods": [
+                    {"workshop_id": "1234567890", "package_id": "author.example",
+                     "name": "Example", "supported_versions": ["1.7"]}]}))
+            args = SimpleNamespace(private_root=root / "private", index_zip=str(index),
+                                   aws="aws", refresh=False, target="Example",
+                                   local_target=None, dependency=[], official=["Core"],
+                                   language="English", scope="validation")
+            fake = FakeR2()
+            with patch.object(cw, "r2_client", return_value=fake), self.assertRaises(cw.WorkflowError) as caught:
+                cw.fetch_mods(args, max_selected_bytes=len(xml), max_selected_files=10, max_mods=1)
+            self.assertEqual(caught.exception.code, "modSelectionBudgetExceeded")
+            self.assertEqual(fake.downloads, [about])
+            self.assertFalse((root / "private" / "request.json").exists())
 
 
 class MeasurementTests(unittest.TestCase):

@@ -57,6 +57,7 @@ jobs:
           echo "exit=$BUILD_EXIT" > artifacts/status.txt
           mkdir -p artifacts/Source-Port
           cp tools/melee_animation_net10_port.py artifacts/Source-Port/
+          cp better-float-menu/LICENSE.md artifacts/Source-Port/BetterFloatMenu-LICENSE.md
           python3 - <<'PY'
           from pathlib import Path
           from shutil import copy2

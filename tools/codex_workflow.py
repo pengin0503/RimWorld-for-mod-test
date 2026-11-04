@@ -377,7 +377,29 @@ def resolve_mod_graph(index, roots, read_metadata, *, official=None, local=None)
     return ordered
 
 
-def fetch_mods(args) -> dict:
+def enforce_selection_caps(groups, *, max_selected_bytes=None, max_selected_files=None, max_mods=None):
+    """Check *all* selected metadata and payload, including locally cached objects.
+
+    Called after resolving required dependencies and active load folders, but
+    before making any R2 payload GET request. None keeps existing behavior.
+    """
+    for limit in (max_selected_bytes, max_selected_files, max_mods):
+        if limit is not None and (type(limit) is not int or limit < 1):
+            raise ValueError("selection caps must be positive integers or None")
+    if not isinstance(groups, (list, tuple)):
+        raise ValueError("selection groups must be a sequence")
+    sizes = [item["size"] for group in groups for item in group]
+    if any(type(size) is not int or size < 0 for size in sizes):
+        raise WorkflowError("R2 selection has invalid object size", "invalidSelectionSize")
+    counts = {"selectedBytes": sum(sizes), "selectedFiles": len(sizes), "selectedMods": len(groups)}
+    if ((max_selected_bytes is not None and counts["selectedBytes"] > max_selected_bytes)
+            or (max_selected_files is not None and counts["selectedFiles"] > max_selected_files)
+            or (max_mods is not None and counts["selectedMods"] > max_mods)):
+        raise WorkflowError("selected MOD closure exceeds workload caps", "modSelectionBudgetExceeded")
+    return counts
+
+
+def fetch_mods(args, *, max_selected_bytes=None, max_selected_files=None, max_mods=None, root_targets=None) -> dict:
     root = _safe_private(args.private_root)
     local_target = getattr(args, "local_target", None)
     if bool(args.target) == bool(local_target):
@@ -385,6 +407,19 @@ def fetch_mods(args) -> dict:
     local_id = _local_metadata(local_target)[4] if local_target else None
     index = load_index(private_index(args, root))
     selected = [resolve(index, name) for name in list(args.dependency or []) + ([args.target] if args.target else [])]
+    if root_targets is not None:
+        if (not isinstance(root_targets, (list, tuple)) or not root_targets
+                or any(not isinstance(x, str) or not x for x in root_targets)):
+            raise WorkflowError("invalid explicit root set", "invalidTarget")
+        roots_resolved = [resolve(index, name) for name in root_targets]
+        root_ids = [m["packageId"].casefold() for m in roots_resolved if m.get("packageId")]
+        selected_ids = {m["packageId"].casefold() for m in selected if m.get("packageId")}
+        if (len(root_ids) != len(roots_resolved) or len(root_ids) != len(set(root_ids))
+                or not set(root_ids) <= selected_ids):
+            raise WorkflowError("explicit roots must be unique members of the selected MOD set", "invalidTarget")
+        explicit_targets = set(root_ids)
+    else:
+        explicit_targets = None
     if any(not m["packageId"] for m in selected):
         raise WorkflowError("index has no packageId for a selected MOD")
     ids = [m["workshopId"] for m in selected]
@@ -400,6 +435,8 @@ def fetch_mods(args) -> dict:
         raise WorkflowError("official must begin with Core and contain supported unique DLCs", "invalidOfficialContent")
     official_ids = {"ludeon.rimworld" if n == "Core" else "ludeon.rimworld." + n.casefold() for n in official}
     target_package = selected[-1]["packageId"].casefold() if not local_target else local_id.casefold()
+    if explicit_targets is None:
+        explicit_targets = {target_package}
     with r2_session(args.aws) as r2:
         fetched = []
         prepared_by_id = {}
@@ -441,12 +478,19 @@ def fetch_mods(args) -> dict:
                 raise WorkflowError(str(exc), exc.code) from exc
             prepared.append((mod, destination, prefix, listed, metadata, counts, folders))
         local = local_mod_plan(local_target, active) if local_target else None
+        plans = []
         for mod, destination, prefix, listed, metadata, counts, folders in prepared:
             metadata_keys = {i["key"] for i in metadata}
             items = [i for i in listed if args.scope == "all" or i["key"] in metadata_keys or
                      mod_validation_asset(i["key"], folders=folders, language=args.language)]
             summary = _selection_counts(listed, items)
             _check_cached_inputs(destination, items, prefix, folders)
+            plans.append((mod, destination, prefix, items, metadata_keys, counts, folders, summary))
+        # The check precedes *every* payload GET; metadata GETs were required to
+        # resolve version folders and dependencies correctly.
+        enforce_selection_caps([p[3] for p in plans], max_selected_bytes=max_selected_bytes,
+                               max_selected_files=max_selected_files, max_mods=max_mods)
+        for mod, destination, prefix, items, metadata_keys, counts, folders, summary in plans:
             summary.update(counts)
             # Retain chosen directories even if no loader file survives filtering.
             for folder in folders:
@@ -465,7 +509,7 @@ def fetch_mods(args) -> dict:
                              "expectedLoadFolders": local["loadFolders"]})
             else:
                 mods.append({"path": str((root / "mods" / m["workshopId"]).absolute()),
-                             "packageId": m["packageId"], "target": local is None and m["packageId"].casefold() == target_package,
+                             "packageId": m["packageId"], "target": local is None and m["packageId"].casefold() in explicit_targets,
                              "expectedLoadFolders": planned[m["workshopId"]]})
         request = {"recordType": "modValidationRequest", "schemaVersion": 1,
                    "levels": ["A"], "official": official, "language": args.language,

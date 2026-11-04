@@ -156,3 +156,33 @@ amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
       "        ___renderTree.SetDirty();",
       "        if (NextDrawMode == DrawMode.HeadStandalone) ___renderTree.SetDirty();")
 print("Source-level 1.7 patches applied")
+
+
+# Native versions of small, independently verifiable 1.7 fixes. These address
+# symptoms also documented by ifchen0/MeleeAnimRenderFix without bundling the
+# separately licensed patch DLL or substantial sections of its source code.
+amend("AnimationMod/Events/EventBase.cs",
+      "Activator.CreateInstance(type) as EventBase",
+      "ScriptableObject.CreateInstance(type) as EventBase",
+      expected=2)
+amend("AnimationMod/Events/EventBase.cs",
+      "            string id = instance.EventID;\n            allBases.Add",
+      "            string id = instance.EventID;\n            UnityEngine.Object.Destroy(instance);\n            allBases.Add")
+amend("AnimationMod/Sweep/SweepMesh.cs",
+      "        public void Rebuild()\n        {\n            Mesh.SetVertices(vertices);",
+      "        public void Rebuild()\n        {\n            Mesh.Clear();\n            Mesh.SetVertices(vertices);")
+amend("AnimationMod/AnimRenderer.cs",
+      '            Core.Error("Started twice!");\n            return;',
+      '            return;')
+amend("AnimationMod/Processing/MapPawnProcessor.cs",
+      "        if (targetPawn.Dead || targetPawn.Downed || targetPawn.IsInAnimation() || GrabUtility.IsBeingTargetedForGrapple(targetPawn))",
+      "        if (targetPawn.Dead || targetPawn.Downed || targetPawn.IsPsychologicallyInvisible() || targetPawn.IsInAnimation() || GrabUtility.IsBeingTargetedForGrapple(targetPawn))")
+amend("AnimationMod/Outcome/OutcomeUtility.cs",
+      "                return Damage(attacker, target, args);",
+      """                // An inventory sidearm does not expose melee verbs while the
+                // primary weapon is equipped; prefer the primary or bare hands.
+                var effective = args;
+                if (effective.Weapon != null && effective.Weapon != attacker.equipment?.Primary)
+                    effective.Weapon = attacker.equipment?.Primary;
+                return Damage(attacker, target, effective);""")
+print("Integrated event creation, trails, duel re-entry, invisibility, and sidearms fixes")

@@ -90,10 +90,15 @@ jobs:
           # was not part of the original source archive and is not needed to build.
           patch_bytes = brotli.decompress(patch).split(b"diff --git a/Source/Verification/")[0]
           (private_root / "review2.patch").write_bytes(patch_bytes)
+          last_patch = fetch("PrivateBuildInputs/keepaimnshoot-20261104-review2/source-v2-last-pass.patch.br")
+          if hashlib.sha256(last_patch).hexdigest() != "9725e14e58d389cad91bcf961b45bc4b7e21c4b88c84ffc8c2f64a04a1d37e31":
+              raise RuntimeError("Final review patch checksum mismatch")
+          (private_root / "last.patch").write_bytes(brotli.decompress(last_patch))
           print("Private source and review2 patch verified; game references: 3; Harmony 3: 1")
           PY
           cd "$RUNNER_TEMP/kas-private/source"
           patch --batch --forward --strip=1 < "$RUNNER_TEMP/kas-private/review2.patch"
+          patch --batch --forward --strip=1 < "$RUNNER_TEMP/kas-private/last.patch"
       - name: Compile reviewed C# against RimWorld 1.7
         shell: bash
         run: |

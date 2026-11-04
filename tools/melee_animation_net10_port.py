@@ -370,3 +370,67 @@ replacement = r"""    private static Pawn cachedRangePawn;
 """
 ui_file.write_text(ui_code[:begin] + replacement + ui_code[end:], encoding="utf-8")
 print("Integrated bounded 1.7 lasso LOS range cache")
+
+
+# Preserve pre-reflection cached results. The previous postfix restored
+# the temporary animation parameters instead of the original results.
+amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
+      """        // Auto-reset AllowNext flag.
+        AllowNext = false;
+
+        if (___results.parms.pawn == null)""",
+      """        // Auto-reset AllowNext flag.
+        AllowNext = false;
+
+        var originalPreRenderResults = ___results;
+        if (___results.parms.pawn == null)""")
+amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
+      """            // Do not feed an invalid pawn to ParallelPreDraw.
+            if (___results.parms.pawn == null)
+                return true;""",
+      """            // Do not feed an invalid pawn to ParallelPreDraw.
+            if (___results.parms.pawn == null)
+            {
+                ___results = originalPreRenderResults;
+                return true;
+            }""")
+amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
+      """        __state = ___results;
+
+        // Setting these values ensures that RenderPawnInternal gets called:""",
+      """        __state = originalPreRenderResults;
+
+        // Setting these values ensures that RenderPawnInternal gets called:""")
+amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
+      """        try
+        {
+            if (NextDrawMode == DrawMode.HeadStandalone)
+                ___renderTree.SetDirty();
+            ___renderTree.EnsureInitialized(___results.parms.flags);
+            ___renderTree.ParallelPreDraw(___results.parms);
+        }
+        finally
+        {
+            Patch_HediffSet_HasHead.ForcedHasHeadValue = null;
+        }""",
+      """        try
+        {
+            if (NextDrawMode == DrawMode.HeadStandalone)
+                ___renderTree.SetDirty();
+            ___renderTree.EnsureInitialized(___results.parms.flags);
+            ___renderTree.ParallelPreDraw(___results.parms);
+        }
+        catch (System.Exception error)
+        {
+            // Failed pre-draw must not leak temporary state to the next pawn.
+            ___results = originalPreRenderResults;
+            __state = null;
+            Log.ErrorOnce("[Melee Animation 1.7] Failed to pre-draw pawn: " + error,
+                          0x4D413138);
+            return false;
+        }
+        finally
+        {
+            Patch_HediffSet_HasHead.ForcedHasHeadValue = null;
+        }""")
+print("Fixed pre-render result restoration and pre-draw exception safety")

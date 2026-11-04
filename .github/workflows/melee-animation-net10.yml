@@ -1,0 +1,60 @@
+name: Melee Animation net10 port (experimental)
+on:
+  push:
+    branches: [feat/melee-animation-net10-port-20261104]
+    paths:
+      - .github/workflows/melee-animation-net10.yml
+      - tools/melee_animation_net10_port.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout build harness
+        uses: actions/checkout@v4
+      - name: Checkout original GPL source
+        uses: actions/checkout@v4
+        with:
+          repository: Epicguru/Melee-Animation
+          ref: master
+          path: upstream
+          persist-credentials: false
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Prepare .NET 10 source changes
+        run: python3 tools/melee_animation_net10_port.py upstream
+      - name: Build 1.7 core
+        shell: bash
+        run: |
+          set +e
+          dotnet build upstream/Source/1.6/AnimationMod/AnimationMod.csproj --configuration Release --nologo --verbosity quiet -p:NuGetAudit=false -p:TreatWarningsAsErrors=false > "$RUNNER_TEMP/compile.log" 2>&1
+          status=$?
+          grep -E 'error (CS|NU|MSB|NETSDK)| error:' "$RUNNER_TEMP/compile.log" | head -n 65 || true
+          echo "BUILD_EXIT=$status" >> "$GITHUB_ENV"
+          echo "Build exit $status"
+          exit 0
+      - name: Export mod assemblies and limited diagnostic logs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/Assemblies
+          find upstream/1.7/Assemblies -maxdepth 1 -type f -name '*.dll' -exec cp {} artifacts/Assemblies/ \; 2>/dev/null || true
+          grep -E 'error (CS|NU|MSB|NETSDK)| error:|Build (succeeded|FAILED)' "$RUNNER_TEMP/compile.log" | head -n 220 > artifacts/build-diagnostics.txt 2>/dev/null || true
+          echo "exit=$BUILD_EXIT" > artifacts/status.txt
+          find artifacts/Assemblies -name '*.dll' -printf '%f\n' | sort
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: melee-animation-net10-compile
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Assert compile success
+        run: test "$BUILD_EXIT" = "0"

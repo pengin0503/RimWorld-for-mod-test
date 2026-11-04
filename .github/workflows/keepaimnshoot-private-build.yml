@@ -152,18 +152,7 @@ jobs:
           raw = (root / "compiled" / "KeepAimNShoot.dll").read_bytes()
           if len(raw) < 4096 or raw[:2] != b"MZ":
               raise RuntimeError("Invalid DLL")
-          public = serialization.load_pem_public_key(b"""-----BEGIN PUBLIC KEY-----
-MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAyaCLBkGAM3gnGDtZUC2Y
-cf0KfV0wfSKmnH/Cw8HpLrulhl+HgKplOlMA9aw0HZ5bJ/UP97SnfWzHkG4dAh0T
-fvcRsSTEY4wVTfHGIGQITh9YP6IgM471XpQkQVX5Orz+7bcIu/ct12d3grvvfqXi
-vZv9iuGQ0PNKbJ5Wl1HKGRSR4GK8sPVTSwEUV65GSNjKzTM3L2zGGPtvx4Qs0Jw1
-jmx+TXybKqiW6jAUO4MVsgc7AXML0hzHrVQT6G5twcoyWtlOkk694VmkeZdF+ikS
-IUpgFTjtgcVoZqtzpTIkQt0VXXqCOnnwgnRm6eKNbHlY2aYA+1QX+sh1TLbKYVPr
-rgBT/WgSw/cjWj+g5xEkcTdFqbYiLBYup4fG1MW0XTQZmLvF2xyi68UNhfNrwLHL
-DCy/5Ebbz/5fAtW2aK0aGH3SWqUpQwr9OFoxB/zw95hlSzvCL3neO64crjq9+Vc4
-dALCnmgAr0TmTETsInvwew5P55U5/2Ve9HoU6TlxMK5ZAgMBAAE=
------END PUBLIC KEY-----
-""")
+          public = serialization.load_der_public_key(base64.b64decode("MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAyaCLBkGAM3gnGDtZUC2Ycf0KfV0wfSKmnH/Cw8HpLrulhl+HgKplOlMA9aw0HZ5bJ/UP97SnfWzHkG4dAh0TfvcRsSTEY4wVTfHGIGQITh9YP6IgM471XpQkQVX5Orz+7bcIu/ct12d3grvvfqXivZv9iuGQ0PNKbJ5Wl1HKGRSR4GK8sPVTSwEUV65GSNjKzTM3L2zGGPtvx4Qs0Jw1jmx+TXybKqiW6jAUO4MVsgc7AXML0hzHrVQT6G5twcoyWtlOkk694VmkeZdF+ikSIUpgFTjtgcVoZqtzpTIkQt0VXXqCOnnwgnRm6eKNbHlY2aYA+1QX+sh1TLbKYVPrrgBT/WgSw/cjWj+g5xEkcTdFqbYiLBYup4fG1MW0XTQZmLvF2xyi68UNhfNrwLHLDCy/5Ebbz/5fAtW2aK0aGH3SWqUpQwr9OFoxB/zw95hlSzvCL3neO64crjq9+Vc4dALCnmgAr0TmTETsInvwew5P55U5/2Ve9HoU6TlxMK5ZAgMBAAE="))
           key = os.urandom(32)
           nonce = os.urandom(12)
           aad = b"RimWorld-KeepAimNShoot-1.7-20261104"

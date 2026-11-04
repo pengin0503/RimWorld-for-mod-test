@@ -46,6 +46,8 @@ class WorkloadRunnerTests(unittest.TestCase):
             root = Path(directory)
             (root / "game-snapshot").mkdir()
             (root / "request.json").write_text(json.dumps({
+                "recordType": "modValidationRequest", "schemaVersion": 1,
+                "levels": ["A"], "official": ["Core", "Royalty"], "language": "English",
                 "mods": [{"packageId": "a.mod", "target": True}]}))
             (root / "profile.json").write_text(json.dumps({"profile": "S"}))
             worker = root / "worker"

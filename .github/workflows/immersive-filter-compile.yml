@@ -1,9 +1,9 @@
-name: ImmersiveFilter 1.7 reviewed fixes compile (temporary)
+name: ImmersiveFilter 1.7 native Waylith compile
 on:
   push:
     branches: [build/immersive-filter-1-7]
     paths:
-      - 'ci/immersive-filter/**'
+      - 'native-staging/immersive-filter/**'
       - '.github/workflows/immersive-filter-compile.yml'
   workflow_dispatch:
 
@@ -13,24 +13,21 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Extract sources and generate standalone reference project
+      - name: Unpack reviewed baseline and native overlay
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ci/immersive-filter/src
-          echo "63993c68b767f5e7b2a005c9b7c188bf78393e646ba88cb1fd96dea4797e3a88  ci/immersive-filter/reviewed-source.tar.xz.b64" | sha256sum -c -
           base64 --decode ci/immersive-filter/reviewed-source.tar.xz.b64 | tar -xJ -C ci/immersive-filter/src
-          cat ci/immersive-filter/final-p1.b64 ci/immersive-filter/final-p2.b64 ci/immersive-filter/final-p3.b64 ci/immersive-filter/final-p4.b64 > ci/immersive-filter/final-overrides.tar.xz.b64
-          echo "27e35128db73090ed17bc633061881c8a64ed95684d565f0cecaf66968fd4163  ci/immersive-filter/final-overrides.tar.xz.b64" | sha256sum -c -
-          base64 --decode ci/immersive-filter/final-overrides.tar.xz.b64 | tar -xJ -C ci/immersive-filter/src
-          echo "Verified updated files:"
-          sha256sum ci/immersive-filter/src/{Filter,Patch,Settings,ShaderLoader}.cs
+          base64 --decode native-staging/immersive-filter/native-overlay.tar.xz.b64 > /tmp/ogif-native-overlay.tar.xz
+          echo '05dc5b05a2a4aba9fec89857ff99cfba880b202c456e12d77092d46f17472280  /tmp/ogif-native-overlay.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/ogif-native-overlay.tar.xz -C ci/immersive-filter/src
           cat > ci/immersive-filter/src/ImmersiveFilter.csproj <<'CSPROJ'
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup>
@@ -43,6 +40,7 @@ jobs:
               <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
               <GenerateDependencyFile>false</GenerateDependencyFile>
               <Nullable>disable</Nullable>
+              <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
               <NoWarn>$(NoWarn);CS0649</NoWarn>
             </PropertyGroup>
             <ItemGroup>
@@ -51,27 +49,50 @@ jobs:
             </ItemGroup>
           </Project>
           CSPROJ
-      - name: Build
+      - name: Validate native shader definitions and GLSL
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          p = Path("native-staging/immersive-filter/Defs/OgImmersiveFilter.xml")
+          root = ET.parse(p).getroot()
+          shaders = root.findall("ShaderDef")
+          assert len(shaders) == 2
+          assert {s.findtext("defName") for s in shaders} == {"OgIF_WaylithFull", "OgIF_WaylithRoof"}
+          assert all(s.findtext("shaderProgram/sceneGrab/name") == "OgImmersiveFilter" for s in shaders)
+          assert shaders[1].findtext("shaderProgram/stencilReadMask") == "17"
+          assert shaders[1].findtext("shaderProgram/stencilRef") == "0"
+          print("ShaderDef XML validated")
+          PY
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq glslang-tools
+          glslangValidator -V -S vert native-staging/immersive-filter/Shaders/OgIFScreen.vert.glsl -o /tmp/OgIFScreen.spv
+          glslangValidator -V -S frag native-staging/immersive-filter/Shaders/OgIFGrade.frag.glsl -o /tmp/OgIFGrade.spv
+          spirv-val /tmp/OgIFScreen.spv
+          spirv-val /tmp/OgIFGrade.spv
+      - name: Build native backend DLL
         run: dotnet build ci/immersive-filter/src/ImmersiveFilter.csproj -c Release -o ci/immersive-filter/out --nologo
-      - name: Check artifact
+      - name: Check compiled assembly
         run: |
           file ci/immersive-filter/out/ImmersiveFilter.dll
           sha256sum ci/immersive-filter/out/ImmersiveFilter.dll
-      - name: Publish compiled DLL in branch
+      - name: Publish DLL to branch
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p ci/immersive-filter/compiled
           cp ci/immersive-filter/out/ImmersiveFilter.dll ci/immersive-filter/compiled/ImmersiveFilter.dll
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          base64 -w0 ci/immersive-filter/out/ImmersiveFilter.dll > ci/immersive-filter/compiled/ImmersiveFilter.dll.b64
-          git add -f ci/immersive-filter/compiled/ImmersiveFilter.dll ci/immersive-filter/compiled/ImmersiveFilter.dll.b64
+          git add -f ci/immersive-filter/compiled/ImmersiveFilter.dll
           if ! git diff --staged --quiet; then
-            git commit -m "ci: compile ImmersiveFilter reviewed fixes for 1.7 [skip ci]"
+            git commit -m "ci: build ImmersiveFilter native Waylith DLL [skip ci]"
             git push origin HEAD:build/immersive-filter-1-7
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: ImmersiveFilter-1.7-compiled
+          name: ImmersiveFilter-1.7-native-Waylith-DLL
           path: ci/immersive-filter/out/ImmersiveFilter.dll
           if-no-files-found: error

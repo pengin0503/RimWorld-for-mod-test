@@ -186,3 +186,105 @@ amend("AnimationMod/Outcome/OutcomeUtility.cs",
                     effective.Weapon = attacker.equipment?.Primary;
                 return Damage(attacker, target, effective);""")
 print("Integrated event creation, trails, duel re-entry, invisibility, and sidearms fixes")
+
+
+# Defensive preparation of the 1.7 cached pre-render results. Avoid doing
+# reflection on the common path where the parameters are already populated.
+amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
+      "    public static Vector3 StandaloneHeadPosition;",
+      """    public static Vector3 StandaloneHeadPosition;
+    private static readonly System.Reflection.MethodInfo GetPreResults =
+        AccessTools.Method(typeof(PawnRenderer), "ParallelGetPreRenderResults");
+    private static readonly System.Reflection.MethodInfo GetDrawParams =
+        AccessTools.Method(typeof(PawnRenderer), "GetDrawParms");
+    private static readonly System.Reflection.PropertyInfo GetDefaultFlags =
+        AccessTools.Property(typeof(PawnRenderer), "DefaultRenderFlagsNow");
+    """)
+amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
+      "public static bool Prefix(Pawn ___pawn, PawnRenderTree ___renderTree, ref PawnRenderer.PreRenderResults ___results, ref PawnRenderer.PreRenderResults? __state)",
+      "public static bool Prefix(PawnRenderer __instance, Pawn ___pawn, PawnRenderTree ___renderTree, Vector3 drawLoc, Rot4? rotOverride, bool neverAimWeapon, ref PawnRenderer.PreRenderResults ___results, ref PawnRenderer.PreRenderResults? __state)")
+amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
+      """        // Auto-reset AllowNext flag.
+        AllowNext = false;""",
+      """        // Auto-reset AllowNext flag.
+        AllowNext = false;
+
+        if (___results.parms.pawn == null)
+        {
+            try
+            {
+                __instance.EnsureGraphicsInitialized();
+                if (GetPreResults != null)
+                    ___results = (PawnRenderer.PreRenderResults)GetPreResults.Invoke(
+                        __instance, new object[] { drawLoc, rotOverride, neverAimWeapon, true });
+                if (___results.parms.pawn == null && GetDrawParams != null && GetDefaultFlags != null)
+                {
+                    var flags = (PawnRenderFlags)GetDefaultFlags.GetValue(__instance)
+                                | PawnRenderFlags.Clothes | PawnRenderFlags.Headgear;
+                    ___results.parms = (PawnDrawParms)GetDrawParams.Invoke(__instance,
+                        new object[] { drawLoc, 0f, ___pawn.Rotation, __instance.CurRotDrawMode, flags });
+                    ___results.valid = true;
+                }
+            }
+            catch (System.Exception error)
+            {
+                Log.ErrorOnce("[Melee Animation 1.7] Render parameters unavailable: " + error,
+                              0x4D413137);
+            }
+
+            // Do not feed an invalid pawn to ParallelPreDraw.
+            if (___results.parms.pawn == null)
+                return true;
+        }""")
+amend("AnimationMod/Patches/Patch_PawnRenderer_RenderPawnAt.cs",
+      """        if (NextDrawMode == DrawMode.HeadStandalone)
+            Patch_HediffSet_HasHead.ForcedHasHeadValue = true;
+
+        // Force RenderTree to recalculate with the new parameters.
+        if (NextDrawMode == DrawMode.HeadStandalone) ___renderTree.SetDirty();
+        ___renderTree.EnsureInitialized(___results.parms.flags);
+        ___renderTree.ParallelPreDraw(___results.parms);
+
+        Patch_HediffSet_HasHead.ForcedHasHeadValue = null;""",
+      """        if (NextDrawMode == DrawMode.HeadStandalone)
+            Patch_HediffSet_HasHead.ForcedHasHeadValue = true;
+
+        try
+        {
+            if (NextDrawMode == DrawMode.HeadStandalone)
+                ___renderTree.SetDirty();
+            ___renderTree.EnsureInitialized(___results.parms.flags);
+            ___renderTree.ParallelPreDraw(___results.parms);
+        }
+        finally
+        {
+            Patch_HediffSet_HasHead.ForcedHasHeadValue = null;
+        }""")
+
+# DrawCore is surrounded by a finally to clean up any animation that was
+# already marked for destruction, even when a draw call throws.
+amend("AnimationMod/AnimRenderer.cs",
+      """    public void Draw(float? atTime, float dt, Action<AnimRenderer, EventBase> eventOutput, bool cullDraw, Action<Pawn, Vector2> labelDraw = null)
+    {""",
+      """    public void Draw(float? atTime, float dt, Action<AnimRenderer, EventBase> eventOutput, bool cullDraw, Action<Pawn, Vector2> labelDraw = null)
+    {
+        try
+        {
+            DrawCore(atTime, dt, eventOutput, cullDraw, labelDraw);
+        }
+        finally
+        {
+            if (delayedDestroy && !IsDestroyed)
+            {
+                try { Destroy(); }
+                catch (System.Exception error)
+                {
+                    Core.Warn("[Melee Animation 1.7] Failed to clean up animation after draw: " + error);
+                }
+            }
+        }
+    }
+
+    private void DrawCore(float? atTime, float dt, Action<AnimRenderer, EventBase> eventOutput, bool cullDraw, Action<Pawn, Vector2> labelDraw = null)
+    {""")
+print("Integrated defensive pre-render results and exception-safe animation cleanup")

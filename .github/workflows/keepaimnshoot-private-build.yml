@@ -1,0 +1,137 @@
+name: Private Keep Aim N Shoot 1.7 compile
+
+# This branch-local, one-shot compile does not upload game files, MOD source,
+# binaries, or raw build logs to GitHub.
+on:
+  push:
+    branches: [ci/keepaimnshoot-build-20261104]
+    paths: [.github/workflows/keepaimnshoot-private-build.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-keepaimnshoot-20261104
+  cancel-in-progress: false
+
+jobs:
+  compile:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/ci/keepaimnshoot-build-20261104'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install private-transfer dependencies
+        run: python -m pip install botocore==1.43.120 brotli==1.1.0
+      - name: Download pinned source and three game reference DLLs privately
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          python - <<'PY'
+          import hashlib
+          import io
+          import os
+          from pathlib import Path
+          import tarfile
+          import brotli
+          import botocore.session
+
+          expected = "6e6638f996a8abb9ac6f501890d132b8640511a2d94445c8b20e7da0621c9839"
+          bucket = "rimworld-17"
+          private_root = Path(os.environ["RUNNER_TEMP"]) / "kas-private"
+          source_root = private_root / "source"
+          ref_root = private_root / "refs"
+          source_root.mkdir(parents=True)
+          ref_root.mkdir(parents=True)
+          client = botocore.session.get_session().create_client(
+              "s3", region_name="auto", endpoint_url=os.environ["R2_ENDPOINT"])
+          def fetch(key):
+              return client.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+          archive = fetch("PrivateBuildInputs/keepaimnshoot-20261104/source.tar.br")
+          if hashlib.sha256(archive).hexdigest() != expected:
+              raise RuntimeError("Private source hash mismatch")
+          data = brotli.decompress(archive)
+          with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as tar:
+              for member in tar.getmembers():
+                  path = Path(member.name)
+                  if (not member.isfile() or len(path.parts) != 3
+                          or path.parts[:2] != ("Source", "KeepAimNShoot")
+                          or path.suffix not in (".cs", ".csproj")):
+                      raise RuntimeError("Unexpected private source entry")
+                  dest = source_root / path
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  with tar.extractfile(member) as src, dest.open("wb") as out:
+                      out.write(src.read())
+          for name in ("Assembly-CSharp.dll", "UnityStubs.dll", "Waylith.dll"):
+              blob = fetch("Game-Linux/" + name)
+              if len(blob) < 10000 or blob[:2] != b"MZ":
+                  raise RuntimeError("Invalid game reference")
+              (ref_root / name).write_bytes(blob)
+          print("Private source hash verified; references fetched: 3")
+          PY
+      - name: Fetch pinned build-only Harmony 2.4.3
+        run: |
+          curl --fail --location --silent --show-error --max-time 90 \
+            https://api.nuget.org/v3-flatcontainer/lib.harmony/2.4.3/lib.harmony.2.4.3.nupkg \
+            --output "$RUNNER_TEMP/harmony.nupkg"
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import os
+          root = Path(os.environ["RUNNER_TEMP"]) / "kas-private" / "refs"
+          with ZipFile(Path(os.environ["RUNNER_TEMP"]) / "harmony.nupkg") as pkg:
+              dll = pkg.read("lib/net10.0/0Harmony.dll")
+          (root / "0Harmony.dll").write_bytes(dll)
+          print("Build-only Harmony reference obtained")
+          PY
+      - name: Compile reviewed C# against RimWorld 1.7
+        shell: bash
+        run: |
+          set +e
+          root="$RUNNER_TEMP/kas-private"
+          dotnet build "$root/source/Source/KeepAimNShoot/KeepAimNShoot.csproj" \
+            --configuration Release --no-restore:false \
+            -p:GameDir="$root/refs" -p:HarmonyDll="$root/refs/0Harmony.dll" \
+            -o "$root/compiled" > "$RUNNER_TEMP/kas-build.log" 2>&1
+          status=$?
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import os
+          import re
+          root = Path(os.environ["RUNNER_TEMP"])
+          log = (root / "kas-build.log").read_text(errors="replace")
+          for line in log.splitlines():
+              m = re.search(r"(error|warning) ((?:CS|MSB|NETSDK)\d+): (.*)", line)
+              if m:
+                  loc = line.split("(")[0].rsplit("/", 1)[-1]
+                  print(f"{m.group(1)} {m.group(2)} ({loc}): {m.group(3)[:180]}")
+          dll = root / "kas-private" / "compiled" / "KeepAimNShoot.dll"
+          if dll.is_file():
+              print("DLL compiled. SHA-256:", hashlib.sha256(dll.read_bytes()).hexdigest())
+          else:
+              print("DLL not produced")
+          PY
+          exit "$status"
+      - name: Assert the compiled file is a managed PE assembly
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path(os.environ["RUNNER_TEMP"]) / "kas-private/compiled/KeepAimNShoot.dll"
+          raw = p.read_bytes()
+          assert raw[:2] == b"MZ" and len(raw) > 4096
+          print("Compiled DLL sanity check passed; DLL retained only in runner temp")
+          PY

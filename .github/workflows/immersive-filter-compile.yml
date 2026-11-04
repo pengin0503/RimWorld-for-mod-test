@@ -24,7 +24,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci/immersive-filter/src
-          base64 --decode ci/immersive-filter/source.tar.xz.b64 | tar -xJ -C ci/immersive-filter/src
+          echo "63993c68b767f5e7b2a005c9b7c188bf78393e646ba88cb1fd96dea4797e3a88  ci/immersive-filter/reviewed-source.tar.xz.b64" | sha256sum -c -
+          base64 --decode ci/immersive-filter/reviewed-source.tar.xz.b64 | tar -xJ -C ci/immersive-filter/src
           cat > ci/immersive-filter/src/ImmersiveFilter.csproj <<'CSPROJ'
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup>

@@ -54,6 +54,24 @@ jobs:
           find upstream/1.7/Assemblies -maxdepth 1 -type f -name '*.dll' -exec cp {} artifacts/Assemblies/ \; 2>/dev/null || true
           grep -E 'error (CS|NU|MSB|NETSDK)| error:|Build (succeeded|FAILED)' "$RUNNER_TEMP/compile.log" | head -n 220 > artifacts/build-diagnostics.txt 2>/dev/null || true
           echo "exit=$BUILD_EXIT" > artifacts/status.txt
+          mkdir -p artifacts/Source-Port
+          cp tools/melee_animation_net10_port.py artifacts/Source-Port/
+          python3 - <<'PY'
+          from pathlib import Path
+          from shutil import copy2
+          home=Path.home()/'.nuget/packages'
+          out=Path('artifacts/Assemblies')
+          for package, name in [('newtonsoft.json','Newtonsoft.Json.dll'),
+                                ('portable.meta.numerics','Meta.Numerics.dll')]:
+              matches=list((home/package).glob('**/'+name))
+              rank=lambda p: (0 if 'net10.0' in str(p) else 1 if 'net6.0' in str(p) else 2 if 'netstandard2.0' in str(p) else 3, len(str(p)))
+              if matches:
+                  selected=sorted(matches,key=rank)[0]
+                  copy2(selected,out/name)
+                  print('Bundled runtime dependency:',name,selected.parent.name)
+              else:
+                  print('Missing runtime dependency:',name)
+          PY
           find artifacts/Assemblies -name '*.dll' -printf '%f\n' | sort
       - uses: actions/upload-artifact@v4
         if: always()

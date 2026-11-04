@@ -5,6 +5,8 @@ import re
 import sys
 
 root = Path(sys.argv[1]).resolve()
+bfm_file = Path(sys.argv[2]).resolve() / "BetterFloatMenu" / "BetterFloatMenu.cs"
+assert bfm_file.is_file(), bfm_file
 sources = root / "Source" / "1.6"
 assert (sources / "AnimationMod").is_dir(), sources
 
@@ -19,7 +21,7 @@ count = 0
 for project in sources.rglob("*.csproj"):
     text = project.read_text(encoding="utf-8-sig")
     before = text
-    text = text.replace('Include="BetterFloatMenu" Version="16.0.0"', 'Include="BetterFloatMenu" Version="17.0.0"')
+    text = re.sub(r'<PackageReference Include="BetterFloatMenu" Version="[^"]+"\s*/>', '', text)
     for old in ["1.6.4871","1.6.4870"]:
         text = text.replace(old, "1.7.4995-unstable")
     text = re.sub(r'(<PackageReference Include="Lib\.Harmony" Version=")[^"]+(")',r'\g<1>3.0.0-rc.3\2',text)
@@ -32,6 +34,13 @@ for project in sources.rglob("*.csproj"):
         project.write_text(text, encoding="utf-8")
         count += 1
 print("Updated",count,"C# projects and shared props")
+# The 1.7 Unity API is provided by UnityStubs/Waylith; the pre-built
+# BetterFloatMenu package retains an incompatible old UnityEngine.CoreModule
+# identity. Compile Epicguru's MIT-licensed 1.7 source against the same refs.
+bfm_target = sources / "AnimationMod" / "EpicUtils" / "BetterFloatMenu.cs"
+bfm_target.parent.mkdir(parents=True, exist_ok=True)
+bfm_target.write_bytes(bfm_file.read_bytes())
+print("Vendored BetterFloatMenu source (MIT) for consistent type identity")
 
 def amend(relative, old, new, expected=1):
     target=sources/relative

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <ShaderDef>
+    <defName>OgIF_WaylithFull</defName>
+    <shaderProgram>
+      <vertexShaderFileName>OgIFScreen.vert.glsl</vertexShaderFileName>
+      <fragmentShaderFileName>OgIFGrade.frag.glsl</fragmentShaderFileName>
+      <useTexture>false</useTexture>
+      <flipTextureST>false</flipTextureST>
+      <blendMode>Opaque</blendMode>
+      <depthTest>false</depthTest>
+      <depthWrite>false</depthWrite>
+      <cullMode>None</cullMode>
+      <renderQueue>4891</renderQueue>
+      <sceneGrab><name>OgImmersiveFilter</name><queue>4890</queue></sceneGrab>
+    </shaderProgram>
+  </ShaderDef>
+  <ShaderDef>
+    <defName>OgIF_WaylithRoof</defName>
+    <shaderProgram>
+      <vertexShaderFileName>OgIFScreen.vert.glsl</vertexShaderFileName>
+      <fragmentShaderFileName>OgIFGrade.frag.glsl</fragmentShaderFileName>
+      <useTexture>false</useTexture>
+      <flipTextureST>false</flipTextureST>
+      <blendMode>Opaque</blendMode>
+      <depthTest>false</depthTest>
+      <depthWrite>false</depthWrite>
+      <cullMode>None</cullMode>
+      <stencilEnabled>true</stencilEnabled>
+      <stencilCompare>Equal</stencilCompare>
+      <stencilPassOp>Keep</stencilPassOp>
+      <stencilRef>0</stencilRef>
+      <stencilReadMask>17</stencilReadMask>
+      <stencilWriteMask>0</stencilWriteMask>
+      <renderQueue>4892</renderQueue>
+      <sceneGrab><name>OgImmersiveFilter</name><queue>4890</queue></sceneGrab>
+    </shaderProgram>
+  </ShaderDef>
+</Defs>

@@ -1,0 +1,179 @@
+name: Private Keep Aim N Shoot 1.7 review 2 Harmony 3 compile
+
+# This branch-local, one-shot compile does not upload game files, MOD source,
+# binaries, or raw build logs to GitHub.
+on:
+  push:
+    branches: [ci/keepaimnshoot-review2-20261104]
+    paths: [.github/workflows/keepaimnshoot-review2-private.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-keepaimnshoot-review2-20261104
+  cancel-in-progress: false
+
+jobs:
+  compile:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/ci/keepaimnshoot-review2-20261104'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install private-transfer dependencies
+        run: python -m pip install botocore==1.43.120 brotli==1.1.0
+      - name: Download pinned reviewed sources, exact RimWorld 1.7 and Harmony 3 DLLs
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          python - <<'PY'
+          import hashlib
+          import io
+          import os
+          from pathlib import Path
+          import tarfile
+          import brotli
+          import botocore.session
+
+          expected = "6e6638f996a8abb9ac6f501890d132b8640511a2d94445c8b20e7da0621c9839"
+          bucket = "rimworld-17"
+          private_root = Path(os.environ["RUNNER_TEMP"]) / "kas-private"
+          source_root = private_root / "source"
+          ref_root = private_root / "refs"
+          source_root.mkdir(parents=True)
+          ref_root.mkdir(parents=True)
+          client = botocore.session.get_session().create_client(
+              "s3", region_name="auto", endpoint_url=os.environ["R2_ENDPOINT"])
+          def fetch(key):
+              return client.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+          archive = fetch("PrivateBuildInputs/keepaimnshoot-20261104/source.tar.br")
+          if hashlib.sha256(archive).hexdigest() != expected:
+              raise RuntimeError("Private source hash mismatch")
+          data = brotli.decompress(archive)
+          with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as tar:
+              for member in tar.getmembers():
+                  path = Path(member.name)
+                  if (not member.isfile() or len(path.parts) != 3
+                          or path.parts[:2] != ("Source", "KeepAimNShoot")
+                          or path.suffix not in (".cs", ".csproj")):
+                      raise RuntimeError("Unexpected private source entry")
+                  dest = source_root / path
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  with tar.extractfile(member) as src, dest.open("wb") as out:
+                      out.write(src.read())
+          for name in ("Assembly-CSharp.dll", "UnityStubs.dll", "Waylith.dll"):
+              blob = fetch("Game-Linux/" + name)
+              if len(blob) < 10000 or blob[:2] != b"MZ":
+                  raise RuntimeError("Invalid game reference")
+              (ref_root / name).write_bytes(blob)
+          harmony = fetch("Workshop/2009463077/1.7/Assemblies/0Harmony.dll")
+          if len(harmony) < 10000 or harmony[:2] != b"MZ":
+              raise RuntimeError("Invalid Harmony 3 reference")
+          (ref_root / "0Harmony.dll").write_bytes(harmony)
+          patch = fetch("PrivateBuildInputs/keepaimnshoot-20261104-review2/source-v2.patch.br")
+          if hashlib.sha256(patch).hexdigest() != "f25d597cafc1c44e9423675af28bca3c719ad36debd5d989828f74e50bdae9a3":
+              raise RuntimeError("Reviewed patch SHA256 mismatch")
+          # The reviewed C# application is private. Verification fixture source
+          # was not part of the original source archive and is not needed to build.
+          patch_bytes = brotli.decompress(patch).split(b"diff --git a/Source/Verification/")[0]
+          (private_root / "review2.patch").write_bytes(patch_bytes)
+          print("Private source and review2 patch verified; game references: 3; Harmony 3: 1")
+          PY
+          cd "$RUNNER_TEMP/kas-private/source"
+          patch --batch --forward --strip=1 < "$RUNNER_TEMP/kas-private/review2.patch"
+      - name: Compile reviewed C# against RimWorld 1.7
+        shell: bash
+        run: |
+          set +e
+          root="$RUNNER_TEMP/kas-private"
+          dotnet build "$root/source/Source/KeepAimNShoot/KeepAimNShoot.csproj" \
+            --configuration Release \
+            -p:GameDir="$root/refs" -p:HarmonyDll="$root/refs/0Harmony.dll" \
+            -o "$root/compiled" > "$RUNNER_TEMP/kas-build.log" 2>&1
+          status=$?
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import os
+          import re
+          root = Path(os.environ["RUNNER_TEMP"])
+          log = (root / "kas-build.log").read_text(errors="replace")
+          for line in log.splitlines():
+              m = re.search(r"(error|warning) ((?:CS|MSB|NETSDK)\d+): (.*)", line)
+              if m:
+                  loc = line.split("(")[0].rsplit("/", 1)[-1]
+                  print(f"{m.group(1)} {m.group(2)} ({loc}): {m.group(3)[:180]}")
+          dll = root / "kas-private" / "compiled" / "KeepAimNShoot.dll"
+          if dll.is_file():
+              print("DLL compiled. SHA-256:", hashlib.sha256(dll.read_bytes()).hexdigest())
+          else:
+              print("DLL not produced")
+          PY
+          exit "$status"
+      - name: Assert the compiled file is a managed PE assembly
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path(os.environ["RUNNER_TEMP"]) / "kas-private/compiled/KeepAimNShoot.dll"
+          raw = p.read_bytes()
+          assert raw[:2] == b"MZ" and len(raw) > 4096
+          print("Compiled DLL sanity check passed; DLL is held in runner temp until encrypted artifact transfer")
+          PY
+      # Encrypted output only. No game binaries or unencrypted MOD DLLs are uploaded.
+      - name: Encrypt built DLL for private assembly
+        run: |
+          python -m pip install -q cryptography==46.0.4
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          from cryptography.hazmat.primitives import serialization, hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          root = Path(os.environ["RUNNER_TEMP"]) / "kas-private"
+          raw = (root / "compiled" / "KeepAimNShoot.dll").read_bytes()
+          if len(raw) < 4096 or raw[:2] != b"MZ":
+              raise RuntimeError("Invalid DLL")
+          public = serialization.load_der_public_key(base64.b64decode("MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEArsluO5NmZpjMbQ35H63gd8q7r/HWi/l2MX7EsVSsCP+wYrAg3+aP+oiPDg+uf1MzUYprrjjh5MWeFcKHbYUBH1x+uMSEja+EzNsGSTQB79BOPDnAgFMpV4BInV9z2MRcxxbNnmhHDg6QyXAWSBi9Sn6IRt0otwgfxDDCCOiy0yD+0eta6eRnw4S2LTt3pVIlzRlG2QzCCXVejploUMtA0amEHCwTOaEvfNqMHa4k/O8A1d2Y21mPOzoTPNbwWy9xHVT3+QUA+BFdRvhzvGmcqqwneafa8YrMxkQRbf8fkxDNw28VULjJyd2TnHr8pPGoh6ehHvQ6ail++43rQoSHYoOipOtbWWmRT8IZWQjapvJBmBk0dT90dS67G6v3fjkOidQkwMcGe5xMy9f1I6jWG+UjqYzvuGcCPWoUC5MyDOPM8/U06iqeOYeZl5qlURG/8mJPp858LlCm3TlvDhFF2BKGyuY6i7WXSvtg15M6YwJpdCJUZS0nwe38qpsE/3itAgMBAAE="))
+          key = os.urandom(32)
+          nonce = os.urandom(12)
+          aad = b"RimWorld-KeepAimNShoot-1.7-20261104"
+          payload = {
+              "version": 1,
+              "algorithm": "RSA-OAEP-SHA256+AES-256-GCM",
+              "sha256": hashlib.sha256(raw).hexdigest(),
+              "bytes": len(raw),
+              "wrapped_key": base64.b64encode(public.encrypt(
+                  key, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                    algorithm=hashes.SHA256(), label=None))).decode(),
+              "nonce": base64.b64encode(nonce).decode(),
+              "ciphertext": base64.b64encode(AESGCM(key).encrypt(nonce, raw, aad)).decode()
+          }
+          delivery = root / "delivery"
+          delivery.mkdir()
+          (delivery / "keepaimnshoot.enc.json").write_text(json.dumps(payload))
+          print("Encrypted output prepared; SHA256:", payload["sha256"])
+          PY
+      - name: Upload encrypted output only
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepaimnshoot-encrypted-dll-review2-20261104
+          path: ${{ runner.temp }}/kas-private/delivery/keepaimnshoot.enc.json
+          retention-days: 1
+          if-no-files-found: error

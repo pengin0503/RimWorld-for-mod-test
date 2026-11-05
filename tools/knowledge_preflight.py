@@ -70,7 +70,7 @@ def _read_json(path: Path):
 
 def load_database(*, build: str = PINNED_BUILD, pack_dir: Path | None = None) -> KnowledgeDatabase:
     """Load only a specifically verified build; never auto-fallback to a nearby 1.7."""
-    match = re.fullmatch(r"(\\d+)\\.(\\d+)\\.(\\d+) rev(\\d+)", build) if isinstance(build, str) else None
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+) rev(\d+)", build) if isinstance(build, str) else None
     if match is None:
         raise KnowledgeError("requested build must be exact major.minor.patch revrevision")
     if pack_dir is None and build not in BUNDLED_PACKS:

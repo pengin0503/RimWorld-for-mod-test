@@ -175,5 +175,51 @@ class KnowledgeDatabaseTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue())["gameVerification"], "notRun")
 
 
+    def test_batch_requirements_return_verified_and_unknown_not_false_missing(self):
+        requirements = self.root / "requires.json"
+        requirements.write_text(json.dumps({
+            "schemaVersion": 1, "gameBuild": BUILD,
+            "requires": [{"kind": "type", "symbol": "Verse.GenText"},
+                         {"kind": "def", "symbol": "ThingDef:FutureThing"}],
+        }), encoding="utf-8")
+        report = kp.check_requirements(requirements, self.db)
+        self.assertEqual(report["status"], "staticIncomplete")
+        self.assertEqual(report["counts"], {"present": 1, "unknown": 1})
+        self.assertFalse(report["runtimeQualified"])
+        output = StringIO()
+        with redirect_stdout(output):
+            code = kp.main(["check", "--build", BUILD, "--requirements", str(requirements)])
+        self.assertEqual(code, 3)
+        self.assertEqual(json.loads(output.getvalue())["counts"]["unknown"], 1)
+        requirements.write_text(json.dumps({
+            "schemaVersion": 1, "gameBuild": BUILD, "requires": [],
+            "extra": "not accepted",
+        }), encoding="utf-8")
+        with self.assertRaises(kp.KnowledgeError):
+            kp.check_requirements(requirements, self.db)
+
+    def test_explicit_newer_build_pack_is_opt_in_never_fallback(self):
+        import shutil
+        folder = self.root / "later"
+        shutil.copytree(kp.DATABASE_ROOT / "1.7.4985-rev1269", folder)
+        manifest = json.loads((folder / "manifest.json").read_text())
+        manifest["gameBuild"] = "1.7.5000 rev1"
+        (folder / "manifest.json").write_text(json.dumps(manifest))
+        db = kp.load_database(build="1.7.5000 rev1", pack_dir=folder)
+        self.assertEqual(db.metadata["gameBuild"], "1.7.5000 rev1")
+        with self.assertRaises(kp.KnowledgeError):
+            kp.load_database(build=BUILD, pack_dir=folder)
+
+    def test_existing_cloud_orchestrator_can_run_standalone_static_first(self):
+        from tools import codex_workflow as cw
+        mod = self.make_mod()
+        output = StringIO()
+        with patch.object(cw, "r2_session", side_effect=AssertionError("network must never run")):
+            with redirect_stdout(output):
+                code = cw.main(["static-preflight", "--build", BUILD, "--mod", str(mod)])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())["gameVerification"], "notRun")
+
+
 if __name__ == "__main__":
     unittest.main()

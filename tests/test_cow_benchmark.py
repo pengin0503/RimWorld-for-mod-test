@@ -2,6 +2,7 @@
 import math
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -74,6 +75,7 @@ class SourceTreeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 cow.manifest(source)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "real Btrfs comparison requires Linux")
     def test_private_source_is_staged_to_dedicated_btrfs_then_compared(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)/"private"; root.mkdir()

@@ -87,6 +87,27 @@ class WorkloadRunnerTests(unittest.TestCase):
             with self.subTest(version=bad), self.assertRaises(ValueError):
                 runner["require_pinned_game"]({"version": bad})
 
+    def test_memory_sample_requires_both_baseline_and_target_rss(self):
+        build = self.code()["parse_measurement"]
+        request = {"mods": [{"packageId": "example.one"}]}
+        base = {"status": "passed",
+                "modOrder": {"matches": True, "actual": ["ludeon.rimworld", "example.one"]},
+                "diagnostics": {"baselineCached": False},
+                "process": {"target": {"peakRssBytes": 2000},
+                            "baseline": {"peakRssBytes": 1400}}}
+        complete = build("uncached-1", base, request, 2.0)
+        self.assertEqual(complete["peakRssBytes"], 2000)
+        self.assertTrue(wr.valid_measurement_row(complete, "uncached-1"))
+        for missing in ("baseline", "target"):
+            with self.subTest(missing=missing):
+                incomplete = {**base, "process": {missing: {"peakRssBytes": 2000}}}
+                row = build("uncached-1", incomplete, request, 2.0)
+                self.assertIsNone(row["peakRssBytes"])
+                self.assertFalse(wr.valid_measurement_row(row, "uncached-1"))
+        missing_value = {**base, "process": {"target": {"peakRssBytes": 2000},
+                                            "baseline": {}}}
+        self.assertIsNone(build("uncached-1", missing_value, request, 2.0)["peakRssBytes"])
+
     def test_private_manifest_digest_is_required_and_checked_before_run(self):
         runner = self.code()
         with tempfile.TemporaryDirectory() as d:

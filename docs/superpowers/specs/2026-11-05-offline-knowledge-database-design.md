@@ -8,7 +8,7 @@ This is an additive first stage. No runtime A/B/C/D feature is removed or relabe
 
 ## Architecture
 
-- Versioned safe reference pack in validation-data/1.7.4985-rev1269. Exactly one manifest, and provenance-linked positive facts in types, methods, defs and Harmony target JSON.
+- Versioned safe reference pack in validation-data/1.7.4985-rev1269. Exactly one manifest, and provenance-linked positive facts in types, methods (documented argument types only), fields, defs, Harmony targets, official package identifiers and known warning JSON.
 - Offline Python engine in tools/knowledge_preflight.py: query a fact, check an explicit requirement batch, scan local About/selected Defs and Patches XML, validate an entire pack.
 - Reuse the qualified exact-build load-folder algorithm from tools/mod_load_plan.py, including 1.7 fallback rules. No approximation to unrelated future builds.
 - tools/codex_workflow.py static-preflight is an offline convenience entry point. Existing fetch-mods and validate remain private-index / R2 and real-game authoritative.

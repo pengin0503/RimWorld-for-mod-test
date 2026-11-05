@@ -29,6 +29,16 @@ performs this step after its PR has been merged. R2 read-only secrets are
 exposed only during that step; no game or private files enter the repository
 or Actions artifacts. Public CI uses only synthetic FakeR2 tests.
 
+## Verified R2 state (2026-11-05)
+
+A separate, read-only Cloudflare R2 inspection confirmed that the current
+`Game-Linux/Version.txt` contains `1.7.4985 rev1269`, not the
+`1.7.4995` candidate. The eight fixed identity names were listed and
+were last modified on 2026-10-26. No new binary content was uploaded
+or qualified. This is a **blocked candidate**, not a passed compatibility
+assessment. The exact 1.7.4995 build, its SHA-256 identities and official
+headless comparison must be supplied independently.
+
 ## Acceptance still required to support 1.7.4995
 
 1. The owner updates the authorized private Linux game snapshot; read-only

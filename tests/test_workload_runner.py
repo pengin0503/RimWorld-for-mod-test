@@ -25,6 +25,14 @@ class WorkloadRunnerTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args(["prepare", "--profile", "../../bad", "--private-root", "/tmp/root"])
 
+    def test_private_workload_has_reusable_call_without_widening_push_scope(self):
+        workflow = (RUNNER.parents[2] / ".github/workflows/linux-private-workload.yml").read_text(encoding="utf-8")
+        header = workflow.split("permissions:", 1)[0]
+        self.assertIn("workflow_call:", header)
+        self.assertIn("profile:", header)
+        self.assertIn("workflow_dispatch:", header)
+        self.assertNotIn("push:", header)
+
     def test_private_workflow_uses_runner_context_only_in_steps(self):
         workflow = (RUNNER.parents[2] / ".github/workflows/linux-private-workload.yml").read_text(encoding="utf-8")
         job_header, steps = workflow.split("    steps:", 1)

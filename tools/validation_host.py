@@ -85,7 +85,7 @@ def detect_build_platform(files):
 ADAPTERS = {
     'rimworld-1.7.4985-rev1269': {
         'version': '1.7.4985 rev1269',
-        'experimentalFeatures': ('bounded-tick.v1',),
+        'experimentalFeatures': ('bounded-tick.v1', 'bounded-tick.v2'),
         'sha256': {
             'Assembly-CSharp.dll': '0be7a7ea4b3111d4430f45b36c234a5e43287880b0514b23915f2ef9a0629e16',
             'RimWorld.dll': '39bd67253a7fa5503ff7f2b51bc3ab5983fb1430acf57d7e8bb322d20e380555',
@@ -1690,7 +1690,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         else:
             fidelity = 'experimental'
         if request.get('tick') and (not qualification or not runtime_ok
-                or 'bounded-tick.v1' not in (adapter or {}).get('experimentalFeatures', ())):
+                or bounded_tick.case_id(request['tick']) not in (adapter or {}).get('experimentalFeatures', ())):
             raise Blocked('boundedTickUnsupported', 'no bounded-tick adapter for this exact game/runtime build')
         result['fidelity'] = fidelity
         result['qualificationEvidence'] = qualification['evidence'] if qualification and fidelity == 'qualified' else None
@@ -1775,7 +1775,7 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         'official': request['official'], 'language': request['language'], 'limits': limits,
         'mods': [(m['packageId'], m['sha256']) for m in baseline_mods],
         'map': {k: v for k, v in request['map'].items() if k != 'imageScale'} if request['map'] else None,
-        **({'boundedTick': {'caseId': bounded_tick.CASE, 'observerVersion': bounded_tick.OBSERVER_VERSION,
+        **({'boundedTick': {**bounded_tick.cache_identity(request['tick']),
                             'tick': request['tick'], 'observations': request['expectations']['tickObservations']}}
            if request.get('tick') else {}),
     }, sort_keys=True).encode()).hexdigest()

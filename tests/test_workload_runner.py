@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import runpy
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
@@ -126,9 +125,6 @@ class WorkloadRunnerTests(unittest.TestCase):
             worker = root / "worker"
             worker.mkdir()
             def fake_validate(snapshot, request, out, worker_dir, **kwargs):
-                # Ensure synthetic duration survives 5-decimal rounding on all
-                # OS/Python combinations; no real game is being timed here.
-                time.sleep(0.002)
                 self.assertIsNone(os.environ.get("AWS_SECRET_ACCESS_KEY"))
                 name = out.name
                 calls.append((name, kwargs.get("baseline_cache")))
@@ -136,8 +132,12 @@ class WorkloadRunnerTests(unittest.TestCase):
                         "modOrder": {"matches": True, "actual": ["a.mod"]},
                         "process": {"target": {"peakRssBytes": 900}},
                         "diagnostics": {"baselineCached": name.startswith("cached-")}}
-            with patch.object(runner["vh"], "run_validation", side_effect=fake_validate), \
-                 patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake", "R2_ENDPOINT": "https://fake.local"}):
+            synthetic_clock = iter(range(1000))
+            with (
+                patch.object(runner["vh"], "run_validation", side_effect=fake_validate),
+                patch.object(runner["time"], "monotonic", side_effect=lambda: next(synthetic_clock)),
+                patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake", "R2_ENDPOINT": "https://fake.local"}),
+            ):
                 summary = runner["run_profile"](root, worker, "S")
             self.assertEqual([case for case, _ in calls],
                              ["uncached-1", "cache-fill", "cached-1", "uncached-2", "cached-2", "uncached-3"],

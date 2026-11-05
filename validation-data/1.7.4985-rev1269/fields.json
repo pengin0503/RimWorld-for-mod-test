@@ -1,0 +1,6 @@
+[
+  {
+    "symbol": "Verse.ThingDef.statBases",
+    "source": "docs/contracts/mod-validation-v1.md: ThingDef Steel statBases[stat=MarketValue].value check; docs/research/test-host-qualification.md: official headless observed Steel value"
+  }
+]

@@ -29,7 +29,8 @@ class D2PrivateRunnerTests(unittest.TestCase):
         def result(expected=60, cached=False, actual=60, kind="completed", status="incomplete"):
             return {
                 "status":status,"executionStatus":"completed",
-                "reasons":[{"code":"dNotQualified"}],
+                "reasons":[{"code":"dNotQualified"}] + (
+                    [{"code":"tickObservationMismatch"}] if kind=="failed" else []),
                 "diagnostics":{"baselineCached":cached},
                 "stages":{"D":{"status":kind,"evidence":{
                     "caseId":"bounded-tick.v2","observerVersion":2,

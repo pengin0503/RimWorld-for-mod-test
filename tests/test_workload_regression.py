@@ -122,6 +122,14 @@ class MeasurementTests(unittest.TestCase):
         rows[-1]["baselineCached"] = False
         self.assertFalse(wr.summarize_runs(rows)["complete"])
 
+    def test_cache_mode_must_be_observed_not_merely_requested(self):
+        rows = self.rows()
+        rows[0]["baselineCached"] = True
+        self.assertFalse(wr.summarize_runs(rows)["complete"])
+        rows = self.rows()
+        rows[5]["baselineCached"] = True
+        self.assertFalse(wr.summarize_runs(rows)["complete"])
+
     def test_reject_duplicate_and_missing_cases(self):
         rows = self.rows()
         self.assertFalse(wr.summarize_runs(rows[:-1])["complete"])

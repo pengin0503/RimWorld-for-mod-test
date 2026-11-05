@@ -4,7 +4,7 @@
 
 Built-in knowledge covers only **Linux RimWorld 1.7.4985 rev1269**, and only facts recorded in the project's existing official-headless comparison and result contracts. It does **not** contain the game, Workshop MOD binaries, a private MOD index, game Def XML, DLL code, decompiled source or private files. It does **not** make the host playable.
 
-The included seed is deliberately **partial**: two known type identifiers, one method name, one Def and one observed Harmony target. This is useful for testing the pipeline and specific well-established references, but is **not** an exhaustive 1.7 API/Def index. Entries carry a pointer to their provenance in the repository. Unlisted names remain **unknown**, not missing or invalid. Actual signature overload resolution, reflection behavior, XML patch application and runtime Harmony success still need the original real-game validation host.
+The included seed is deliberately **partial**: two known type identifiers, one method name with an observed parameter type, one field reference, one Def, one observed Harmony target, two official package identifiers and one documented warning. This is useful for testing the pipeline and specific well-established references, but is **not** an exhaustive 1.7 API/Def index. Entries carry a pointer to their provenance in the repository. Unlisted names remain **unknown**, not missing or invalid. Actual signature overload resolution, reflection behavior, XML patch application and runtime Harmony success still need the original real-game validation host.
 
 ## Use (requires only Python 3.12+, no extra packages)
 

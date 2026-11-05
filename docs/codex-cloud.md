@@ -1,5 +1,14 @@
 # Codex Cloud + R2 + RimWorld 検証ホスト（私有資材）
 
+## 0. ローカルMODのオフライン予備検証（R2通信・認証不要）
+
+ローカルにMODのソース/構成ファイルがある場合は、最初に以下を実行できる。
+
+    python3 tools/codex_workflow.py static-preflight --mod ./MyMod
+    python3 tools/knowledge_preflight.py query --kind def --symbol ThingDef:Steel
+
+現行1.7 unstable（1.7.4985 rev1269）の**一部**の既知シンボルのみ内蔵。未収録はunknown扱いであり、静的合格は実ゲームの動作保証ではない。入力がローカルにない外部MODの特定や実ゲーム検証が必要なら、従来どおり非公開MOD索引から特定し、R2経由で必要ファイルのみ取得する。詳細は[内蔵検証データベース](knowledge-database.md)。
+
 ## 確認済みと未確認を分ける
 
 2026-10-26 のユーザーからの報告で、Codex Cloud (Linux x86_64、Python 3.12.14、.NET SDK 10.0.403) から Cloudflare R2 バケット rimworld-17 の Game-Linux/Version.txt に HEAD 200、GET 成功。バージョンは 1.7.4985 rev1269。

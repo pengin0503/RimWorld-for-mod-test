@@ -100,6 +100,10 @@ def validated_prefix(config, evidence):
         if (not isinstance(values, dict) or set(values) != expected_ids
                 or not all(integer(n) and -(2**63) <= n < 2**63 for n in values.values())):
             return None
+        if 'game.tick' in values and values['game.tick'] != row['gameTick']:
+            # The Worker claims this is the real TickManager value: a
+            # disagreement with its own raw gameTick means corrupt evidence.
+            return None
         actual[point] = values
     return actual
 

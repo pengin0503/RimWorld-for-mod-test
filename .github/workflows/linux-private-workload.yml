@@ -22,8 +22,6 @@ jobs:
     if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    env:
-      PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,6 +47,7 @@ jobs:
           AWS_DEFAULT_REGION: auto
           RWMT_R2_TRANSPORT: sdk
           PROFILE: ${{ inputs.profile }}
+          PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
         run: |
           python tests/integration/run_workload_regression.py prepare --profile "$PROFILE" --private-root "$PRIVATE_ROOT"
       - name: Build Worker without R2 secrets
@@ -58,11 +57,13 @@ jobs:
         id: run
         env:
           PROFILE: ${{ inputs.profile }}
+          PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
         run: |
           python tests/integration/run_workload_regression.py run --profile "$PROFILE" --private-root "$PRIVATE_ROOT" --worker worker/bin
       - name: Publish rebuilt fixed-field summary
         if: always() && steps.prepare.outcome == 'success'
         env:
           PROFILE: ${{ inputs.profile }}
+          PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
         run: |
           python tests/integration/run_workload_regression.py publish --profile "$PROFILE" --private-root "$PRIVATE_ROOT"

@@ -91,6 +91,7 @@ class SourceTreeTests(unittest.TestCase):
                 summary=cow.run_benchmark(root, btrfs_root=mount)
             self.assertTrue(summary["complete"])
             self.assertEqual(len(commands),10)
+            self.assertTrue(all("selected" in cmd[-2] for cmd in commands))
             self.assertEqual(summary["samples"],{"copy":5,"reflink":5})
             self.assertEqual(cow.manifest(source)[0][1], len(b"private synthetic MOD"))
             self.assertEqual(list(mount.iterdir()),[])

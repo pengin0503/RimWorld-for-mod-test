@@ -66,6 +66,7 @@ def prepare_profile(root: Path, profile: str):
     root = cw._safe_private(root)
     if (root / "profile.json").exists() or (root / "request.json").exists():
         raise ValueError("private profile already prepared; use a fresh root")
+    started = time.monotonic()
     # The precise Workshop IDs and PackageIds are resolved by fetch_mods
     # against the private index; never guess IDs from display names.
     fetch = cw.fetch_mods(
@@ -75,12 +76,29 @@ def prepare_profile(root: Path, profile: str):
                         language="English", scope="validation"),
         root_targets=roots, max_selected_bytes=MAX_BYTES,
         max_selected_files=MAX_FILES, max_mods=MAX_MODS)
+    mod_fetch_seconds = time.monotonic() - started
     # All metadata and selected payload was bounded before the game was acquired.
     prepared = cw.prepare(SimpleNamespace(private_root=root, refresh=False, aws="aws"))
     require_pinned_game(prepared)
+    prep_timings = prepared.get("timings") or {}
+    counts = fetch["fetched"]
+    preparation = wr.summarize_preparation({
+        "modFetchSeconds": mod_fetch_seconds,
+        "gameRuntimeFetchSeconds": prep_timings.get("fetchSeconds"),
+        "snapshotTotalSeconds": prep_timings.get("snapshotTotalSeconds"),
+        "totalInitialSeconds": time.monotonic() - started,
+        "selectedModCount": len(counts),
+        "selectedModFiles": sum(x["r2"]["selected"] for x in counts),
+        "selectedModBytes": sum(x["r2"]["listedBytes"] for x in counts),
+        "gameFiles": prepared.get("files"),
+    })
+    # A reused snapshot has no first-acquisition measurement. Never infer
+    # missing preparation timings or print them as zero.
+    if prepared.get("status") != "prepared":
+        preparation = wr.summarize_preparation(None)
     raw_request = (root / "request.json").read_bytes()
     manifest = {"profile": profile, "requestSha256": sha256(raw_request).hexdigest(),
-                "runtimePrepared": True}
+                "runtimePrepared": True, "preparation": preparation}
     write_private(root / "profile.json", manifest)
     return {"profile": profile, "mods": len(fetch["fetched"]),
             "modSelectedBytes": sum(x["r2"]["listedBytes"] for x in fetch["fetched"]),
@@ -181,7 +199,8 @@ def publish_profile(root: Path, profile: str):
     check_request_digest(manifest, root / "request.json")
     rows = read_private(root / "workload-rows.json")
     # Always regenerate and whitelist; do not trust a stale summary file.
-    return wr.summarize_runs(rows)
+    return {**wr.summarize_runs(rows),
+            "preparation": wr.summarize_preparation(manifest.get("preparation"))}
 
 
 def main(argv=None):

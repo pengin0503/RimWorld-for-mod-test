@@ -53,6 +53,14 @@ def check_request_digest(manifest: dict, request_path: Path):
         raise ValueError("private request changed since preparation")
 
 
+PINNED_VERSION = "1.7.4985 rev1269"
+
+
+def require_pinned_game(prepared: dict) -> None:
+    if not isinstance(prepared, dict) or prepared.get("version") != PINNED_VERSION:
+        raise ValueError("P4 only supports the qualified Linux RimWorld 1.7.4985 rev1269 snapshot")
+
+
 def prepare_profile(root: Path, profile: str):
     roots = wr.profile_roots(profile)
     root = cw._safe_private(root)
@@ -69,6 +77,7 @@ def prepare_profile(root: Path, profile: str):
         max_selected_files=MAX_FILES, max_mods=MAX_MODS)
     # All metadata and selected payload was bounded before the game was acquired.
     prepared = cw.prepare(SimpleNamespace(private_root=root, refresh=False, aws="aws"))
+    require_pinned_game(prepared)
     raw_request = (root / "request.json").read_bytes()
     manifest = {"profile": profile, "requestSha256": sha256(raw_request).hexdigest(),
                 "runtimePrepared": True}
@@ -136,6 +145,10 @@ def run_profile(root: Path, worker: Path, profile: str):
         rows.append(row)
         # Checkpoint safely: a crash must never masquerade as 11 completed runs.
         write_private(root / "workload-rows.json", rows)
+        if not wr.valid_measurement_row(row, case):
+            # A full 5+1+5 successful suite is now impossible. Preserve the
+            # failed/blocked observation, but do not spend more game runs.
+            break
     summary = wr.summarize_runs(rows)
     write_private(root / "workload-summary.json", summary)
     return summary

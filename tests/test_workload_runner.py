@@ -40,8 +40,10 @@ class WorkloadRunnerTests(unittest.TestCase):
             (root/"profile.json").write_text(json.dumps({"profile": "S"}))
             (root/"mods").mkdir()
             (root/"request.json").write_text("{}")
-            with patch.object(runner["cow"], "run_benchmark") as bench, \\
-                 patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake"}, clear=False):
+            with (
+                patch.object(runner["cow"], "run_benchmark") as bench,
+                patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake"}, clear=False),
+            ):
                 bench.side_effect = lambda private: (
                     self.assertIsNone(os.environ.get("AWS_SECRET_ACCESS_KEY")) or
                     {"status": "unsupportedFilesystem", "complete": False,

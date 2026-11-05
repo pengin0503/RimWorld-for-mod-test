@@ -4,7 +4,7 @@
 
 Built-in knowledge covers only **Linux RimWorld 1.7.4985 rev1269**, and only facts recorded in the project's existing official-headless comparison and result contracts. It does **not** contain the game, Workshop MOD binaries, a private MOD index, game Def XML, DLL code, decompiled source or private files. It does **not** make the host playable.
 
-The included seed is deliberately **partial**: two known type identifiers, one method name with an observed parameter type, one field reference, one Def, one observed Harmony target, two official package identifiers and one documented warning. This is useful for testing the pipeline and specific well-established references, but is **not** an exhaustive 1.7 API/Def index. Entries carry a pointer to their provenance in the repository. Unlisted names remain **unknown**, not missing or invalid. Actual signature overload resolution, reflection behavior, XML patch application and runtime Harmony success still need the original real-game validation host.
+The bundled catalog remains **partial**: six inspected type identifiers, five method names (only the original `Verse.GenText.ToSpaceList` entry has an observed parameter list), one field reference, one Def, one observed Harmony target, five official package identifiers and one documented warning. This is useful for testing the pipeline and specific well-established references, but is **not** an exhaustive 1.7 API/Def index. Entries carry a pointer to their provenance in the repository. Unlisted names remain **unknown**, not missing or invalid. Actual signature overload resolution, reflection behavior, XML patch application and runtime Harmony success still need the original real-game validation host.
 
 ## Use (requires only Python 3.12+, no extra packages)
 
@@ -21,6 +21,9 @@ python tools/knowledge_preflight.py query --kind issue --symbol UnityStubs.DrawT
 python tools/knowledge_preflight.py scan --mod ./MyMod
 # The same offline mode, from the normal Codex entry point:
 python tools/codex_workflow.py static-preflight --mod ./MyMod
+
+# A local MOD ZIP is also supported; no prior extraction or R2 access:
+python tools/codex_workflow.py static-preflight --mod ./MyMod.zip
 
 # Exact complete active-set assertions are opt-in; without --complete-set
 # missing dependencies remain unverified, not definitely absent.
@@ -50,6 +53,14 @@ Requirements input is a JSON object:
 - check exits 0 only when every explicit fact is present, 3 when unknown or the batch is empty. When `parameters` is specified for a method/Harmony target, the positive entry must match the **documented exact signature**; another overload is `unknown`, not `missing`. Omitting `parameters` checks only the name, not any overload.
 - scan exits 0 for staticChecksPassed, 1 for staticIssuesFound, 3 for staticIncomplete.
 - input/pack rejection exits 2 (blocked). JSON output is designed for automation.
+
+## Offline ZIP staging and what stays private
+
+`scan --mod ./MyMod.zip` and `codex_workflow.py static-preflight --mod ./MyMod.zip` handle a **single local MOD archive**, with `About/About.xml` at the root or inside one containing directory. They use a bounded temporary staging tree (outside the repository), retaining all relative file and version-folder names but decompressing **only** the relevant About/LoadFolders and selected Defs/Patches XML. The archive's game assets, DLLs, textures and audio are never decompressed or executed. The temporary data is discarded when the scan finishes.
+
+ZIP path traversal, symlink members, duplicate/case-ambiguous names, multi-MOD roots, unsupported entries and excessive XML/entry counts are **blocked** (exit 2) rather than silently ignored. The static result is limited to the parser and loader rules actually modeled; a valid ZIP is *not* a verified or installable MOD. These checks avoid R2 only when a local source/ZIP and static requirements are sufficient. They do not replace private-index lookup for unknown Workshop MODs, nor any A/B/C/D runtime verification.
+
+The additional catalog entries come exclusively from `docs/research/2026-10-26-load-folder-rules.md` (inspected 1.7.4985 loader names; **name only**, no inferred overloads) and `docs/research/split-data-inventory.json` (the inspected 1.7.4985 official DLC package IDs). As before, a missing symbol is `unknown`; the catalog must not be extrapolated to later RimWorld builds.
 
 ## Interpretation and limits
 

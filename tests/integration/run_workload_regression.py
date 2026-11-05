@@ -25,6 +25,7 @@ def parser():
     p.add_argument("--profile", required=True, choices=tuple(wr.PROFILES))
     p.add_argument("--private-root", required=True)
     p.add_argument("--worker", default="worker/bin")
+    p.add_argument("--cow-root", help="separately mounted disposable Btrfs directory, cow phase only")
     return p
 
 
@@ -140,7 +141,7 @@ def run_profile(root: Path, worker: Path, profile: str):
     return summary
 
 
-def run_cow_profile(root: Path, profile: str):
+def run_cow_profile(root: Path, profile: str, btrfs_root: Path | None = None):
     """Opt-in Btrfs benchmark; never calls R2 or runs the game Worker."""
     wr.profile_roots(profile)
     root = cw._safe_private(root)
@@ -153,7 +154,8 @@ def run_cow_profile(root: Path, profile: str):
     if (root / "cow-summary.json").exists():
         raise ValueError("cow benchmark already recorded; use a new private root")
     with cw._no_cloud_credentials():
-        summary = cow.run_benchmark(root)
+        summary = (cow.run_benchmark(root) if btrfs_root is None else
+                   cow.run_benchmark(root, btrfs_root=Path(btrfs_root)))
     write_private(root / "cow-summary.json", summary)
     return summary
 
@@ -177,7 +179,8 @@ def main(argv=None):
         elif args.phase == "run":
             output = run_profile(Path(args.private_root), Path(args.worker), args.profile)
         elif args.phase == "cow":
-            output = run_cow_profile(Path(args.private_root), args.profile)
+            output = run_cow_profile(Path(args.private_root), args.profile,
+                                     Path(args.cow_root) if args.cow_root else None)
         else:
             output = publish_profile(Path(args.private_root), args.profile)
     except (ValueError, OSError, cw.WorkflowError, vh.Blocked) as exc:

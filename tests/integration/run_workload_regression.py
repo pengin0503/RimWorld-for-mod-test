@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from tools import codex_workflow as cw, validation_host as vh, workload_regression as wr
+from tools import codex_workflow as cw, validation_host as vh, workload_regression as wr, cow_benchmark as cow
 
 MAX_BYTES = 256 * 1024 * 1024
 MAX_FILES = 5000
@@ -21,7 +21,7 @@ MAX_MODS = 20
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("phase", choices=("prepare", "run", "publish"))
+    p.add_argument("phase", choices=("prepare", "run", "publish", "cow"))
     p.add_argument("--profile", required=True, choices=tuple(wr.PROFILES))
     p.add_argument("--private-root", required=True)
     p.add_argument("--worker", default="worker/bin")
@@ -130,6 +130,26 @@ def run_profile(root: Path, worker: Path, profile: str):
     return summary
 
 
+def run_cow_profile(root: Path, profile: str):
+    """Opt-in Btrfs benchmark; never calls R2 or runs the game Worker."""
+    wr.profile_roots(profile)
+    root = cw._safe_private(root)
+    manifest = read_private(root / "profile.json")
+    request = root / "request.json"
+    if (manifest.get("profile") != profile or not request.is_file()
+            or not (root / "mods").is_dir()):
+        raise ValueError("private MOD workload is not prepared")
+    stored_sha = manifest.get("requestSha256")
+    if stored_sha and sha256(request.read_bytes()).hexdigest() != stored_sha:
+        raise ValueError("private request modified since preparation")
+    if (root / "cow-summary.json").exists():
+        raise ValueError("cow benchmark already recorded; use a new private root")
+    with cw._no_cloud_credentials():
+        summary = cow.run_benchmark(root)
+    write_private(root / "cow-summary.json", summary)
+    return summary
+
+
 def publish_profile(root: Path, profile: str):
     root = cw._safe_private(root)
     if read_private(root / "profile.json").get("profile") != profile:
@@ -146,6 +166,8 @@ def main(argv=None):
             output = prepare_profile(Path(args.private_root), args.profile)
         elif args.phase == "run":
             output = run_profile(Path(args.private_root), Path(args.worker), args.profile)
+        elif args.phase == "cow":
+            output = run_cow_profile(Path(args.private_root), args.profile)
         else:
             output = publish_profile(Path(args.private_root), args.profile)
     except (ValueError, OSError, cw.WorkflowError, vh.Blocked) as exc:
@@ -158,7 +180,8 @@ def main(argv=None):
         print(json.dumps({"profile": args.profile, "prepared": True}, sort_keys=True))
     else:
         print(json.dumps(output, allow_nan=False, sort_keys=True))
-    return 0 if args.phase == "prepare" or output["complete"] else 1
+    return 0 if args.phase == "prepare" or output["complete"] or (
+        args.phase == "cow" and output.get("status") == "unsupportedFilesystem") else 1
 
 
 if __name__ == "__main__":

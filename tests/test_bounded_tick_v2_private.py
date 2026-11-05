@@ -1,6 +1,7 @@
 """Private finite D v2 acceptance runner contract, synthetic only."""
 import json
 from pathlib import Path
+from unittest.mock import patch
 import runpy
 import tempfile
 import unittest
@@ -67,6 +68,27 @@ class D2PrivateRunnerTests(unittest.TestCase):
         compromised = result()
         compromised["reasons"].append({"code":"tickObservationMismatch"})
         self.assertFalse(m["case_accepted"]("positive", compromised, expected_cached=False))
+
+    def test_private_runner_rejects_symlinked_output_parent_before_execution(self):
+        m = self.script()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            real = root / "real"
+            real.mkdir()
+            alias = root / "alias"
+            try:
+                alias.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink creation not permitted on this platform")
+            snapshot = root / "game-snapshot"
+            snapshot.mkdir()
+            worker = root / "worker"
+            worker.mkdir()
+            with patch.object(m["vh"], "run_validation", return_value={"status":"blocked"}) as check:
+                with self.assertRaises(ValueError):
+                    m["run"](snapshot, worker, alias / "private-output")
+                check.assert_not_called()
+            self.assertFalse((real / "private-output").exists())
 
     def test_public_summary_only_has_fixed_counts_and_no_game_paths(self):
         m=self.script()

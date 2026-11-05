@@ -12,6 +12,12 @@ Private games, index, third-party files, raw diagnostics and paths stay outside 
 - Same snapshot and MOD request run at most 5 uncached validations, 1 cache-fill and 5 cached validations; uncached and cached trials are interleaved after the fill. Cached trials must actually show `baselineCached=true`. An invalid/failed/blocked sample stops the sequence immediately because a complete 5+1+5 result is already impossible; all executed rows remain checkpointed and the suite remains incomplete.
 - The workload is pinned to **exactly RimWorld 1.7.4985 rev1269**. Other build versions abort before writing a prepared-workload manifest; no future Adapter is silently inherited.
 - Initial selected MOD index/metadata/payload retrieval and first game runtime/snapshot preparation are measured separately from all 11 warm-OS-cache validation times. The private manifest stores only a bounded first-acquisition numeric summary; `publish` whitelists these exact counts/times, drops private strings, and marks reused snapshots or incomplete timing records as unavailable rather than zero.
+- Memory figures are accepted only when **both** baseline and target
+  Worker processes independently report bounded peak RSS. One missing value
+  invalidates that sample rather than silently underestimating the
+  whole-validation peak. Cached samples retain the prior valid baseline RSS
+  record; no new baseline memory acquisition is inferred.
+
 - Only complete, qualified-scope A `passed` results with full MOD-order agreement, finite durations and valid peak RSS yield medians. Failure/incomplete/missing/duplicate cases and missing cache evidence yield `complete=false` and no timing medians. Timings are warm-OS-cache measurements, not a cold acquisition benchmark.
 - Dedicated main-only manual workflow `linux-private-workload.yml` offers only S and M. R2 secrets are scoped to the preparation step; Worker runs without those credentials. The publish phase re-evaluates the private raw rows and emits a fixed-field summary without copying raw game or MOD data into GitHub artifacts.
 

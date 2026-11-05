@@ -80,6 +80,13 @@ class WorkloadRunnerTests(unittest.TestCase):
         result["status"] = "incomplete"
         self.assertEqual(build("cached-1", result, request, 2.25)["status"], "incomplete")
 
+    def test_profile_pins_exact_qualified_14985_build(self):
+        runner = self.code()
+        runner["require_pinned_game"]({"version": "1.7.4985 rev1269"})
+        for bad in ("1.7.4995 rev0", "1.7.4985", None, "", 1.7):
+            with self.subTest(version=bad), self.assertRaises(ValueError):
+                runner["require_pinned_game"]({"version": bad})
+
     def test_private_manifest_digest_is_required_and_checked_before_run(self):
         runner = self.code()
         with tempfile.TemporaryDirectory() as d:

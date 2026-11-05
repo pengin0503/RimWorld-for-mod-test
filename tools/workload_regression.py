@@ -17,6 +17,45 @@ CACHED = tuple("cached-" + str(i) for i in range(1, 6))
 EXPECTED = (*UNCACHED, "cache-fill", *CACHED)
 
 
+PREPARATION_SECONDS = (
+    "modFetchSeconds", "gameRuntimeFetchSeconds",
+    "snapshotTotalSeconds", "totalInitialSeconds")
+PREPARATION_COUNTS = (
+    "selectedModCount", "selectedModFiles", "selectedModBytes", "gameFiles")
+
+
+def summarize_preparation(raw) -> dict:
+    """Publish only bounded first-acquisition measurements, never R2 metadata."""
+    blocked = {"complete": False, **{key: None for key in
+               (*PREPARATION_SECONDS, *PREPARATION_COUNTS)}}
+    if not isinstance(raw, dict):
+        return blocked
+    values = {}
+    for key in PREPARATION_SECONDS:
+        value = raw.get(key)
+        if (type(value) not in (float, int) or not math.isfinite(value)
+                or value < 0 or value > 7200):
+            return blocked
+        values[key] = round(value, 5)
+    maximums = {
+        "selectedModCount": 20,
+        "selectedModFiles": 5000,
+        "selectedModBytes": 256 * 1024 * 1024,
+        "gameFiles": 1000000,
+    }
+    for key in PREPARATION_COUNTS:
+        value = raw.get(key)
+        if type(value) is not int or not 1 <= value <= maximums[key]:
+            return blocked
+        values[key] = value
+    # These are sequential, non-overlapping stages; tolerances cover bounded
+    # rounding error without allowing impossible fast end-to-end numbers.
+    if values["totalInitialSeconds"] + 0.05 < sum(values[key] for key in
+            ("modFetchSeconds", "gameRuntimeFetchSeconds", "snapshotTotalSeconds")):
+        return blocked
+    return {"complete": True, **values}
+
+
 def profile_roots(name: str) -> tuple[str, ...]:
     if not isinstance(name, str) or name not in PROFILES:
         raise ValueError("unknown workload profile")

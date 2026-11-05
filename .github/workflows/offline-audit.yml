@@ -51,6 +51,8 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Test the GUI model (warnings are errors)
         run: dotnet test gui/RimWorldValidation.Gui.Model.Tests -c Release
+      - name: Test independent DPA CSV serialization (no game references)
+        run: dotnet run --project addons/DPA-CSV-Exporter/Tests/CsvSmokeTest.csproj -c Release
 
   # Builds the validation Worker without any game file: it binds every game
   # member by reflection at run time. Real-game runs stay private.

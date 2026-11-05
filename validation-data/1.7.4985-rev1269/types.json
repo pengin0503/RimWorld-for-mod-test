@@ -1,7 +1,23 @@
 [
   {
+    "symbol": "RimWorld.VersionControl",
+    "source": "docs/research/2026-10-26-load-folder-rules.md: build-specific inspected loader entrypoint (name only; no signature or runtime qualification)"
+  },
+  {
     "symbol": "Verse.GenText",
     "source": "docs/contracts/mod-validation-v1.md: harmonyPatches example; docs/research/test-host-qualification.md: official headless harmony-ok comparison"
+  },
+  {
+    "symbol": "Verse.LoadFolder",
+    "source": "docs/research/2026-10-26-load-folder-rules.md: build-specific inspected loader entrypoint (name only; no signature or runtime qualification)"
+  },
+  {
+    "symbol": "Verse.ModContentPack",
+    "source": "docs/research/2026-10-26-load-folder-rules.md: build-specific inspected loader entrypoint (name only; no signature or runtime qualification)"
+  },
+  {
+    "symbol": "Verse.ModLoadFolders",
+    "source": "docs/research/2026-10-26-load-folder-rules.md: build-specific inspected loader entrypoint (name only; no signature or runtime qualification)"
   },
   {
     "symbol": "Verse.ThingDef",

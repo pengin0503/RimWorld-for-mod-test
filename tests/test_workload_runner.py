@@ -110,6 +110,30 @@ class WorkloadRunnerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 runner["publish_profile"](root,"S")
 
+    def test_publish_keeps_first_acquisition_distinct_and_private_values_out(self):
+        runner = self.code()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "request.json").write_bytes(b"{}")
+            (root / "profile.json").write_text(json.dumps({
+                "profile": "S",
+                "requestSha256": sha256(b"{}").hexdigest(),
+                "preparation": {
+                    "modFetchSeconds": 7.25, "gameRuntimeFetchSeconds": 12.5,
+                    "snapshotTotalSeconds": 4, "totalInitialSeconds": 24,
+                    "selectedModCount": 3, "selectedModFiles": 250,
+                    "selectedModBytes": 1024, "gameFiles": 1200,
+                    "privatePath": "/secret/private/modfiles",
+                }
+            }))
+            (root / "workload-rows.json").write_text("[]")
+            result = runner["publish_profile"](root, "S")
+            self.assertFalse(result["complete"])
+            self.assertTrue(result["preparation"]["complete"])
+            self.assertEqual(result["preparation"]["totalInitialSeconds"], 24)
+            self.assertNotIn("/secret", json.dumps(result))
+            self.assertNotIn("privatePath", json.dumps(result))
+
     def test_run_separates_credentials_and_never_counts_failed_rows(self):
         runner = self.code()
         calls = []

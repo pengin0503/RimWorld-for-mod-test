@@ -18,7 +18,7 @@ This is an additive first stage. No runtime A/B/C/D feature is removed or relabe
 
 Existing public repo contains verified examples of GenText.ToSpaceList and the Steel Def; it does NOT contain the full set of game API signatures or all Defs. An unlisted API or Def is UNKNOWN, not absent. All records are explicitly marked as partial coverage with a source pointer. Never claim the tiny seed pack is exhaustive.
 
-The static status vocabulary is separate from the runtime contract:
+Static scanning treats unverified conditional `LoadFolders.xml` and conditional Defs (`MayRequire*`) as uncertainty rather than confirmed compatibility failures. The static status vocabulary is separate from the runtime contract:
 - staticChecksPassed: all performed static checks passed, no runtime assertion.
 - staticIssuesFound: a definite syntax/declared-version/duplicate-local-definition error.
 - staticIncomplete: cannot resolve a dependency with an incomplete selected active set, or a requirement is not in the partial catalog.

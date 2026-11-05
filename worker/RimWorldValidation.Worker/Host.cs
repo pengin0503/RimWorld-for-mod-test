@@ -51,6 +51,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
     private Dictionary<string, object?>? _mapSummary;
 
     private BoundedTickRunner? _ticks;
+    private BoundedTickRunnerV2? _ticksV2;
     private TickApi? _tickApi;
     private string? _tickInitialization;
     private string? _tickError;
@@ -381,7 +382,10 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         }, async: false, handler: null);
         if (request.Tick is { } tickRequest)
         {
-            _ticks = new BoundedTickRunner(tickRequest.Count, tickRequest.ObserveAt);
+            if (tickRequest.Observers is { } observers)
+                _ticksV2 = new BoundedTickRunnerV2(tickRequest.Count, tickRequest.ObserveAt, observers);
+            else
+                _ticks = new BoundedTickRunner(tickRequest.Count, tickRequest.ObserveAt);
             Queue(() =>
             {
                 if (_mapException != null || _map?.Game == null) { _tickError = "map unavailable"; return; }
@@ -414,8 +418,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
             {
                 if (diagnostics.ErrorCount != _tickErrorsBefore)
                     throw new InvalidOperationException("game initialization emitted an error");
-                Func<long> probe = _tickApi.Probe(game);
-                _ticks!.Run(() => _tickApi.ReadTick(game), () =>
+                void Step()
                 {
                     _tickApi.SingleTick(game);
                     // Component exceptions may be caught and logged by the game.
@@ -423,8 +426,22 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
                         throw new InvalidOperationException("game tick emitted an error");
                     if (api.AnyEventNowOrWaiting())
                         throw new InvalidOperationException("tick queued a long event outside the fixed D case");
-                }, probe, () => clock.Elapsed.TotalSeconds >= request.DeadlineSeconds
-                    || Volatile.Read(ref _finished) != 0, WriteTickCheckpoint);
+                }
+                bool Stop() => clock.Elapsed.TotalSeconds >= request.DeadlineSeconds
+                    || Volatile.Read(ref _finished) != 0;
+                if (_ticksV2 != null)
+                {
+                    string[] ids = request.Tick!.Observers!;
+                    Func<long>? fixture = ids.Contains("fixture.counter") ? _tickApi.Probe(game) : null;
+                    _ticksV2.Run(() => _tickApi.ReadTick(game), Step,
+                        () => _tickApi.TrustedObservations(game, ids, fixture),
+                        Stop, WriteTickCheckpoint);
+                }
+                else
+                {
+                    Func<long> probe = _tickApi.Probe(game);
+                    _ticks!.Run(() => _tickApi.ReadTick(game), Step, probe, Stop, WriteTickCheckpoint);
+                }
             }
         }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -436,7 +453,8 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
 
     private Dictionary<string, object?> TickCheckpointEvidence()
     {
-        Dictionary<string, object?> evidence = _ticks!.Evidence(_tickInitialization);
+        Dictionary<string, object?> evidence = _ticksV2?.Evidence(_tickInitialization)
+            ?? _ticks!.Evidence(_tickInitialization);
         evidence["camera"] = _tickApi?.CameraContext;
         return evidence;
     }
@@ -518,7 +536,8 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
             if (request.Tick != null)
             {
                 json.WritePropertyName("tick");
-                Dictionary<string, object?> evidence = _ticks?.Evidence(_tickInitialization) ?? new();
+                Dictionary<string, object?> evidence = _ticksV2?.Evidence(_tickInitialization)
+                    ?? _ticks?.Evidence(_tickInitialization) ?? new();
                 evidence["camera"] = _tickApi?.CameraContext;
                 if (_tickError != null) { evidence["status"] = "incomplete"; evidence["error"] = _tickError; }
                 JsonSerializer.Serialize(json, evidence);

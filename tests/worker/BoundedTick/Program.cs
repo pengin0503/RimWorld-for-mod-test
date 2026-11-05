@@ -31,4 +31,26 @@ foreach (string mode in new[] { "frozen", "jump", "throw", "deadline", "probeMis
     if (mode is "throw" or "deadline")
         Check(runner.Observations.Count == 2 && runner.Observations[^1].Tick == 60, "partial evidence retained");
 }
-Console.WriteLine("bounded tick synthetic: 7 cases passed");
+{
+    int tick = 1000;
+    var runner = new BoundedTickRunnerV2(60, [0, 60], ["game.tick"]);
+    runner.Run(() => tick, () => tick++,
+        () => new Dictionary<string, long> { ["game.tick"] = tick },
+        () => false);
+    Check(runner.Status == "completed" && runner.Advanced == 60, "v2 trusted game tick");
+    Check(runner.Observations.Count == 2, "v2 observation count");
+    Check(runner.Observations[0].Values["game.tick"] == 1000, "v2 tick zero");
+    Check(runner.Observations[1].Values["game.tick"] == 1060, "v2 current game tick");
+    var evidence = runner.Evidence("gameFinalizeInitAndStartedNewGame");
+    Check((string?)evidence["caseId"] == "bounded-tick.v2"
+          && (int?)evidence["observerVersion"] == 2, "v2 identity");
+}
+{
+    int tick = 1000;
+    var runner = new BoundedTickRunnerV2(60, [0, 60], ["game.tick"]);
+    runner.Run(() => tick, () => tick++,
+        () => new Dictionary<string, long> { ["game.tick"] = tick, ["extra"] = 123 },
+        () => false);
+    Check(runner.Status == "incomplete" && runner.Error != null, "v2 extra evidence fails closed");
+}
+Console.WriteLine("bounded tick synthetic: 9 cases passed");

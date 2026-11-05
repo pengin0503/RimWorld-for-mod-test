@@ -211,3 +211,19 @@ Linux は画面を描画しません。固定ケース `bill-ingredient-options.
   tick指定のない従来要求は従来の経路を使う。
 
 実装経路と検証の記録は[有限tick実装記録](../research/2026-10-29-bounded-tick.md)。
+
+### D v2：登録済み観測ID（experimental）
+
+`tests: ["bounded-tick.v2"]` を指定すると、`tick` の3番目の必須フィールドとして
+`"observers": ["game.tick"]` のような**昇順・重複なし**のID配列を要求する。
+初期登録IDは `game.tick`（実ゲームのTicksGame）と `fixture.counter`（既存の署名確認済みfixture）。
+v2では期待値のIDは登録済みIDのみ許可し、登録した全IDについて最低1件の期待値を指定する。
+v1では`observers`を拒否し、従来の観測判定を変更しない。
+
+Workerは有限tickの観測点でコードに固定された取得方法だけを使用する。ログの自己申告や
+要求JSON内の任意の型名/メソッド名を実行しない。v2の観測内容・ケースID・観測版は
+v1とは別のベースラインキャッシュキーに組み込む。v2も独立した公式比較が未完了のため
+**D全体は常にexperimental/incomplete**であり、一般的な作業、装備、建設、描画の動作保証にはならない。
+
+[設計・制限と合成テストの記録](../research/2026-11-05-d-v2-trusted-runtime.md)を参照。
+

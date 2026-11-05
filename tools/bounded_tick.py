@@ -2,9 +2,24 @@
 import re
 
 CASE = 'bounded-tick.v1'
+CASE_V2 = 'bounded-tick.v2'
 OBSERVER_VERSION = 1
 INITIALIZATION = 'gameFinalizeInitAndStartedNewGame'
 OBSERVERS = {'fixture.counter'}
+OBSERVERS_V2 = {'fixture.counter', 'game.tick'}
+
+
+def case_id(config):
+    return CASE_V2 if isinstance(config, dict) and 'observers' in config else CASE
+
+
+def observer_version(config):
+    return 2 if case_id(config) == CASE_V2 else OBSERVER_VERSION
+
+
+def cache_identity(config):
+    return {'caseId': case_id(config), 'observerVersion': observer_version(config)}
+
 ID = re.compile(r'[A-Za-z][A-Za-z0-9_.-]{0,127}')
 
 
@@ -17,10 +32,19 @@ def validate_tick(value, levels, tests, map_request, rows):
         if value is not None or rows:
             raise ValueError('tick and tickObservations need level D')
         return None
-    if set(levels) != {'A', 'D'} or tests != [CASE] or map_request is None:
-        raise ValueError('D v1 requires only A/D, bounded-tick.v1 and a generated map')
-    if not isinstance(value, dict) or set(value) != {'count', 'observeAt'}:
-        raise ValueError('tick needs exactly count and observeAt')
+    if set(levels) != {'A', 'D'} or tests not in ([CASE], [CASE_V2]) or map_request is None:
+        raise ValueError('D requires only A/D, a supported bounded-tick case and a generated map')
+    v2 = tests == [CASE_V2]
+    expected = {'count', 'observeAt', 'observers'} if v2 else {'count', 'observeAt'}
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError('tick fields do not match the selected D case')
+    observers = None
+    if v2:
+        observers = value['observers']
+        if (not isinstance(observers, list) or not 1 <= len(observers) <= 2
+                or any(not isinstance(name, str) or name not in OBSERVERS_V2 for name in observers)
+                or observers != sorted(set(observers))):
+            raise ValueError('v2 observer registry must be sorted, unique, and allowlisted')
     count, points = value['count'], value['observeAt']
     if not integer(count) or not 1 <= count <= 60000:
         raise ValueError('tick.count must be an integer 1..60000')
@@ -40,16 +64,24 @@ def validate_tick(value, levels, tests, map_request, rows):
         pair = (row['tick'], row['id'])
         if pair in seen:
             raise ValueError('tick/id observations must be distinct')
+        if v2 and row['id'] not in observers:
+            raise ValueError('v2 requires explicitly registered observer IDs')
         seen.add(pair)
-    return {'count': count, 'observeAt': list(points)}
+    if v2 and not set(observers) <= {row['id'] for row in rows}:
+        raise ValueError('every v2 observer must have an expectation')
+    result = {'count': count, 'observeAt': list(points)}
+    if v2:
+        result['observers'] = list(observers)
+    return result
 
 
 def validated_prefix(config, evidence):
     """Return only a structurally consistent prefix, including interrupted evidence."""
     if not isinstance(evidence, dict):
         return None
-    if (evidence.get('caseId') != CASE or type(evidence.get('observerVersion')) is not int
-            or evidence['observerVersion'] != OBSERVER_VERSION or evidence.get('initialization') != INITIALIZATION):
+    if (evidence.get('caseId') != case_id(config) or type(evidence.get('observerVersion')) is not int
+            or evidence['observerVersion'] != observer_version(config)
+            or evidence.get('initialization') != INITIALIZATION):
         return None
     start, end, advanced = (evidence.get(k) for k in ('startTick', 'endTick', 'advanced'))
     if (not all(integer(n) and 0 <= n <= 2**31-1 for n in (start, end, advanced))
@@ -64,8 +96,13 @@ def validated_prefix(config, evidence):
                 or point > advanced or not integer(row.get('gameTick')) or row['gameTick'] != start + point):
             return None
         values = row.get('values')
-        if (not isinstance(values, dict) or set(values) != OBSERVERS
+        expected_ids = set(config['observers']) if 'observers' in config else OBSERVERS
+        if (not isinstance(values, dict) or set(values) != expected_ids
                 or not all(integer(n) and -(2**63) <= n < 2**63 for n in values.values())):
+            return None
+        if 'game.tick' in values and values['game.tick'] != row['gameTick']:
+            # The Worker claims this is the real TickManager value: a
+            # disagreement with its own raw gameTick means corrupt evidence.
             return None
         actual[point] = values
     return actual
@@ -85,7 +122,8 @@ def evaluate_tick(request, evidence, *, interrupted=False):
     unavailable = interrupted or not evidence_complete(request['tick'], evidence)
     for row in request['expectations']['tickObservations']:
         check = {'tick': row['tick'], 'id': row['id'], 'expected': row['equals']}
-        if actual is None or row['tick'] not in actual or row['id'] not in OBSERVERS:
+        permitted = set(request['tick']['observers']) if 'observers' in request['tick'] else OBSERVERS
+        if actual is None or row['tick'] not in actual or row['id'] not in permitted:
             check.update(actual=None, outcome='error')
             unavailable = True
         else:

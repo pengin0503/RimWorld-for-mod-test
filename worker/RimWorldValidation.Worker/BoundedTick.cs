@@ -82,6 +82,26 @@ public sealed class TickApi
     public int ReadTick(object game) => (int)_ticks.GetValue(_map.TickManager.GetValue(game))!;
     public void SingleTick(object game) => _single.Invoke(_map.TickManager.GetValue(game), null);
 
+    public IReadOnlyDictionary<string, long> TrustedObservations(
+        object game, IReadOnlyList<string> observers, Func<long>? fixture)
+    {
+        // Fixed code paths only. No requested method or field name is ever
+        // interpreted as reflection input or executed as an arbitrary probe.
+        var result = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (string id in observers)
+        {
+            long value = id switch
+            {
+                "game.tick" => ReadTick(game),
+                "fixture.counter" when fixture != null => fixture(),
+                _ => throw new InvalidOperationException("unregistered runtime observer")
+            };
+            if (!result.TryAdd(id, value))
+                throw new InvalidOperationException("duplicate runtime observer");
+        }
+        return result;
+    }
+
     public Func<long> Probe(object game)
     {
         object[] matches = ((IEnumerable)_components.GetValue(game)!).Cast<object>()

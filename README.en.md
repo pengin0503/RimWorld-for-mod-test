@@ -4,6 +4,10 @@
 
 A test-only tool for validating RimWorld mod loading and selected game logic on Linux. It is not a playable game and does not launch the official game executable. Legally supplied game files are required; the game is not distributed here.
 
+## Built-in offline knowledge preflight
+
+A **version-pinned 1.7.4985 rev1269** reference pack now supports local metadata/XML checks and evidence-backed API, Def and Harmony name queries **without R2, game files, or a private Workshop index**. Example: run `python tools/codex_workflow.py static-preflight --mod ./MyMod` or `python tools/knowledge_preflight.py validate-db`. The catalog is deliberately partial: missing entries mean **unknown**, not absent. Static checks never qualify actual game behavior. See [the knowledge database guide](docs/knowledge-database.md).
+
 ## Usage
 
 See the [validation host guide](docs/validation-host.md) for setup and execution, the [R2 guide](docs/r2-on-demand.md) for fetching required files from Cloudflare R2, and the [result contract](docs/contracts/mod-validation-v1.md) for interpreting results. These guides are in Japanese.

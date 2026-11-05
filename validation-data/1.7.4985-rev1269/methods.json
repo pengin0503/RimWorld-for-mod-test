@@ -1,0 +1,9 @@
+[
+  {
+    "symbol": "Verse.GenText.ToSpaceList",
+    "source": "docs/contracts/mod-validation-v1.md: exact Harmony target example; docs/research/test-host-qualification.md: harmony-ok patch effect matched official headless",
+    "parameters": [
+      "System.Collections.Generic.IEnumerable`1[System.String]"
+    ]
+  }
+]

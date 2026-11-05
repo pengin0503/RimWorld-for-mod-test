@@ -1,0 +1,9 @@
+[
+  {
+    "symbol": "Verse.GenText.ToSpaceList",
+    "source": "docs/research/test-host-qualification.md: harmony-ok postfix registration and effect matched official headless fixture",
+    "parameters": [
+      "System.Collections.Generic.IEnumerable`1[System.String]"
+    ]
+  }
+]

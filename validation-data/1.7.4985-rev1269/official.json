@@ -1,0 +1,10 @@
+[
+  {
+    "symbol": "ludeon.rimworld",
+    "source": "docs/contracts/mod-validation-v1.md: official Core; docs/research/test-host-qualification.md: real headless qualified comparison"
+  },
+  {
+    "symbol": "ludeon.rimworld.royalty",
+    "source": "docs/contracts/mod-validation-v1.md: official Royalty; docs/research/2026-11-05-private-14985-acceptance.md: Core+Royalty S/M real-game measurements"
+  }
+]

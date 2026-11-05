@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "gameBuild": "1.7.4985 rev1269",
+  "gameVersion": "1.7",
+  "coverage": "partial",
+  "source": "docs/research/test-host-qualification.md; docs/contracts/mod-validation-v1.md; verified synthetic-to-official comparison only",
+  "collections": {
+    "types": "types.json",
+    "methods": "methods.json",
+    "defs": "defs.json",
+    "harmony": "harmony.json",
+    "fields": "fields.json",
+    "official": "official.json",
+    "issues": "issues.json"
+  }
+}

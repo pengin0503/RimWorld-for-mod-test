@@ -1,0 +1,10 @@
+[
+  {
+    "symbol": "Verse.GenText",
+    "source": "docs/contracts/mod-validation-v1.md: harmonyPatches example; docs/research/test-host-qualification.md: official headless harmony-ok comparison"
+  },
+  {
+    "symbol": "Verse.ThingDef",
+    "source": "docs/research/test-host-qualification.md: Core Steel ThingDef verified in official headless comparison"
+  }
+]

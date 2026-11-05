@@ -8,6 +8,9 @@
     "types": "types.json",
     "methods": "methods.json",
     "defs": "defs.json",
-    "harmony": "harmony.json"
+    "harmony": "harmony.json",
+    "fields": "fields.json",
+    "official": "official.json",
+    "issues": "issues.json"
   }
 }

@@ -30,6 +30,29 @@ class WorkloadRunnerTests(unittest.TestCase):
         self.assertNotIn("runner.temp", job_header)
         self.assertIn("runner.temp", steps)
 
+    def test_cow_phase_is_opt_in_and_hides_cloud_credentials(self):
+        runner = self.code()
+        args = runner["parser"]().parse_args(
+            ["cow", "--profile", "S", "--private-root", "/tmp/root"])
+        self.assertEqual(args.phase, "cow")
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/"profile.json").write_text(json.dumps({"profile": "S"}))
+            (root/"mods").mkdir()
+            (root/"request.json").write_text("{}")
+            with patch.object(runner["cow"], "run_benchmark") as bench, \\
+                 patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake"}, clear=False):
+                bench.side_effect = lambda private: (
+                    self.assertIsNone(os.environ.get("AWS_SECRET_ACCESS_KEY")) or
+                    {"status": "unsupportedFilesystem", "complete": False,
+                     "samples": {"copy": 0, "reflink": 0},
+                     "medianCopySeconds": None, "medianReflinkSeconds": None,
+                     "reflinkSpeedupPercent": None})
+                summary = runner["run_cow_profile"](root, "S")
+            self.assertEqual(summary["status"], "unsupportedFilesystem")
+            self.assertTrue((root/"cow-summary.json").exists())
+            self.assertEqual(os.environ.get("AWS_SECRET_ACCESS_KEY"), None)
+
     def test_observation_only_counts_real_passed_results(self):
         build = self.code()["parse_measurement"]
         request = {"mods": [{"packageId": "a.mod"}, {"packageId": "b.mod"}]}

@@ -65,6 +65,16 @@ class KnowledgeDatabaseTests(unittest.TestCase):
                 self.assertEqual(self.db.query(kind, symbol)["status"], "unknown")
         self.assertEqual(self.db.query("type", "verse.gentext")["status"], "unknown")
 
+    def test_documented_member_overload_official_and_known_issue(self):
+        self.assertEqual(self.db.query("field", "Verse.ThingDef.statBases")["status"], "present")
+        self.assertEqual(self.db.query("official", "ludeon.rimworld")["status"], "present")
+        self.assertEqual(self.db.query("issue", "UnityStubs.DrawTextureStub")["status"], "present")
+        self.assertEqual(self.db.query("field", "Verse.ThingDef.futureField")["status"], "unknown")
+        method = self.db.query("method", "Verse.GenText.ToSpaceList")
+        self.assertEqual(method["parameters"],
+                         ["System.Collections.Generic.IEnumerable" + chr(96) + "1[System.String]"])
+        self.assertFalse(method["runtimeVerified"])
+
     def test_valid_synthetic_mod_needs_no_game_or_r2(self):
         mod = self.make_mod()
         with patch.dict("os.environ", {"R2_ENDPOINT": "invalid-endpoint", "AWS_ACCESS_KEY_ID": "fake"}, clear=False):
@@ -140,11 +150,10 @@ class KnowledgeDatabaseTests(unittest.TestCase):
         manifest = {
             "schemaVersion": 1, "gameBuild": BUILD, "coverage": "partial",
             "gameVersion": "1.7", "source": "synthetic-test",
-            "collections": {"types": "types.json", "methods": "methods.json",
-                            "defs": "defs.json", "harmony": "harmony.json"},
+            "collections": {name: name + ".json" for name in kp.COLLECTIONS.values()},
         }
         (pack / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        for key in ("types", "methods", "defs", "harmony"):
+        for key in kp.COLLECTIONS.values():
             (pack / (key + ".json")).write_text("[]", encoding="utf-8")
         self.assertEqual(kp.load_database(pack_dir=pack).query("type", "Anything")["status"], "unknown")
         (pack / "types.json").write_text(json.dumps([

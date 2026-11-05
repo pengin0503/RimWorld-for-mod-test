@@ -21,7 +21,9 @@ except ImportError:
 PINNED_BUILD = "1.7.4985 rev1269"
 BUNDLED_PACKS = {PINNED_BUILD: "1.7.4985-rev1269"}
 DATABASE_ROOT = Path(__file__).resolve().parent.parent / "validation-data"
-COLLECTIONS = {"type": "types", "method": "methods", "def": "defs", "harmony": "harmony"}
+COLLECTIONS = {"type": "types", "method": "methods", "field": "fields",
+               "def": "defs", "harmony": "harmony", "official": "official",
+               "issue": "issues"}
 SYMBOL = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]{0,255}\Z")
 PACKAGE_ID = re.compile(r"[A-Za-z0-9_.]{1,160}\Z")
 MAX_RECORD_BYTES = 2 * 1024 * 1024
@@ -44,7 +46,7 @@ class KnowledgeDatabase:
         if kind not in COLLECTIONS or not isinstance(symbol, str) or not SYMBOL.fullmatch(symbol):
             raise KnowledgeError("invalid knowledge query")
         evidence = self.collections[kind].get(symbol)
-        return {
+        result = {
             "recordType": "offlineKnowledgeQuery",
             "gameBuild": self.metadata["gameBuild"],
             "kind": kind,
@@ -54,6 +56,9 @@ class KnowledgeDatabase:
             "runtimeVerified": False,
             "catalogCoverage": "partial",
         }
+        if evidence is not None and "parameters" in evidence:
+            result["parameters"] = list(evidence["parameters"])
+        return result
 
 
 def _read_json(path: Path):
@@ -105,11 +110,20 @@ def load_database(*, build: str = PINNED_BUILD, pack_dir: Path | None = None) ->
             raise KnowledgeError("invalid knowledge collection")
         by_symbol = {}
         for row in rows:
-            if (not isinstance(row, dict) or set(row) != {"symbol", "source"}
+            if (not isinstance(row, dict)
+                    or not {"symbol", "source"} <= set(row)
+                    or not set(row) <= {"symbol", "source", "parameters"}
                     or not isinstance(row["symbol"], str) or not SYMBOL.fullmatch(row["symbol"])
                     or not isinstance(row["source"], str) or not row["source"].strip()
                     or len(row["source"]) > 300 or row["symbol"] in by_symbol):
                 raise KnowledgeError("invalid or duplicate knowledge symbol")
+            if "parameters" in row:
+                parameters = row["parameters"]
+                if (kind not in {"method", "harmony"}
+                        or not isinstance(parameters, list) or len(parameters) > 24
+                        or any(not isinstance(p, str) or
+                               not re.fullmatch(r"[\\x21-\\x7e]{1,200}", p) for p in parameters)):
+                    raise KnowledgeError("invalid method argument types")
             by_symbol[row["symbol"]] = row
         result[kind] = by_symbol
     return KnowledgeDatabase(manifest, result)

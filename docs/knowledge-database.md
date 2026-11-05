@@ -38,7 +38,8 @@ Requirements input is a JSON object:
   "gameBuild": "1.7.4985 rev1269",
   "requires": [
     {"kind": "type", "symbol": "Verse.GenText"},
-    {"kind": "method", "symbol": "Verse.GenText.ToSpaceList"},
+    {"kind": "method", "symbol": "Verse.GenText.ToSpaceList",
+     "parameters": ["System.Collections.Generic.IEnumerable`1[System.String]"]},
     {"kind": "def", "symbol": "ThingDef:Steel"},
     {"kind": "harmony", "symbol": "Verse.GenText.ToSpaceList"}
   ]
@@ -46,7 +47,7 @@ Requirements input is a JSON object:
 ~~~
 
 - query exits 0 if the positive fact is known, 3 if unknown.
-- check exits 0 only when every explicit fact is present, 3 when unknown.
+- check exits 0 only when every explicit fact is present, 3 when unknown or the batch is empty. When `parameters` is specified for a method/Harmony target, the positive entry must match the **documented exact signature**; another overload is `unknown`, not `missing`. Omitting `parameters` checks only the name, not any overload.
 - scan exits 0 for staticChecksPassed, 1 for staticIssuesFound, 3 for staticIncomplete.
 - input/pack rejection exits 2 (blocked). JSON output is designed for automation.
 
@@ -54,7 +55,7 @@ Requirements input is a JSON object:
 
 The scan checks a real local MOD's About.xml, declared 1.7 support, selected 1.7 load-folder and Defs/Patches XML syntax, and duplicate local full Def declarations. The old loader policy is reused rather than inferred from a folder name. When an active MOD set is not supplied as *complete*, absent dependencies are reported only as unverified.
 
-A query of a method or Harmony target may include the argument types actually corroborated by the documented fixture; missing overloads or return types are not inferred. A known-issue record is informational and never automatically suppresses a game warning. A staticChecksPassed report means **only the checks performed did not discover a problem**. It includes gameVerification=notRun, runtimeQualified=false and an explicit notChecked list. It is **not** equivalent to a game-verified passed/qualified. A correctly named Harmony target may still fail at runtime. Do not use this system as a replacement for A/B/C/D or the qualified Linux WaylithClr runtime.
+A query of a method or Harmony target may include the argument types actually corroborated by the documented fixture; missing overloads or return types are not inferred. A known-issue record is informational and never automatically suppresses a game warning. Unsupported but potentially valid `LoadFolders.xml` conditions are marked `staticIncomplete`, not definitely invalid, because the offline parser intentionally models only a qualified subset of loader semantics. A staticChecksPassed report means **only the checks performed did not discover a problem**. It includes gameVerification=notRun, runtimeQualified=false and an explicit notChecked list. It is **not** equivalent to a game-verified passed/qualified. A correctly named Harmony target may still fail at runtime. Do not use this system as a replacement for A/B/C/D or the qualified Linux WaylithClr runtime.
 
 Nothing here selects arbitrary Workshop MODs. Runtime selection of third-party MODs **still begins with the private user index** and then on-demand R2 retrieval under AGENTS.md. Static scanning a local MOD folder does not need that index.
 

@@ -122,7 +122,7 @@ def load_database(*, build: str = PINNED_BUILD, pack_dir: Path | None = None) ->
                 if (kind not in {"method", "harmony"}
                         or not isinstance(parameters, list) or len(parameters) > 24
                         or any(not isinstance(p, str) or
-                               not re.fullmatch(r"[\\x21-\\x7e]{1,200}", p) for p in parameters)):
+                               not re.fullmatch(r"[\x21-\x7e]{1,200}", p) for p in parameters)):
                     raise KnowledgeError("invalid method argument types")
             by_symbol[row["symbol"]] = row
         result[kind] = by_symbol

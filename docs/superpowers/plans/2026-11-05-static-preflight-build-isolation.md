@@ -1,6 +1,6 @@
 # Prevent cross-build static scan false positives — implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Prevent local MOD scans from certifying rules for unqualified RimWorld builds.
 
@@ -23,7 +23,14 @@
 - No changes to qualified host runtime.
 
 ## Tasks
-- [ ] Add a failing regression test for both future 1.7.4995 and 1.8 with real `inspect_mod` and CLI; confirm RED.
-- [ ] Add minimal pre-read pinned-build gate in `inspect_mod`; verify GREEN.
-- [ ] Update offline knowledge database usage/limits.
-- [ ] Execute full Linux/Windows public CI, inspect PR diff and report exact results.
+- [x] Add a failing regression test for both future 1.7.4995 and 1.8 with real `inspect_mod` and CLI; confirm RED.
+- [x] Add minimal pre-read pinned-build gate in `inspect_mod`; verify GREEN.
+- [x] Update offline knowledge database usage/limits.
+- [x] Execute full Linux/Windows public CI, inspect PR diff and report exact results.
+
+## Additional TDD checks and evidence
+
+- Two supplementary negative tests for malformed caller-provided active package IDs and exceeded selected-XML scanning budget were added after review, observed RED in CI run `41975600349`, then corrected in `tools/knowledge_preflight.py`.
+- Future pack regression was observed RED in CI run `41975196015` (`KnowledgeError not raised` for 1.7.4995 and 1.8), then GREEN after the exact-build gate.
+- Full public Linux/Windows CI at head `229fb98f448a1efe21707c63204f5cf00d5859fd` completed 8/8 success in run `41975832274`. The affected implementation/test paths are `tools/knowledge_preflight.py` and `tests/test_knowledge_preflight.py`.
+- PR is kept separate from main pending explicit review/merge approval. No MOD content, game files, R2 data or branch refs were altered in main.

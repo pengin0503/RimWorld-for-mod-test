@@ -164,6 +164,18 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
     # NOT been verified. Never silently scan them with the old 1.7 policy.
     if db.metadata["gameBuild"] != PINNED_BUILD:
         raise KnowledgeError("no verified MOD loader policy for requested game build")
+    # Caller-provided active IDs are *request data*. An invalid ID must block
+    # the request before MOD metadata is parsed, not blame a valid MOD.
+    if isinstance(active_packages, (str, bytes)):
+        raise KnowledgeError("invalid active package list")
+    active = set()
+    try:
+        for item in active_packages:
+            if not isinstance(item, str) or not PACKAGE_ID.fullmatch(item):
+                raise KnowledgeError("invalid active package identifier")
+            active.add(item.casefold())
+    except TypeError as exc:
+        raise KnowledgeError("invalid active package list") from exc
     root = Path(mod).absolute()
     issues, local_defs = [], []
     stats = {"filesConsidered": 0, "xmlFilesChecked": 0, "definitionsFound": 0}
@@ -214,11 +226,6 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                 if not versions:
                     _static_issue(issues, "versionNotDeclared", definite=False)
 
-                active = set()
-                for item in active_packages:
-                    if not isinstance(item, str) or not PACKAGE_ID.fullmatch(item):
-                        raise KnowledgeError("invalid active package identifier")
-                    active.add(item.casefold())
                 if pack_id and PACKAGE_ID.fullmatch(pack_id):
                     active.add(pack_id.casefold())
                 try:
@@ -279,7 +286,8 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                     continue
                 inspected_bytes += path.stat().st_size
                 if inspected_bytes > MAX_SCAN_XML_BYTES or metadata_bytes + inspected_bytes > MAX_INPUT_BYTES:
-                    _static_issue(issues, "xmlInputLimit")
+                    # A scan budget limit means unexamined inputs, not a defective MOD.
+                    _static_issue(issues, "xmlInputLimit", definite=False)
                     break
                 try:
                     node = _parse_xml_file(path)

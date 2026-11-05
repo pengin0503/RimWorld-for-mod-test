@@ -60,6 +60,25 @@ jobs:
           PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
         run: |
           python tests/integration/run_workload_regression.py run --profile "$PROFILE" --private-root "$PRIVATE_ROOT" --worker worker/bin
+      - name: Create disposable Btrfs filesystem for real selected MODs
+        id: cow_mount
+        if: steps.run.outcome == 'success'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y btrfs-progs
+          truncate -s 3G "$RUNNER_TEMP/rwmt-workload-cow.img"
+          mkfs.btrfs -q -f "$RUNNER_TEMP/rwmt-workload-cow.img"
+          mkdir "$RUNNER_TEMP/rwmt-workload-cow"
+          sudo mount -o loop,compress=no "$RUNNER_TEMP/rwmt-workload-cow.img" "$RUNNER_TEMP/rwmt-workload-cow"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/rwmt-workload-cow"
+      - name: Compare 5 forced-copy and 5 reflink runs on real selected MOD files
+        id: cow
+        if: steps.cow_mount.outcome == 'success'
+        env:
+          PROFILE: ${{ inputs.profile }}
+          PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
+        run: |
+          python tests/integration/run_workload_regression.py cow --profile "$PROFILE" --private-root "$PRIVATE_ROOT" --cow-root "$RUNNER_TEMP/rwmt-workload-cow"
       - name: Publish rebuilt fixed-field summary
         if: always() && steps.prepare.outcome == 'success'
         env:
@@ -67,3 +86,9 @@ jobs:
           PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
         run: |
           python tests/integration/run_workload_regression.py publish --profile "$PROFILE" --private-root "$PRIVATE_ROOT"
+      - name: Unmount disposable Btrfs filesystem
+        if: always()
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/rwmt-workload-cow"; then
+            sudo umount "$RUNNER_TEMP/rwmt-workload-cow"
+          fi

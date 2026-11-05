@@ -356,6 +356,30 @@ class KnowledgeDatabaseTests(unittest.TestCase):
                 self.assertEqual(code, 2)
                 self.assertEqual(json.loads(output.getvalue())["status"], "blocked")
 
+    def test_invalid_active_package_is_a_blocked_request_not_a_mod_defect(self):
+        mod = self.make_mod()
+        with self.assertRaisesRegex(kp.KnowledgeError, "active package"):
+            kp.inspect_mod(mod, self.db, active_packages=("bad/package",), complete_set=True)
+        output = StringIO()
+        with redirect_stdout(output):
+            code = kp.main([
+                "scan", "--mod", str(mod), "--active", "bad/package",
+                "--complete-set",
+            ])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(output.getvalue())["status"], "blocked")
+
+    def test_exceeded_xml_scan_budget_is_incomplete_not_mod_invalidity(self):
+        mod = self.make_mod()
+        with patch.object(kp, "MAX_SCAN_XML_BYTES", 2):
+            report = kp.inspect_mod(mod, self.db)
+        self.assertEqual(report["status"], "staticIncomplete")
+        self.assertIn(
+            {"code": "xmlInputLimit", "certainty": "unknown"},
+            report["issues"],
+        )
+        self.assertFalse(report["runtimeQualified"])
+
     def test_real_cli_process_without_game_files_or_r2_credentials(self):
         """Exercise both Python script entrypoints, not only direct module imports."""
         repository = Path(__file__).resolve().parents[1]

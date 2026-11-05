@@ -79,6 +79,26 @@ tests run both runners and reject extra keys. Worker builds on
 Windows/Linux without game assets. Real-game D v2 acceptance and official
 independent comparison **have not been performed**.
 
+## Main-only private acceptance added
+
+The optional `.github/workflows/linux-private-d-v2.yml` is available
+**only after reviewed integration into main**. It prepares the pinned
+private Linux game runtime using read-only R2 credentials in a separate
+step, then builds the Worker and executes
+`tests/integration/run_bounded_tick_v2.py` without cloud credentials.
+
+The test validates an actual 60-tick `game.tick` observation against
+absolute game tick 0 and 60, a deliberate expected-value mismatch, and
+reuse of a validated baseline cache in a third execution. Any unexpected
+initial tick, new diagnostics, observation inconsistency or interrupted
+execution fails the private acceptance; the workflow does **not** guess
+the starting tick or mark D qualified. It prints only a fixed three-case
+count and Boolean pass/fail, never raw paths or game logs.
+
+Neither the private acceptance nor the official independent headless
+comparison has been executed in this PR; the complete public CI covers
+the parser, runner contracts and synthetic C# Worker only.
+
 The v2 registry is extensible only by adding carefully reviewed,
 build-specific Worker readers, typed expectation contracts and independent
 game evidence. Adding arbitrary reflective paths or treating

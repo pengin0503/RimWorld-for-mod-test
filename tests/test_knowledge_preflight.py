@@ -183,6 +183,29 @@ class KnowledgeDatabaseTests(unittest.TestCase):
             run([{"kind": "method", "symbol": "Verse.GenText.ToSpaceList",
                   "parameters": ["Unknown\x00"]}])
 
+    def test_unread_large_textures_do_not_exceed_xml_scan_byte_budget(self):
+        mod = self.make_mod()
+        textures = mod / "Textures"
+        textures.mkdir()
+        (textures / "huge.dds").write_bytes(b"x" * 4097)
+        # Only About + selected Defs/Patches are opened in static mode.
+        with patch.object(kp, "MAX_INPUT_BYTES", 1024):
+            result = kp.inspect_mod(mod, self.db)
+        self.assertEqual(result["status"], "staticChecksPassed")
+        self.assertEqual(result["statistics"]["xmlFilesChecked"], 1)
+        self.assertEqual(result["statistics"]["filesConsidered"], 3)
+
+    def test_loadfolders_xml_has_size_limit_before_read(self):
+        mod = self.make_mod()
+        # A valid document that exceeds the scanner's artificially tight
+        # per-file limit, without allocating huge files in CI.
+        document = "<loadFolders><v1.7><li>/</li></v1.7></loadFolders>"
+        (mod / "LoadFolders.xml").write_text(document + " " * 200, encoding="utf-8")
+        with patch.object(kp, "MAX_XML_BYTES", 150):
+            result = kp.inspect_mod(mod, self.db)
+        self.assertEqual(result["status"], "staticIssuesFound")
+        self.assertIn("invalidMetadata", {issue["code"] for issue in result["issues"]})
+
     def test_catalog_rejects_duplicate_and_untrusted_completeness(self):
         pack = self.root / "pack"
         pack.mkdir()

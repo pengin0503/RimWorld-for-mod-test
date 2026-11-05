@@ -29,10 +29,12 @@ class D2PrivateRunnerTests(unittest.TestCase):
         def result(expected=60, cached=False, actual=60, kind="completed", status="incomplete"):
             return {
                 "status":status,"executionStatus":"completed",
-                "reasons":[{"code":"dNotQualified"}] + (
-                    [{"code":"tickObservationMismatch"}] if kind=="failed" else []),
+                "reasons":[{"code":code} for code in (
+                    ["experimental", "dNotQualified", "mapNotQualified"] +
+                    (["tickObservationMismatch"] if kind=="failed" else []))],
                 "diagnostics":{"baselineCached":cached},
-                "stages":{"D":{"status":kind,"evidence":{
+                "stages":{"A":{"status":"completed"}, "map":{"status":"completed"},
+                          "D":{"status":kind,"evidence":{
                     "caseId":"bounded-tick.v2","observerVersion":2,
                     "status":"completed","initialization":"gameFinalizeInitAndStartedNewGame",
                     "startTick":0,"endTick":60,"advanced":60,
@@ -50,6 +52,21 @@ class D2PrivateRunnerTests(unittest.TestCase):
         self.assertFalse(m["case_accepted"]("positive",broken,expected_cached=False))
         without=result();without["reasons"]=[]
         self.assertFalse(m["case_accepted"]("positive",without,expected_cached=False))
+        for extra in ("modOrderMismatch", "loadException", "newTranslationErrors",
+                      "workerExitCode", "newWarnings", "unknownUnsafeReason"):
+            with self.subTest(extra=extra):
+                compromised = result()
+                compromised["reasons"].append({"code": extra})
+                self.assertFalse(m["case_accepted"](
+                    "positive", compromised, expected_cached=False))
+        for stage_name in ("A", "map"):
+            compromised = result()
+            compromised["stages"][stage_name]["status"] = "incomplete"
+            self.assertFalse(m["case_accepted"](
+                "positive", compromised, expected_cached=False))
+        compromised = result()
+        compromised["reasons"].append({"code":"tickObservationMismatch"})
+        self.assertFalse(m["case_accepted"]("positive", compromised, expected_cached=False))
 
     def test_public_summary_only_has_fixed_counts_and_no_game_paths(self):
         m=self.script()

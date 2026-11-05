@@ -70,7 +70,8 @@ class WorkloadRunnerTests(unittest.TestCase):
         request = {"mods": [{"packageId": "a.mod"}, {"packageId": "b.mod"}]}
         result = {"status": "passed",
                   "modOrder": {"matches": True, "actual": ["ludeon.rimworld", "a.mod", "b.mod"]},
-                  "process": {"target": {"peakRssBytes": 1234}},
+                  "process": {"target": {"peakRssBytes": 1234},
+                              "baseline": {"peakRssBytes": 1110}},
                   "diagnostics": {"baselineCached": True}}
         row = build("cached-1", result, request, 2.25)
         self.assertEqual(row["elapsedSeconds"], 2.25)
@@ -175,7 +176,8 @@ class WorkloadRunnerTests(unittest.TestCase):
                 calls.append((name, kwargs.get("baseline_cache")))
                 return {"status": "incomplete" if name == "uncached-3" else "passed",
                         "modOrder": {"matches": True, "actual": ["a.mod"]},
-                        "process": {"target": {"peakRssBytes": 900}},
+                        "process": {"target": {"peakRssBytes": 900},
+                                    "baseline": {"peakRssBytes": 600}},
                         "diagnostics": {"baselineCached": name.startswith("cached-")}}
             synthetic_clock = iter(range(1000))
             with (

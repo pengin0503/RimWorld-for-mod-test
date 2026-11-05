@@ -206,6 +206,35 @@ class KnowledgeDatabaseTests(unittest.TestCase):
         self.assertEqual(result["status"], "staticIssuesFound")
         self.assertIn("invalidMetadata", {issue["code"] for issue in result["issues"]})
 
+    def test_conditional_loadfolders_require_complete_active_set_for_clean_result(self):
+        mod = self.make_mod()
+        (mod / "Conditional" / "Defs").mkdir(parents=True)
+        (mod / "Conditional" / "Defs" / "Broken.xml").write_text("<broken>", encoding="utf-8")
+        (mod / "LoadFolders.xml").write_text(
+            "<loadFolders><v1.7><li>/</li>"
+            "<li IfModActive='other.required'>Conditional</li>"
+            "</v1.7></loadFolders>", encoding="utf-8")
+        incomplete = kp.inspect_mod(mod, self.db)
+        self.assertEqual(incomplete["status"], "staticIncomplete")
+        self.assertIn("conditionalLoadFoldersNotChecked",
+                      {item["code"] for item in incomplete["issues"]})
+        active = kp.inspect_mod(mod, self.db, active_packages=("other.required",), complete_set=True)
+        self.assertEqual(active["status"], "staticIssuesFound")
+        self.assertIn("invalidXml", {item["code"] for item in active["issues"]})
+        excluded = kp.inspect_mod(mod, self.db, complete_set=True)
+        self.assertEqual(excluded["status"], "staticChecksPassed")
+
+    def test_conditional_duplicate_definitions_cannot_be_certified_invalid(self):
+        mod = self.make_mod(def_xml=(
+            "<Defs><ThingDef MayRequire='foo.optional'><defName>Same</defName></ThingDef>"
+            "<ThingDef MayRequire='bar.optional'><defName>Same</defName></ThingDef></Defs>"
+        ))
+        result = kp.inspect_mod(mod, self.db)
+        self.assertEqual(result["status"], "staticIncomplete")
+        self.assertIn("conditionalDefDuplicateNotChecked",
+                      {issue["code"] for issue in result["issues"]})
+        self.assertNotIn("duplicateLocalDef", {issue["code"] for issue in result["issues"]})
+
     def test_catalog_rejects_duplicate_and_untrusted_completeness(self):
         pack = self.root / "pack"
         pack.mkdir()

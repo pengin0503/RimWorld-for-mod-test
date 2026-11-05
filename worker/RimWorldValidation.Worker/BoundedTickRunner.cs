@@ -2,14 +2,19 @@ using System.Text.Json;
 
 namespace RimWorldValidation.Worker;
 
-public sealed record TickRequest(int Count, int[] ObserveAt)
+public sealed record TickRequest(int Count, int[] ObserveAt, string[]? Observers = null)
 {
     public static TickRequest? Load(JsonElement root)
     {
         if (!root.TryGetProperty("tick", out JsonElement value)) return null;
-        if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 2
-            || !value.TryGetProperty("count", out JsonElement countValue) || !countValue.TryGetInt32(out int count)
-            || count < 1 || count > 60000 || !value.TryGetProperty("observeAt", out JsonElement array)
+        if (value.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("invalid bounded tick request");
+        var names = value.EnumerateObject().Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
+        bool v2 = names.Contains("observers");
+        if (!names.SetEquals(v2 ? ["count", "observeAt", "observers"] : ["count", "observeAt"])
+            || !value.TryGetProperty("count", out JsonElement countValue)
+            || !countValue.TryGetInt32(out int count) || count < 1 || count > 60000
+            || !value.TryGetProperty("observeAt", out JsonElement array)
             || array.ValueKind != JsonValueKind.Array || array.GetArrayLength() is < 1 or > 64)
             throw new InvalidDataException("invalid bounded tick request");
         var points = new List<int>();
@@ -21,7 +26,21 @@ public sealed record TickRequest(int Count, int[] ObserveAt)
             points.Add(point);
         }
         if (points[^1] != count) throw new InvalidDataException("final tick observation required");
-        return new TickRequest(count, points.ToArray());
+        string[]? observers = null;
+        if (v2)
+        {
+            JsonElement obs = value.GetProperty("observers");
+            if (obs.ValueKind != JsonValueKind.Array || obs.GetArrayLength() is < 1 or > 2)
+                throw new InvalidDataException("invalid v2 observers");
+            var ids = obs.EnumerateArray().Select(e =>
+                e.ValueKind == JsonValueKind.String ? e.GetString() :
+                throw new InvalidDataException("observer ID must be a string")).ToArray();
+            if (ids.Any(id => id is not ("game.tick" or "fixture.counter"))
+                || !ids.SequenceEqual(ids.OrderBy(x => x, StringComparer.Ordinal).Distinct()))
+                throw new InvalidDataException("unregistered or duplicate v2 observer");
+            observers = ids!;
+        }
+        return new TickRequest(count, points.ToArray(), observers);
     }
 }
 

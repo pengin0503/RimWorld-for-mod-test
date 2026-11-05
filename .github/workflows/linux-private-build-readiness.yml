@@ -1,0 +1,36 @@
+name: Private RimWorld 1.7.4995 readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-rimworld-build-readiness
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Check main source identity
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Install bounded R2 SDK
+        run: python -m pip install -r requirements-r2-sdk.txt
+      - name: Read only fixed identity metadata and Version.txt
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          RWMT_R2_TRANSPORT: sdk
+        run: python -m tools.build_readiness

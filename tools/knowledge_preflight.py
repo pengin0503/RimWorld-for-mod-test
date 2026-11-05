@@ -235,6 +235,16 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                         load_data = stream.read(MAX_XML_BYTES + 1)
                     if len(load_data) > MAX_XML_BYTES:
                         raise KnowledgeError("oversized load-folder metadata")
+                if load_data is not None and not complete_set:
+                    # Conditional paths cannot be resolved from the target
+                    # package alone. A partial active MOD list must not make
+                    # unexamined XML look clean.
+                    load_xml = mod_load_plan.parse_xml(load_data)
+                    conditional_keys = {"IfModActive", "IfModActiveAll", "IfModNotActive"}
+                    if any(conditional_keys.intersection(item.attrib)
+                           for item in load_xml.iter("li")):
+                        _static_issue(issues, "conditionalLoadFoldersNotChecked",
+                                      definite=False)
                 folders = mod_load_plan.load_folders(names, load_data, active)
             except mod_load_plan.LoadPlanError as exc:
                 # A parser refusing to model a loader condition or version
@@ -251,6 +261,8 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
 
             inspected_bytes = 0
             declared = set()
+            unconditional_defs = set()
+            conditional_seen = False
             for rel, path in files:
                 if not rel.casefold().endswith(".xml"):
                     continue
@@ -278,11 +290,22 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                     # without defName are not treated as missing definitions.
                     if name and entry.tag.endswith("Def") and SYMBOL.fullmatch(name):
                         key = (entry.tag, name)
+                        conditional = any(attr.startswith("MayRequire") for attr in entry.attrib)
+                        if conditional and not conditional_seen:
+                            _static_issue(issues, "conditionalDefNotChecked",
+                                          definite=False)
+                            conditional_seen = True
                         if key in declared:
-                            _static_issue(issues, "duplicateLocalDef")
+                            if conditional or key not in unconditional_defs:
+                                _static_issue(issues, "conditionalDefDuplicateNotChecked",
+                                              definite=False)
+                            else:
+                                _static_issue(issues, "duplicateLocalDef")
                         else:
                             declared.add(key)
                             local_defs.append({"type": entry.tag, "defName": name})
+                        if not conditional:
+                            unconditional_defs.add(key)
     except (OSError, ValueError, KnowledgeError):
         _static_issue(issues, "unsafeInput")
 

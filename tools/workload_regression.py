@@ -10,7 +10,7 @@ from statistics import median
 
 PROFILES = {
     "S": ("Vanilla Psycasts Expanded",),
-    "M": ("Vanilla Psycasts Expanded", "TD Enhancement Pack"),
+    "M": ("Vanilla Psycasts Expanded", "TD Enhancement Pack - Continued"),
 }
 UNCACHED = tuple("uncached-" + str(i) for i in range(1, 6))
 CACHED = tuple("cached-" + str(i) for i in range(1, 6))

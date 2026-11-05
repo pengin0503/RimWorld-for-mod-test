@@ -133,7 +133,7 @@ def run_benchmark(root: Path, *, btrfs_root: Path | None = None,
     with tempfile.TemporaryDirectory(prefix="rwmt-realmod-cow-", dir=mount) as scratch:
         work = Path(scratch)
         source = original
-        if original.stat().st_dev != work.stat().st_dev:
+        if btrfs_root is not None or original.stat().st_dev != work.stat().st_dev:
             start = time.monotonic()
             source = work / "selected"
             shutil.copytree(original, source)

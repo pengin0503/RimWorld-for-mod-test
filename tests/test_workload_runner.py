@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import runpy
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -125,6 +126,9 @@ class WorkloadRunnerTests(unittest.TestCase):
             worker = root / "worker"
             worker.mkdir()
             def fake_validate(snapshot, request, out, worker_dir, **kwargs):
+                # Ensure synthetic duration survives 5-decimal rounding on all
+                # OS/Python combinations; no real game is being timed here.
+                time.sleep(0.002)
                 self.assertIsNone(os.environ.get("AWS_SECRET_ACCESS_KEY"))
                 name = out.name
                 calls.append((name, kwargs.get("baseline_cache")))

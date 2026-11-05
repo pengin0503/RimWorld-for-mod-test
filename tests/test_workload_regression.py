@@ -89,6 +89,46 @@ class PayloadPreflightTests(unittest.TestCase):
             self.assertFalse((root / "private" / "request.json").exists())
 
 
+class PreparationPublicationTests(unittest.TestCase):
+    def sample(self):
+        return {
+            "modFetchSeconds": 7.25,
+            "gameRuntimeFetchSeconds": 12.5,
+            "snapshotTotalSeconds": 4.0,
+            "totalInitialSeconds": 23.75,
+            "selectedModCount": 3,
+            "selectedModFiles": 250,
+            "selectedModBytes": 1024,
+            "gameFiles": 1200,
+            "privateIndexPath": "/secret/index.zip",
+        }
+
+    def test_public_initial_preparation_is_fixed_safe_numeric_fields(self):
+        summary = wr.summarize_preparation(self.sample())
+        self.assertTrue(summary["complete"])
+        self.assertEqual(summary["modFetchSeconds"], 7.25)
+        self.assertEqual(summary["gameRuntimeFetchSeconds"], 12.5)
+        self.assertEqual(summary["totalInitialSeconds"], 23.75)
+        self.assertEqual(summary["selectedModCount"], 3)
+        self.assertNotIn("privateIndexPath", summary)
+        self.assertNotIn("/secret", str(summary))
+
+    def test_bad_private_prep_never_publishes_fake_speed_or_sizes(self):
+        for key, value in (("modFetchSeconds", float("nan")),
+                           ("totalInitialSeconds", -1),
+                           ("gameRuntimeFetchSeconds", True),
+                           ("selectedModBytes", -1),
+                           ("selectedModCount", "three"),
+                           ("totalInitialSeconds", 1.0)):
+            with self.subTest(key=key, value=value):
+                raw = self.sample()
+                raw[key] = value
+                summary = wr.summarize_preparation(raw)
+                self.assertFalse(summary["complete"])
+                self.assertIsNone(summary["totalInitialSeconds"])
+        self.assertFalse(wr.summarize_preparation({})["complete"])
+
+
 class MeasurementTests(unittest.TestCase):
     def rows(self):
         return ([{"case": "uncached-" + str(i), "mode": "uncached", "status": "passed",

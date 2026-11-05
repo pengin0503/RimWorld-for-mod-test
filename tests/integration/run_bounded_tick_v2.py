@@ -37,8 +37,32 @@ def case_accepted(case: str, result: dict, *, expected_cached: bool) -> bool:
     if case not in CASES or type(expected_cached) is not bool or not isinstance(result,dict):
         return False
     reasons=result.get("reasons") if isinstance(result.get("reasons"),list) else []
-    codes={item.get("code") for item in reasons if isinstance(item,dict)}
-    stage=(result.get("stages") or {}).get("D",{})
+    if not all(isinstance(item, dict) and isinstance(item.get("code"), str)
+               for item in reasons):
+        return False
+    codes={item["code"] for item in reasons}
+    if len(codes)!=len(reasons):
+        return False
+    mismatch=case=="mismatch"
+    # These codes describe the known experimental status on the pinned
+    # 1.7.4985 runtime. Any other failure/incomplete reason makes this
+    # specific smoke acceptance invalid, even if tick observations match.
+    allowed={"experimental", "dNotQualified", "mapNotQualified"}
+    if mismatch:
+        allowed.add("tickObservationMismatch")
+    if (not {"experimental", "dNotQualified"} <= codes
+            or not codes <= allowed
+            or ("tickObservationMismatch" in codes)!=mismatch):
+        return False
+    stages=result.get("stages")
+    if not isinstance(stages,dict):
+        return False
+    if (not isinstance(stages.get("A"),dict)
+            or stages["A"].get("status")!="completed"
+            or not isinstance(stages.get("map"),dict)
+            or stages["map"].get("status")!="completed"):
+        return False
+    stage=stages.get("D",{})
     if not isinstance(stage,dict):
         return False
     evidence=stage.get("evidence")
@@ -53,10 +77,7 @@ def case_accepted(case: str, result: dict, *, expected_cached: bool) -> bool:
             or [row["tick"] for row in observations]!=[0,N]
             or any(row["values"]["game.tick"]!=row["gameTick"] for row in observations)):
         return False
-    mismatch=case=="mismatch"
-    return (stage.get("status")==("failed" if mismatch else "completed")
-            and ("tickObservationMismatch" in codes)==mismatch
-            and not any(k in codes for k in ("tickObservationIncomplete","baselineIncomplete","newErrors","newWarnings")))
+    return stage.get("status")==("failed" if mismatch else "completed")
 
 
 def public_summary(rows):
@@ -78,8 +99,14 @@ def public_summary(rows):
 
 
 def run(snapshot: Path, worker: Path, out: Path) -> dict:
-    out=Path(out).absolute()
-    if out.exists() or out==REPO or REPO in out.parents:
+    out=Path(out).expanduser().absolute()
+    # Do not follow even a symlinked parent to a checkout or shared path.
+    # Only an owned fresh directory outside the repository may hold game
+    # observations, raw result.json or copied private MOD inputs.
+    if any(part.is_symlink() for part in (out, *out.parents)):
+        raise ValueError("symlinked private output path")
+    out=out.resolve()
+    if out.exists() or out==REPO or REPO in out.parents or (out/".git").exists():
         raise ValueError("new private output outside checkout is required")
     if not Path(snapshot).is_dir() or not Path(worker).exists():
         raise ValueError("private snapshot or Worker is unavailable")

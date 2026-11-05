@@ -228,8 +228,6 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                         else:
                             declared.add(key)
                             local_defs.append({"type": entry.tag, "defName": name})
-        else:
-            folders = []
     except (OSError, ValueError, KnowledgeError):
         _static_issue(issues, "unsafeInput")
 

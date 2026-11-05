@@ -1,5 +1,6 @@
 """Synthetic contract tests for the private P4 runner; never use R2."""
 import json
+from hashlib import sha256
 import os
 from pathlib import Path
 import runpy
@@ -37,9 +38,10 @@ class WorkloadRunnerTests(unittest.TestCase):
         self.assertEqual(args.phase, "cow")
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            (root/"profile.json").write_text(json.dumps({"profile": "S"}))
             (root/"mods").mkdir()
             (root/"request.json").write_text("{}")
+            (root/"profile.json").write_text(json.dumps({"profile": "S",
+                "requestSha256": sha256(b"{}").hexdigest()}))
             with (
                 patch.object(runner["cow"], "run_benchmark") as bench,
                 patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake"}, clear=False),
@@ -70,6 +72,29 @@ class WorkloadRunnerTests(unittest.TestCase):
         result["status"] = "incomplete"
         self.assertEqual(build("cached-1", result, request, 2.25)["status"], "incomplete")
 
+    def test_private_manifest_digest_is_required_and_checked_before_run(self):
+        runner = self.code()
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            (root/"game-snapshot").mkdir()
+            (root/"request.json").write_text(json.dumps({
+                "levels":["A"], "official":["Core","Royalty"],
+                "mods":[{"packageId":"a.mod","target":True}]}))
+            (root/"profile.json").write_text(json.dumps({"profile":"S"}))
+            (root/"worker").mkdir()
+            with patch.object(runner["vh"], "run_validation") as call:
+                with self.assertRaises(ValueError):
+                    runner["run_profile"](root,root/"worker","S")
+                call.assert_not_called()
+            (root/"profile.json").write_text(json.dumps({"profile":"S",
+                "requestSha256":sha256(b"different request").hexdigest()}))
+            with patch.object(runner["vh"], "run_validation") as call:
+                with self.assertRaises(ValueError):
+                    runner["run_profile"](root,root/"worker","S")
+                call.assert_not_called()
+            with self.assertRaises(ValueError):
+                runner["publish_profile"](root,"S")
+
     def test_run_separates_credentials_and_never_counts_failed_rows(self):
         runner = self.code()
         calls = []
@@ -80,7 +105,8 @@ class WorkloadRunnerTests(unittest.TestCase):
                 "recordType": "modValidationRequest", "schemaVersion": 1,
                 "levels": ["A"], "official": ["Core", "Royalty"], "language": "English",
                 "mods": [{"packageId": "a.mod", "target": True}]}))
-            (root / "profile.json").write_text(json.dumps({"profile": "S"}))
+            (root / "profile.json").write_text(json.dumps({"profile": "S",
+                "requestSha256": sha256((root / "request.json").read_bytes()).hexdigest()}))
             worker = root / "worker"
             worker.mkdir()
             def fake_validate(snapshot, request, out, worker_dir, **kwargs):

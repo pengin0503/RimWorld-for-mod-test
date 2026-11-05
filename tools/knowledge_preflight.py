@@ -70,8 +70,11 @@ def _read_json(path: Path):
 
 def load_database(*, build: str = PINNED_BUILD, pack_dir: Path | None = None) -> KnowledgeDatabase:
     """Load only a specifically verified build; never auto-fallback to a nearby 1.7."""
-    if build not in BUNDLED_PACKS:
-        raise KnowledgeError("no verified knowledge pack for requested exact build")
+    match = re.fullmatch(r"(\\d+)\\.(\\d+)\\.(\\d+) rev(\\d+)", build) if isinstance(build, str) else None
+    if match is None:
+        raise KnowledgeError("requested build must be exact major.minor.patch revrevision")
+    if pack_dir is None and build not in BUNDLED_PACKS:
+        raise KnowledgeError("no bundled knowledge pack for requested exact build")
     directory = (DATABASE_ROOT / BUNDLED_PACKS[build]) if pack_dir is None else Path(pack_dir)
     if directory.is_symlink() or not directory.is_dir():
         raise KnowledgeError("knowledge directory missing or linked")
@@ -81,7 +84,8 @@ def load_database(*, build: str = PINNED_BUILD, pack_dir: Path | None = None) ->
     }:
         raise KnowledgeError("unsupported manifest schema")
     if (type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1
-            or manifest["gameBuild"] != build or manifest["gameVersion"] != "1.7"
+            or manifest["gameBuild"] != build
+            or manifest["gameVersion"] != match.group(1) + "." + match.group(2)
             or manifest["coverage"] != "partial"
             or not isinstance(manifest["source"], str) or not manifest["source"].strip()):
         raise KnowledgeError("manifest build or coverage is not independently verified")
@@ -252,15 +256,54 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
     }
 
 
+
+def check_requirements(path: Path, db: KnowledgeDatabase) -> dict:
+    """Batch positive-evidence queries; unknown symbols never become missing errors."""
+    requested = Path(path)
+    if requested.is_symlink() or not requested.is_file() or requested.stat().st_size > 256 * 1024:
+        raise KnowledgeError("invalid requirements input")
+    data = _read_json(requested)
+    if (not isinstance(data, dict) or set(data) != {"schemaVersion", "gameBuild", "requires"}
+            or type(data["schemaVersion"]) is not int or data["schemaVersion"] != 1
+            or data["gameBuild"] != db.metadata["gameBuild"]
+            or not isinstance(data["requires"], list) or len(data["requires"]) > 1000):
+        raise KnowledgeError("invalid requirements schema/build")
+    seen, results = set(), []
+    for row in data["requires"]:
+        if not isinstance(row, dict) or set(row) != {"kind", "symbol"}:
+            raise KnowledgeError("invalid symbol requirement")
+        kind, symbol = row["kind"], row["symbol"]
+        if (not isinstance(kind, str) or not isinstance(symbol, str)
+                or kind not in COLLECTIONS or not SYMBOL.fullmatch(symbol)
+                or (kind, symbol) in seen):
+            raise KnowledgeError("invalid or repeated requirement")
+        seen.add((kind, symbol))
+        results.append(db.query(kind, symbol))
+    known = sum(row["status"] == "present" for row in results)
+    unknown = len(results) - known
+    return {
+        "recordType": "offlineKnowledgeRequirements",
+        "schemaVersion": 1,
+        "gameBuild": db.metadata["gameBuild"],
+        "status": "staticIncomplete" if unknown else "staticChecksPassed",
+        "counts": {"present": known, "unknown": unknown},
+        "results": results,
+        "gameVerification": "notRun",
+        "runtimeQualified": False,
+        "notChecked": ["runtimeResolution", "overloadSignature", "nativeBehavior", "modConflicts"],
+    }
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     query = commands.add_parser("query", help="query a verified known symbol, or return unknown")
     scan = commands.add_parser("scan", help="scan a local MOD without R2, game or Worker")
     verify = commands.add_parser("validate-db", help="validate pack schema and show safe counts")
-    for cmd in (query, scan, verify):
+    batch = commands.add_parser("check", help="batch-check explicit API/Def requirements offline")
+    for cmd in (query, scan, verify, batch):
         cmd.add_argument("--build", default=PINNED_BUILD)
         cmd.add_argument("--pack-dir", type=Path, default=None)
+    batch.add_argument("--requirements", type=Path, required=True)
     query.add_argument("--kind", choices=tuple(COLLECTIONS), required=True)
     query.add_argument("--symbol", required=True)
     scan.add_argument("--mod", type=Path, required=True)
@@ -276,6 +319,9 @@ def main(argv=None) -> int:
             result = inspect_mod(args.mod, db,
                                  active_packages=args.active, complete_set=args.complete_set)
             code = {"staticChecksPassed": 0, "staticIssuesFound": 1, "staticIncomplete": 3}[result["status"]]
+        elif args.command == "check":
+            result = check_requirements(args.requirements, db)
+            code = 0 if result["status"] == "staticChecksPassed" else 3
         else:
             result = {
                 "recordType": "offlineKnowledgePackStatus", "status": "valid",

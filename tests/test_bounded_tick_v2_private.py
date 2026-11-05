@@ -69,6 +69,14 @@ class D2PrivateRunnerTests(unittest.TestCase):
         compromised["reasons"].append({"code":"tickObservationMismatch"})
         self.assertFalse(m["case_accepted"]("positive", compromised, expected_cached=False))
 
+    def test_private_d_v2_can_be_called_from_scoped_main_only_workflow(self):
+        workflow = (RUNNER.parents[2] / ".github/workflows/linux-private-d-v2.yml").read_text(encoding="utf-8")
+        header, jobs = workflow.split("jobs:", 1)
+        self.assertIn("workflow_call:", header)
+        self.assertIn("workflow_dispatch:", header)
+        self.assertNotIn("push:", header)
+        self.assertIn("github.ref == 'refs/heads/main'", jobs)
+
     def test_private_runner_rejects_symlinked_output_parent_before_execution(self):
         m = self.script()
         with tempfile.TemporaryDirectory() as temp:

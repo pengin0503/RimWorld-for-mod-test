@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>DPA.CsvExporter</AssemblyName>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <OutputPath>../1.7/Assemblies/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="3.0.0-rc.3" ExcludeAssets="runtime" />
+    <Reference Include="Assembly-CSharp"><HintPath>$(RimWorldRefs)/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityStubs"><HintPath>$(RimWorldRefs)/UnityStubs.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Waylith"><HintPath>$(RimWorldRefs)/Waylith.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+  <Target Name="CheckRimWorldReferences" BeforeTargets="CoreCompile">
+    <Error Condition="!Exists('$(RimWorldRefs)/Assembly-CSharp.dll')" Text="Specify RimWorldRefs containing RimWorld 1.7 reference DLLs."/>
+    <Error Condition="!Exists('$(RimWorldRefs)/UnityStubs.dll')" Text="Missing UnityStubs.dll."/>
+    <Error Condition="!Exists('$(RimWorldRefs)/Waylith.dll')" Text="Missing Waylith.dll."/>
+  </Target>
+</Project>

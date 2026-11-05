@@ -5,6 +5,8 @@ from contextlib import redirect_stdout
 from io import StringIO
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -255,6 +257,25 @@ class KnowledgeDatabaseTests(unittest.TestCase):
         self.assertEqual(db.metadata["gameBuild"], "1.7.5000 rev1")
         with self.assertRaises(kp.KnowledgeError):
             kp.load_database(build=BUILD, pack_dir=folder)
+
+    def test_real_cli_process_without_game_files_or_r2_credentials(self):
+        """Exercise both Python script entrypoints, not only direct module imports."""
+        repository = Path(__file__).resolve().parents[1]
+        for command, expected_record in (
+            ([sys.executable, str(repository / "tools" / "knowledge_preflight.py"),
+              "validate-db"], "offlineKnowledgePackStatus"),
+            ([sys.executable, str(repository / "tools" / "codex_workflow.py"),
+              "static-preflight", "--mod", str(self.make_mod())],
+             "modKnowledgePreflight"),
+        ):
+            with self.subTest(command=command[1].rsplit("/", 1)[-1]):
+                result = subprocess.run(
+                    command, cwd=repository, capture_output=True, text=True,
+                    timeout=20, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr[-600:])
+                report = json.loads(result.stdout)
+                self.assertEqual(report["recordType"], expected_record)
+                self.assertEqual(report["gameVerification"], "notRun")
 
     def test_existing_cloud_orchestrator_can_run_standalone_static_first(self):
         from tools import codex_workflow as cw

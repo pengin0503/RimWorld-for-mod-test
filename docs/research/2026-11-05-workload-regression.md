@@ -22,9 +22,12 @@ The existing public CI on the PR tests Linux/Windows and builds the Worker with 
 ## Remaining acceptance / scope limits
 
 - The S and M real-game runs have **not yet been executed** on the merged main branch. They require private R2 and the pinned compatible game snapshot, and must not be reported as benchmark results before that.
-- A real-MOD Btrfs COW vs copy measurement (five alternating runs per mode) is still separate work. The previously measured 39.8% relates only to a synthetic file-copy benchmark and cannot be added to the ~42% warm-cache result.
+- An opt-in real-selected-MOD Btrfs comparison has now been implemented: after `prepare` on a Btrfs private root, invoke `python tests/integration/run_workload_regression.py cow --profile S --private-root /private/path`. The benchmark uses five alternating `cp -a --reflink=never` / `--reflink=always` trials and SHA-256 content-tree checks, including a final source re-check. It creates/removes only its own temporary scratch directory, never MOD inputs. No such real-MOD measurement has been executed or claimed yet.
+- On a non-Btrfs filesystem the command reports `status=unsupportedFilesystem`, `complete=false` and null medians. Do not interpret unsupported as zero benefit. The previously measured 39.8% relates only to a synthetic file-copy benchmark and cannot be added to the ~42% warm-cache result.
 - Memory hard limits require an explicitly delegated writeable cgroup v2 tree (separate P5); soft RSS monitoring is unchanged.
 - C/D independent qualification remains incomplete. No Windows new feature, non-headless gameplay or expanded arbitrary-MOD validation is implied.
 - A new RimWorld build requires a separate snapshot and independent qualification; the P4 runner does not silently enable it.
 
 The PR stays Draft until real-game acceptance and review. Do not merge automatically.
+
+The GitHub Actions workflow's `runner.temp` interpolation is scoped to step-level `env`, not job-level `env` (the latter caused an invalid-workflow run with no jobs). Only step context has a `runner` binding. Both no-cache and cache-fill samples must prove `baselineCached=false` to avoid recording a contaminated baseline as an uncached performance measurement.

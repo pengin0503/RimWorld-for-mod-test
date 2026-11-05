@@ -103,45 +103,65 @@ def filesystem_type(root: Path) -> str:
     return p.stdout.strip() if p.returncode == 0 else "unsupported"
 
 
-def run_benchmark(root: Path, *, max_files=MAX_FILES, max_bytes=MAX_BYTES):
-    """Real selected private MOD tree at root/mods; output only safe numerics."""
+def run_benchmark(root: Path, *, btrfs_root: Path | None = None,
+                  max_files=MAX_FILES, max_bytes=MAX_BYTES):
+    """Benchmark real selected MOD files, with optional Btrfs staging.
+
+    If the private download root is ext4, a dedicated disposable Btrfs mount
+    may be supplied. The one-time, integrity-checked stage is *excluded*
+    from the ten copy/reflink trial timings and reported separately.
+    """
     root = Path(root).resolve()
-    source = root / "mods"
-    if source.is_symlink() or not source.is_dir():
+    original = root / "mods"
+    if original.is_symlink() or not original.is_dir():
         raise ValueError("private selected MOD directory missing")
-    source_manifest = manifest(source, max_files=max_files, max_bytes=max_bytes)
-    if filesystem_type(root) != "btrfs":
+    original_manifest = manifest(original, max_files=max_files, max_bytes=max_bytes)
+    mount = root if btrfs_root is None else Path(btrfs_root)
+    if mount.is_symlink() or not mount.is_dir():
+        raise ValueError("Btrfs scratch root must be an existing real directory")
+    mount = mount.resolve()
+    if filesystem_type(mount) != "btrfs":
         return {"status": "unsupportedFilesystem", "complete": False,
                 "samples": {"copy": 0, "reflink": 0},
                 "medianCopySeconds": None, "medianReflinkSeconds": None,
-                "reflinkSpeedupPercent": None}
+                "reflinkSpeedupPercent": None, "stagingSeconds": None}
+
     rows = []
-    # A unique, owned temporary directory on the same filesystem is cleaned
-    # even after cp failure. Never delete pre-existing user directories.
-    with tempfile.TemporaryDirectory(prefix="rwmt-realmod-cow-", dir=root) as work:
-        work = Path(work)
+    staged_seconds = 0.0
+    # This one owned subtree is created/deleted atomically; the selected
+    # original MOD payload is NEVER removed or modified.
+    with tempfile.TemporaryDirectory(prefix="rwmt-realmod-cow-", dir=mount) as scratch:
+        work = Path(scratch)
+        source = original
+        if original.stat().st_dev != work.stat().st_dev:
+            start = time.monotonic()
+            source = work / "selected"
+            shutil.copytree(original, source)
+            staged_seconds = time.monotonic() - start
+            if manifest(source, max_files=max_files, max_bytes=max_bytes) != original_manifest:
+                return summarize_samples([])
         if work.stat().st_dev != source.stat().st_dev:
-            raise ValueError("source and scratch must be on same filesystem")
+            raise ValueError("source and scratch must be on the same Btrfs filesystem")
         for i in range(1, REPEATS + 1):
             modes = MODES if i % 2 else tuple(reversed(MODES))
             for mode in modes:
                 destination = work / f"{mode}-{i}"
                 destination.mkdir(mode=0o700)
-                start = time.monotonic()
+                started = time.monotonic()
                 try:
                     cp = subprocess.run(cp_command(source, destination, mode),
                                         capture_output=True, timeout=300, check=False)
                 except (OSError, subprocess.SubprocessError):
                     return summarize_samples(rows)
-                seconds = time.monotonic() - start
+                seconds = time.monotonic() - started
                 if cp.returncode != 0:
                     return summarize_samples(rows)
-                identical = manifest(destination, max_files=max_files, max_bytes=max_bytes) == source_manifest
+                identical = manifest(destination, max_files=max_files, max_bytes=max_bytes) == original_manifest
                 rows.append({"case": f"{mode}-{i}", "mode": mode,
                              "seconds": seconds, "identical": identical})
                 shutil.rmtree(destination)
                 if not identical:
                     return summarize_samples(rows)
-    if manifest(source, max_files=max_files, max_bytes=max_bytes) != source_manifest:
+    if manifest(original, max_files=max_files, max_bytes=max_bytes) != original_manifest:
         return summarize_samples([])
-    return summarize_samples(rows)
+    return {**summarize_samples(rows), "stagingSeconds": round(staged_seconds, 5)}

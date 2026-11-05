@@ -146,9 +146,14 @@ def _static_issue(issues: list, code: str, *, definite: bool = True):
 
 
 def _parse_xml_file(path: Path):
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_XML_BYTES:
-        raise KnowledgeError("missing, linked or oversized XML")
-    return mod_load_plan.parse_xml(path.read_bytes())
+    if path.is_symlink() or not path.is_file():
+        raise KnowledgeError("missing or linked XML")
+    # A capped read, not an unchecked read_bytes() after a racy stat check.
+    with path.open("rb") as stream:
+        data = stream.read(MAX_XML_BYTES + 1)
+    if len(data) > MAX_XML_BYTES:
+        raise KnowledgeError("oversized XML")
+    return mod_load_plan.parse_xml(data)
 
 
 def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
@@ -162,8 +167,14 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
     try:
         if not root.is_dir() or root.is_symlink() or any(p.is_symlink() for p in root.parents):
             raise KnowledgeError("MOD folder is unavailable or linked")
-        total = 0
-        for path in sorted(root.rglob("*")):
+        # Count bytes we will actually READ, not opaque texture/audio/AssetBundle
+        # payloads. A legitimate large MOD should not fail metadata-only checks.
+        metadata_bytes = 0
+        visited = 0
+        for path in root.rglob("*"):
+            visited += 1
+            if visited > 2 * MAX_FILES:
+                raise KnowledgeError("too many directory entries")
             if path.is_symlink():
                 _static_issue(issues, "unsafeFile")
                 continue
@@ -175,9 +186,11 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
             if not rel or "\\" in rel or any(p in (".", "..", "") for p in rel.split("/")):
                 raise KnowledgeError("unsafe relative path")
             files.append((rel, path))
-            total += path.stat().st_size
-            if total > MAX_INPUT_BYTES:
-                raise KnowledgeError("MOD exceeds bounded static scan input")
+            if rel in ("About/About.xml", "LoadFolders.xml"):
+                metadata_bytes += path.stat().st_size
+                if metadata_bytes > MAX_INPUT_BYTES:
+                    raise KnowledgeError("metadata exceeds bounded read budget")
+        files.sort(key=lambda item: item[0])
         stats["filesConsidered"] = len(files)
         names = {p for p, _ in files}
         if "About/About.xml" not in names:
@@ -214,9 +227,14 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                         _static_issue(issues, "incompatibleMod")
 
                 config = (root / "LoadFolders.xml")
-                load_data = config.read_bytes() if config.is_file() and not config.is_symlink() else None
                 if config.is_symlink():
                     raise KnowledgeError("linked load-folder metadata")
+                load_data = None
+                if config.is_file():
+                    with config.open("rb") as stream:
+                        load_data = stream.read(MAX_XML_BYTES + 1)
+                    if len(load_data) > MAX_XML_BYTES:
+                        raise KnowledgeError("oversized load-folder metadata")
                 folders = mod_load_plan.load_folders(names, load_data, active)
             except mod_load_plan.LoadPlanError as exc:
                 # A parser refusing to model a loader condition or version
@@ -243,7 +261,7 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                 if not any(p in ("defs", "patches") for p in lower[:-1]):
                     continue
                 inspected_bytes += path.stat().st_size
-                if inspected_bytes > MAX_SCAN_XML_BYTES:
+                if inspected_bytes > MAX_SCAN_XML_BYTES or metadata_bytes + inspected_bytes > MAX_INPUT_BYTES:
                     _static_issue(issues, "xmlInputLimit")
                     break
                 try:

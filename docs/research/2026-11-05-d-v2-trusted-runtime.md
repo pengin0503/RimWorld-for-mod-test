@@ -87,6 +87,16 @@ private Linux game runtime using read-only R2 credentials in a separate
 step, then builds the Worker and executes
 `tests/integration/run_bounded_tick_v2.py` without cloud credentials.
 
+The private acceptance predicate is deliberately stricter than a tick-only
+comparison. It requires the A and map stages to complete, checks the requested
+cache state, and accepts only the known unqualified feature reasons
+(`experimental`, `dNotQualified`, optionally `mapNotQualified`, and
+`tickObservationMismatch` only in the deliberate negative case).
+Any unrelated diagnostic, load-order mismatch, initialization fault,
+incomplete stage or duplicate/unknown reason fails acceptance, even with
+matching tick observations. The private output root rejects symlinks in any
+ancestor before writing raw game observations.
+
 The test validates an actual 60-tick `game.tick` observation against
 absolute game tick 0 and 60, a deliberate expected-value mismatch, and
 reuse of a validated baseline cache in a third execution. Any unexpected

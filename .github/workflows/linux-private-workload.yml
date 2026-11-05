@@ -1,0 +1,94 @@
+name: Private Linux workload regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Fixed real-MOD workload (private-index IDs only)
+        required: true
+        type: choice
+        default: S
+        options: [S, M]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-linux-workload
+  cancel-in-progress: false
+
+jobs:
+  workload:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Check pinned main checkout
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Install optional private R2 SDK
+        run: python -m pip install -r requirements-r2-sdk.txt
+      - name: Prepare one private snapshot and bounded MOD closure
+        id: prepare
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: rimworld-17
+          AWS_DEFAULT_REGION: auto
+          RWMT_R2_TRANSPORT: sdk
+          PROFILE: ${{ inputs.profile }}
+          PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
+        run: |
+          python tests/integration/run_workload_regression.py prepare --profile "$PROFILE" --private-root "$PRIVATE_ROOT"
+      - name: Build Worker without R2 secrets
+        id: build
+        run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin
+      - name: Run 11 fixed validation samples without credentials
+        id: run
+        env:
+          PROFILE: ${{ inputs.profile }}
+          PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
+        run: |
+          python tests/integration/run_workload_regression.py run --profile "$PROFILE" --private-root "$PRIVATE_ROOT" --worker worker/bin
+      - name: Create disposable Btrfs filesystem for real selected MODs
+        id: cow_mount
+        if: steps.run.outcome == 'success'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y btrfs-progs
+          truncate -s 3G "$RUNNER_TEMP/rwmt-workload-cow.img"
+          mkfs.btrfs -q -f "$RUNNER_TEMP/rwmt-workload-cow.img"
+          mkdir "$RUNNER_TEMP/rwmt-workload-cow"
+          sudo mount -o loop,compress=no "$RUNNER_TEMP/rwmt-workload-cow.img" "$RUNNER_TEMP/rwmt-workload-cow"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/rwmt-workload-cow"
+      - name: Compare 5 forced-copy and 5 reflink runs on real selected MOD files
+        id: cow
+        if: steps.cow_mount.outcome == 'success'
+        env:
+          PROFILE: ${{ inputs.profile }}
+          PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
+        run: |
+          python tests/integration/run_workload_regression.py cow --profile "$PROFILE" --private-root "$PRIVATE_ROOT" --cow-root "$RUNNER_TEMP/rwmt-workload-cow"
+      - name: Publish rebuilt fixed-field summary
+        if: always() && steps.prepare.outcome == 'success'
+        env:
+          PROFILE: ${{ inputs.profile }}
+          PRIVATE_ROOT: ${{ runner.temp }}/rwmt-workload
+        run: |
+          python tests/integration/run_workload_regression.py publish --profile "$PROFILE" --private-root "$PRIVATE_ROOT"
+      - name: Unmount disposable Btrfs filesystem
+        if: always()
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/rwmt-workload-cow"; then
+            sudo umount "$RUNNER_TEMP/rwmt-workload-cow"
+          fi

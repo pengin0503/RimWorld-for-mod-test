@@ -1,8 +1,11 @@
 """Copy versus reflink full real-MOD tree benchmark: synthetic contracts."""
 import math
 from pathlib import Path
+import shutil
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from tools import cow_benchmark as cow
 
 
@@ -70,6 +73,27 @@ class SourceTreeTests(unittest.TestCase):
                 self.skipTest("symlinks unavailable")
             with self.assertRaises(ValueError):
                 cow.manifest(source)
+
+    def test_private_source_is_staged_to_dedicated_btrfs_then_compared(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)/"private"; root.mkdir()
+            source=root/"mods"; source.mkdir()
+            (source/"About").mkdir()
+            (source/"About"/"About.xml").write_bytes(b"private synthetic MOD")
+            mount=Path(d)/"btrfs"; mount.mkdir()
+            commands=[]
+            def fake_cp(args, **kwargs):
+                commands.append(args)
+                shutil.copytree(Path(args[-2]), Path(args[-1]), dirs_exist_ok=True)
+                return SimpleNamespace(returncode=0)
+            with patch.object(cow, "filesystem_type", return_value="btrfs"), \
+                 patch.object(cow.subprocess, "run", side_effect=fake_cp):
+                summary=cow.run_benchmark(root, btrfs_root=mount)
+            self.assertTrue(summary["complete"])
+            self.assertEqual(len(commands),10)
+            self.assertEqual(summary["samples"],{"copy":5,"reflink":5})
+            self.assertEqual(cow.manifest(source)[0][1], len(b"private synthetic MOD"))
+            self.assertEqual(list(mount.iterdir()),[])
 
     def test_cp_modes_are_forced_and_arguments_not_shell_strings(self):
         source=Path("/private/mods")

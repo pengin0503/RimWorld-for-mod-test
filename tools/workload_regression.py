@@ -61,6 +61,11 @@ def _valid_row(row, case):
             and row.get("baselineCached") is (mode == "cached"))
 
 
+def valid_measurement_row(row, case):
+    """An invalid sample cannot contribute to a complete fixed suite."""
+    return case in EXPECTED and _valid_row(row, case)
+
+
 def summarize_runs(rows) -> dict:
     """Only complete, successful, exact-case samples yield performance statistics."""
     blocked = {"complete": False, "samples": {"uncached": 0, "cached": 0},
@@ -73,7 +78,7 @@ def summarize_runs(rows) -> dict:
         if not isinstance(row, dict) or row.get("case") not in EXPECTED or row["case"] in by_case:
             return blocked
         by_case[row["case"]] = row
-    if set(by_case) != set(EXPECTED) or not all(_valid_row(by_case[c], c) for c in EXPECTED):
+    if set(by_case) != set(EXPECTED) or not all(valid_measurement_row(by_case[c], c) for c in EXPECTED):
         return blocked
     uncached = median(by_case[c]["elapsedSeconds"] for c in UNCACHED)
     cached = median(by_case[c]["elapsedSeconds"] for c in CACHED)

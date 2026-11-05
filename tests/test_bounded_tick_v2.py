@@ -63,11 +63,15 @@ class TickV2Tests(unittest.TestCase):
 
     def test_forged_missing_and_failed_v2_observation(self):
         r=vh.validate_request(request_v2(), Path("/tmp"))
-        changed=evidence_v2()
-        changed["observations"][1]["values"]["game.tick"]=1059
-        stage, incomplete, failed=vh.evaluate_tick(r,changed)
+        request_wrong=request_v2()
+        request_wrong["expectations"]["tickObservations"][1]["equals"]=1059
+        stage, incomplete, failed=vh.evaluate_tick(
+            vh.validate_request(request_wrong, Path("/tmp")), evidence_v2())
         self.assertEqual(stage["status"],"failed")
         self.assertEqual(failed[0]["code"], "tickObservationMismatch")
+        forged=evidence_v2()
+        forged["observations"][1]["values"]["game.tick"]=1059
+        self.assertFalse(bounded_tick.evidence_complete(r["tick"],forged))
         for mutate in (lambda e:e["observations"][0]["values"].update(other=1),
                        lambda e:e["observations"].pop(),
                        lambda e:e.update(advanced=59),

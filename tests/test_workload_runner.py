@@ -128,8 +128,12 @@ class WorkloadRunnerTests(unittest.TestCase):
             with patch.object(runner["vh"], "run_validation", side_effect=fake_validate), \
                  patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake", "R2_ENDPOINT": "https://fake.local"}):
                 summary = runner["run_profile"](root, worker, "S")
-            self.assertEqual(len(calls), 11)
+            self.assertEqual([case for case, _ in calls],
+                             ["uncached-1", "cache-fill", "cached-1", "uncached-2", "cached-2", "uncached-3"],
+                             "stop at the first invalid sample rather than running all 11")
+            self.assertEqual(len(calls), 6)
             self.assertFalse(summary["complete"])
+            self.assertEqual(len(json.loads((root / "workload-rows.json").read_text())), 6)
             self.assertIsNone(summary["medianUncachedSeconds"])
             self.assertEqual(os.environ.get("AWS_SECRET_ACCESS_KEY"), None)
             self.assertTrue((root / "workload-summary.json").exists())

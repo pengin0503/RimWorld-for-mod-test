@@ -24,6 +24,12 @@ class WorkloadRunnerTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args(["prepare", "--profile", "../../bad", "--private-root", "/tmp/root"])
 
+    def test_private_workflow_uses_runner_context_only_in_steps(self):
+        workflow = (RUNNER.parents[2] / ".github/workflows/linux-private-workload.yml").read_text(encoding="utf-8")
+        job_header, steps = workflow.split("    steps:", 1)
+        self.assertNotIn("runner.temp", job_header)
+        self.assertIn("runner.temp", steps)
+
     def test_observation_only_counts_real_passed_results(self):
         build = self.code()["parse_measurement"]
         request = {"mods": [{"packageId": "a.mod"}, {"packageId": "b.mod"}]}

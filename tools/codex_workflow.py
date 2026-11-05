@@ -574,6 +574,11 @@ def main(argv=None) -> int:
     s.add_argument("query")
     s.add_argument("--exact", action="store_true")
     s.add_argument("--limit", type=int, default=20)
+    offline = commands.add_parser("static-preflight", help="local MOD static checks; no R2, Worker or private index")
+    offline.add_argument("--mod", required=True)
+    offline.add_argument("--build", default="1.7.4985 rev1269")
+    offline.add_argument("--active", action="append", default=[])
+    offline.add_argument("--complete-set", action="store_true")
     for name in ("prepare", "fetch-mods", "validate"):
         sub = commands.add_parser(name)
         sub.add_argument("--private-root", required=True)
@@ -593,6 +598,20 @@ def main(argv=None) -> int:
             sub.add_argument("--worker", default="worker/bin")
             sub.add_argument("--run-id", required=True)
     args = parser.parse_args(argv)
+    if args.command == "static-preflight":
+        # Strictly offline. This path must not build an R2 client, read the
+        # private index or require game/Worker files. Runtime checks remain
+        # separate operations with their existing private-index policy.
+        try:
+            from tools import knowledge_preflight
+        except ImportError:
+            import knowledge_preflight
+        cmd = ["scan", "--build", args.build, "--mod", args.mod]
+        for item in args.active:
+            cmd.extend(("--active", item))
+        if args.complete_set:
+            cmd.append("--complete-set")
+        return knowledge_preflight.main(cmd)
     try:
         if args.command == "search":
             output = lookup(load_index(Path(args.index_zip)), args.query, exact=args.exact, limit=args.limit)

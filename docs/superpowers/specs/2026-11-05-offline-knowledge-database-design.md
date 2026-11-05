@@ -28,7 +28,7 @@ All results preserve gameVerification=notRun and runtimeQualified=false; no stat
 
 ## Security / privacy
 
-No executable code in pack, no DLLs, no copied game XML, no Workshop index, no private raw logs, no personal paths in printed diagnostics, no network access. Reject symlinks, DTDs/entities, oversized XML, duplicate symbols, unsupported schema and stale/mismatched build. Scan is bounded to 20,000 input files / 128 MiB input footprint / 32 MiB selected XML, with 4 MiB per XML.
+No executable code in pack, no DLLs, no copied game XML, no Workshop index, no private raw logs, no personal paths in printed diagnostics, no network access. Reject symlinks, DTDs/entities, oversized XML, duplicate symbols, unsupported schema and stale/mismatched build. Scan is bounded to 20,000 input files and 40,000 visited paths; 128 MiB applies only to metadata and selected XML **actually read** (not uninspected texture/audio assets), and selected XML is capped at 32 MiB, with 4 MiB per XML and for LoadFolders.xml. Large binary assets are not opened by the static scanner.
 
 The mandatory private index still governs identification of external MODs for runtime validation. A user-supplied local MOD directory is not selected from the private index, so offline first-stage scanning needs no R2.
 

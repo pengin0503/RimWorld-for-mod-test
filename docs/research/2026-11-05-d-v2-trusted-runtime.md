@@ -61,7 +61,9 @@ than assuming it is always zero.
 - Cache keys include case ID, observer version, selected IDs, tick points
   and expected values. An incomplete/forged/old-version baseline is not reused.
 - The Controller validates count, points, names, monotonic real tick sequence,
-  typed values and evidence metadata. Interrupted/exception cases remain
+  typed values and evidence metadata. A claimed `game.tick` value must also
+  equal its observation's absolute `gameTick`; contradictory evidence is
+  incomplete, not a successful observation. Interrupted/exception cases remain
   incomplete even if the last sample was reached.
 - Any error reported by RimWorld during a controlled tick aborts the D run;
   the Watchdog only reads checkpointed evidence, never game objects.

@@ -1,0 +1,36 @@
+name: Private Linux 1.7.4985 one-shot acceptance
+
+# Only the introduction/update of this workflow on main triggers these
+# private game runs. Unrelated pushes do not re-run costly private workloads.
+# After the acceptance has been inspected, remove this temporary workflow.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/linux-private-acceptance-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  profile_s:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/linux-private-workload.yml
+    with:
+      profile: S
+    secrets: inherit
+
+  profile_m:
+    # M is only meaningful if index-resolved S actually passed; a blocked
+    # S must not trigger a costlier M or manufacture performance numbers.
+    needs: profile_s
+    if: needs.profile_s.result == 'success'
+    uses: ./.github/workflows/linux-private-workload.yml
+    with:
+      profile: M
+    secrets: inherit
+
+  d_v2:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/linux-private-d-v2.yml
+    secrets: inherit

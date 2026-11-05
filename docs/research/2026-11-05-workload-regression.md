@@ -30,6 +30,6 @@ The existing public CI on the PR tests Linux/Windows and builds the Worker with 
 - C/D independent qualification remains incomplete. No Windows new feature, non-headless gameplay or expanded arbitrary-MOD validation is implied.
 - A new RimWorld build requires a separate snapshot and independent qualification; the P4 runner does not silently enable it.
 
-The PR stays Draft until real-game acceptance and review. Do not merge automatically.
+The PR may enter human review after the public offline CI is green; it must **not** claim S/M real-game acceptance until a separately authorized merge and subsequent main-only private workflow. No PR is merged automatically or without the user's explicit instruction. Issue #54 stays open for the post-integration private run.
 
 The GitHub Actions workflow's `runner.temp` interpolation is scoped to step-level `env`, not job-level `env` (the latter caused an invalid-workflow run with no jobs). Only step context has a `runner` binding. Both no-cache and cache-fill samples must prove `baselineCached=false` to avoid recording a contaminated baseline as an uncached performance measurement.

@@ -49,12 +49,14 @@ public sealed class DpaCsvExporterMod : Mod
     }
 
     // Harmony postfix to an existing window; never patch the measured code paths.
-    public static void DrawExportButton(Rect rect)
+    // Harmony injects the first original method argument by position.
+    // DPA 1.7 calls it `inRect`, so using `rect` here prevents patch installation.
+    public static void DrawExportButton(Rect __0)
     {
         try
         {
             // Clear the native close control; title-bar height is ~18 px.
-            var button = new Rect(rect.xMax - 195f, rect.y + 1f, 118f, 18f);
+            var button = new Rect(__0.xMax - 195f, __0.y + 1f, 118f, 18f);
             if (Widgets.ButtonText(button, "Export CSV"))
                 ExportWithFeedback();
         }

@@ -110,9 +110,14 @@ def parse_measurement(case, result, request, elapsed_seconds):
     """Store a fixed-schema row. No raw messages, MOD names or private paths."""
     expected = [mod["packageId"] for mod in request.get("mods", [])]
     processes = result.get("process") if isinstance(result.get("process"), dict) else {}
-    peaks = [p.get("peakRssBytes") for p in (processes.get("target"), processes.get("baseline"))
-             if isinstance(p, dict)]
-    peaks = [p for p in peaks if type(p) is int and 0 <= p <= 1 << 48]
+    # Both processes must have valid RSS evidence; retaining only the
+    # available process would understate peak memory for a full validation.
+    processes_pair = (processes.get("target"), processes.get("baseline"))
+    if all(isinstance(p, dict) and type(p.get("peakRssBytes")) is int
+           and 0 <= p["peakRssBytes"] <= 1 << 48 for p in processes_pair):
+        peaks = [p["peakRssBytes"] for p in processes_pair]
+    else:
+        peaks = []
     diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
     mode = "cache-fill" if case == "cache-fill" else "cached" if case.startswith("cached-") else "uncached"
     return {"case": case, "mode": mode,

@@ -61,7 +61,7 @@ Nothing here selects arbitrary Workshop MODs. Runtime selection of third-party M
 
 ## Future version packs
 
-The built-in pack is pinned to 1.7.4985 rev1269. Unsupported builds are blocked, not silently mapped to the closest 1.7. Optional --pack-dir permits a separate exact-build pack with schema/build validation; it does not make any runtime qualified. Stable 1.7 and newer builds should each have independent evidence and tests before inclusion. Game binaries, raw source and private Workshop data must never be committed.
+The built-in pack and the **local MOD scan loader policy** are pinned to **1.7.4985 rev1269**. Unsupported builds are blocked, not silently mapped to the closest 1.7. Optional `--pack-dir` permits a separate exact-build knowledge pack for `query`, `check`, and `validate-db` (positive-name evidence only); **`scan` remains blocked (exit 2, `status=blocked`) for every other build**, even with a valid custom pack, because `tools/mod_load_plan.py` still models the older build's LoadFolders selection and version-specific dependencies. A future-build scan must not report `staticChecksPassed` after reading the wrong version folder. Stable 1.7 and newer builds require their own independently verified loader implementation, evidence and regression tests before enabling `scan`. No custom pack makes real-game validation qualified. Game binaries, raw source and private Workshop data must never be committed.
 
 ## Reproducibility
 

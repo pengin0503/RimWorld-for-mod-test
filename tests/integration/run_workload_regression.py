@@ -41,6 +41,17 @@ def read_private(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def check_request_digest(manifest: dict, request_path: Path):
+    expected = manifest.get("requestSha256")
+    if (not isinstance(expected, str) or len(expected) != 64
+            or any(char not in "0123456789abcdef" for char in expected)):
+        raise ValueError("private request manifest has no valid SHA-256")
+    if not request_path.is_file() or request_path.stat().st_size > 1024 * 1024:
+        raise ValueError("private request missing or oversized")
+    if sha256(request_path.read_bytes()).hexdigest() != expected:
+        raise ValueError("private request changed since preparation")
+
+
 def prepare_profile(root: Path, profile: str):
     roots = wr.profile_roots(profile)
     root = cw._safe_private(root)
@@ -93,8 +104,7 @@ def run_profile(root: Path, worker: Path, profile: str):
     request_path = root / "request.json"
     if manifest.get("profile") != profile or not request_path.is_file() or not (root / "game-snapshot").is_dir():
         raise ValueError("profile is not prepared")
-    if manifest.get("requestSha256") and sha256(request_path.read_bytes()).hexdigest() != manifest["requestSha256"]:
-        raise ValueError("private request changed since preparation")
+    check_request_digest(manifest, request_path)
     worker = Path(worker).resolve()
     if not worker.exists():
         raise ValueError("Worker has not been built")
@@ -139,9 +149,7 @@ def run_cow_profile(root: Path, profile: str):
     if (manifest.get("profile") != profile or not request.is_file()
             or not (root / "mods").is_dir()):
         raise ValueError("private MOD workload is not prepared")
-    stored_sha = manifest.get("requestSha256")
-    if stored_sha and sha256(request.read_bytes()).hexdigest() != stored_sha:
-        raise ValueError("private request modified since preparation")
+    check_request_digest(manifest, request)
     if (root / "cow-summary.json").exists():
         raise ValueError("cow benchmark already recorded; use a new private root")
     with cw._no_cloud_credentials():
@@ -152,8 +160,10 @@ def run_cow_profile(root: Path, profile: str):
 
 def publish_profile(root: Path, profile: str):
     root = cw._safe_private(root)
-    if read_private(root / "profile.json").get("profile") != profile:
+    manifest = read_private(root / "profile.json")
+    if manifest.get("profile") != profile:
         raise ValueError("profile does not match private manifest")
+    check_request_digest(manifest, root / "request.json")
     rows = read_private(root / "workload-rows.json")
     # Always regenerate and whitelist; do not trust a stale summary file.
     return wr.summarize_runs(rows)

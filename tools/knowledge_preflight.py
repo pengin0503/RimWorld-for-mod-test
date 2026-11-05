@@ -159,6 +159,11 @@ def _parse_xml_file(path: Path):
 def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                 active_packages=(), complete_set: bool = False) -> dict:
     """Static-only read of a local MOD. Definite vs incomplete issues are separate."""
+    # mod_load_plan is qualified only for this exact build. Knowledge packs
+    # for newer builds can support name queries, but their loader rules have
+    # NOT been verified. Never silently scan them with the old 1.7 policy.
+    if db.metadata["gameBuild"] != PINNED_BUILD:
+        raise KnowledgeError("no verified MOD loader policy for requested game build")
     root = Path(mod).absolute()
     issues, local_defs = [], []
     stats = {"filesConsidered": 0, "xmlFilesChecked": 0, "definitionsFound": 0}

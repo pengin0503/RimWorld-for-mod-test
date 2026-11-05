@@ -13,6 +13,9 @@ python tools/knowledge_preflight.py validate-db
 python tools/knowledge_preflight.py query --kind type --symbol Verse.GenText
 python tools/knowledge_preflight.py query --kind method --symbol Verse.GenText.ToSpaceList
 python tools/knowledge_preflight.py query --kind def --symbol ThingDef:Steel
+python tools/knowledge_preflight.py query --kind field --symbol Verse.ThingDef.statBases
+python tools/knowledge_preflight.py query --kind official --symbol ludeon.rimworld
+python tools/knowledge_preflight.py query --kind issue --symbol UnityStubs.DrawTextureStub
 
 # A local MOD available in your current workspace, e.g. a working source MOD:
 python tools/knowledge_preflight.py scan --mod ./MyMod

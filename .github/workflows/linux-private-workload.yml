@@ -9,6 +9,12 @@ on:
         type: choice
         default: S
         options: [S, M]
+  workflow_call:
+    inputs:
+      profile:
+        description: S or M fixed private-index profile
+        type: string
+        required: true
 
 permissions:
   contents: read

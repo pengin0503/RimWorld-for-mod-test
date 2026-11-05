@@ -144,6 +144,43 @@ class KnowledgeDatabaseTests(unittest.TestCase):
         report = kp.inspect_mod(mod, self.db)
         self.assertIn("unsafeFile", {i["code"] for i in report["issues"]})
 
+    def test_unsupported_but_safe_loadfolders_condition_is_incomplete_not_incompatible(self):
+        mod = self.make_mod()
+        (mod / "LoadFolders.xml").write_text(
+            "<loadFolders><v1.7><li IfUnrecognized='flag'>/</li></v1.7></loadFolders>",
+            encoding="utf-8")
+        report = kp.inspect_mod(mod, self.db)
+        self.assertEqual(report["status"], "staticIncomplete")
+        self.assertIn("unsupportedLoaderMetadata", {r["code"] for r in report["issues"]})
+        self.assertNotIn("invalidMetadata", {r["code"] for r in report["issues"]})
+        (mod / "LoadFolders.xml").write_text("<loadFolders><bad", encoding="utf-8")
+        report = kp.inspect_mod(mod, self.db)
+        self.assertEqual(report["status"], "staticIssuesFound")
+        self.assertIn("invalidMetadata", {r["code"] for r in report["issues"]})
+
+    def test_empty_batch_and_unverified_method_overload_cannot_pass(self):
+        req = self.root / "requires.json"
+        def run(rows):
+            req.write_text(json.dumps({"schemaVersion": 1, "gameBuild": BUILD,
+                                       "requires": rows}), encoding="utf-8")
+            return kp.check_requirements(req, self.db)
+        self.assertEqual(run([])["status"], "staticIncomplete")
+        method = {"kind": "method", "symbol": "Verse.GenText.ToSpaceList",
+                  "parameters": ["System.Collections.Generic.IEnumerable" + chr(96) + "1[System.String]"]}
+        report = run([method])
+        self.assertEqual(report["status"], "staticChecksPassed")
+        self.assertEqual(report["counts"], {"present": 1, "unknown": 0})
+        method["parameters"] = ["System.Int32"]
+        report = run([method])
+        self.assertEqual(report["status"], "staticIncomplete")
+        self.assertEqual(report["counts"], {"present": 0, "unknown": 1})
+        self.assertEqual(report["results"][0]["status"], "unknown")
+        with self.assertRaises(kp.KnowledgeError):
+            run([{"kind": "def", "symbol": "ThingDef:Steel", "parameters": []}])
+        with self.assertRaises(kp.KnowledgeError):
+            run([{"kind": "method", "symbol": "Verse.GenText.ToSpaceList",
+                  "parameters": ["Unknown\x00"]}])
+
     def test_catalog_rejects_duplicate_and_untrusted_completeness(self):
         pack = self.root / "pack"
         pack.mkdir()

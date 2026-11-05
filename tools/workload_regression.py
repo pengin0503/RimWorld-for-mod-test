@@ -58,7 +58,7 @@ def _valid_row(row, case):
             and row.get("orderMatches") is True and type(elapsed) in (int, float)
             and math.isfinite(elapsed) and 0 < elapsed <= 3600
             and type(rss) is int and 0 <= rss <= 1 << 48
-            and (row.get("baselineCached") is True if mode == "cached" else True))
+            and row.get("baselineCached") is (mode == "cached"))
 
 
 def summarize_runs(rows) -> dict:

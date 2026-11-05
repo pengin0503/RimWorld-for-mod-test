@@ -14,7 +14,20 @@ from tools import workload_regression as wr
 class WorkloadProfileTests(unittest.TestCase):
     def test_only_fixed_profiles(self):
         self.assertEqual(wr.profile_roots("S"), ("Vanilla Psycasts Expanded",))
-        self.assertEqual(wr.profile_roots("M"), ("Vanilla Psycasts Expanded", "TD Enhancement Pack"))
+        self.assertEqual(wr.profile_roots("M"), ("Vanilla Psycasts Expanded", "TD Enhancement Pack - Continued"))
+        # The private index is exact-name / Workshop ID / packageId only.
+        # This synthetic subset models the two root labels verified in the
+        # read-only 2026-11-05 index audit; never guess Workshop IDs.
+        index = {"mods": [
+            {"name": "Vanilla Psycasts Expanded", "workshop_id": "1000000001",
+             "package_id": "example.vpe"},
+            {"name": "TD Enhancement Pack - Continued", "workshop_id": "1000000002",
+             "package_id": "example.td"},
+        ]}
+        for name in wr.profile_roots("M"):
+            self.assertIn(cw.resolve(index, name)["packageId"], ("example.vpe", "example.td"))
+        with self.assertRaises(cw.WorkflowError):
+            cw.resolve(index, "TD Enhancement Pack")
         for name in ("", "../M", "all", "s", None):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 wr.profile_roots(name)

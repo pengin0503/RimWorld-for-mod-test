@@ -55,6 +55,14 @@ class WorkloadRunnerTests(unittest.TestCase):
                 summary = runner["run_cow_profile"](root, "S")
             self.assertEqual(summary["status"], "unsupportedFilesystem")
             self.assertTrue((root/"cow-summary.json").exists())
+            mount=root/"mount";mount.mkdir()
+            with patch.object(runner["cow"], "run_benchmark") as bench:
+                bench.return_value={"status": "unsupportedFilesystem", "complete": False,
+                    "samples": {"copy": 0, "reflink": 0}, "medianCopySeconds": None,
+                    "medianReflinkSeconds": None, "reflinkSpeedupPercent": None}
+                (root/"cow-summary.json").unlink()
+                runner["run_cow_profile"](root, "S", mount)
+                self.assertEqual(bench.call_args.kwargs["btrfs_root"], mount)
             self.assertEqual(os.environ.get("AWS_SECRET_ACCESS_KEY"), None)
 
     def test_observation_only_counts_real_passed_results(self):

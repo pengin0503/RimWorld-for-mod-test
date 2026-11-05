@@ -42,16 +42,26 @@ class KnowledgeDatabase:
         self.metadata = metadata
         self.collections = collections
 
-    def query(self, kind: str, symbol: str) -> dict:
+    def query(self, kind: str, symbol: str, *, parameters=None) -> dict:
         if kind not in COLLECTIONS or not isinstance(symbol, str) or not SYMBOL.fullmatch(symbol):
             raise KnowledgeError("invalid knowledge query")
+        if parameters is not None:
+            if kind not in {"method", "harmony"}:
+                raise KnowledgeError("only method/Harmony requirements can specify arguments")
+            if (not isinstance(parameters, list) or len(parameters) > 24
+                    or any(not isinstance(p, str) or
+                           not re.fullmatch(r"[\x21-\x7e]{1,200}", p) for p in parameters)):
+                raise KnowledgeError("invalid required method arguments")
         evidence = self.collections[kind].get(symbol)
+        known = evidence is not None and (
+            parameters is None or evidence.get("parameters") == parameters
+        )
         result = {
             "recordType": "offlineKnowledgeQuery",
             "gameBuild": self.metadata["gameBuild"],
             "kind": kind,
             "symbol": symbol,
-            "status": "present" if evidence is not None else "unknown",
+            "status": "present" if known else "unknown",
             "source": evidence["source"] if evidence is not None else None,
             "runtimeVerified": False,
             "catalogCoverage": "partial",
@@ -208,7 +218,16 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                 if config.is_symlink():
                     raise KnowledgeError("linked load-folder metadata")
                 folders = mod_load_plan.load_folders(names, load_data, active)
-            except (OSError, ValueError, mod_load_plan.LoadPlanError, KnowledgeError):
+            except mod_load_plan.LoadPlanError as exc:
+                # A parser refusing to model a loader condition or version
+                # cannot prove the MOD invalid. Preserve unknown rather than
+                # producing a false incompatibility verdict.
+                if exc.code.startswith("unsupported"):
+                    _static_issue(issues, "unsupportedLoaderMetadata", definite=False)
+                else:
+                    _static_issue(issues, "invalidMetadata")
+                folders = []
+            except (OSError, ValueError, KnowledgeError):
                 _static_issue(issues, "invalidMetadata")
                 folders = []
 
@@ -284,7 +303,9 @@ def check_requirements(path: Path, db: KnowledgeDatabase) -> dict:
         raise KnowledgeError("invalid requirements schema/build")
     seen, results = set(), []
     for row in data["requires"]:
-        if not isinstance(row, dict) or set(row) != {"kind", "symbol"}:
+        if (not isinstance(row, dict)
+                or not {"kind", "symbol"} <= set(row)
+                or not set(row) <= {"kind", "symbol", "parameters"}):
             raise KnowledgeError("invalid symbol requirement")
         kind, symbol = row["kind"], row["symbol"]
         if (not isinstance(kind, str) or not isinstance(symbol, str)
@@ -292,14 +313,14 @@ def check_requirements(path: Path, db: KnowledgeDatabase) -> dict:
                 or (kind, symbol) in seen):
             raise KnowledgeError("invalid or repeated requirement")
         seen.add((kind, symbol))
-        results.append(db.query(kind, symbol))
+        results.append(db.query(kind, symbol, parameters=row.get("parameters")))
     known = sum(row["status"] == "present" for row in results)
     unknown = len(results) - known
     return {
         "recordType": "offlineKnowledgeRequirements",
         "schemaVersion": 1,
         "gameBuild": db.metadata["gameBuild"],
-        "status": "staticIncomplete" if unknown else "staticChecksPassed",
+        "status": "staticIncomplete" if unknown or not results else "staticChecksPassed",
         "counts": {"present": known, "unknown": unknown},
         "results": results,
         "gameVerification": "notRun",

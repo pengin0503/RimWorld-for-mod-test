@@ -1,9 +1,6 @@
 name: Private Rimworld-Statistics qualified A+B game smoke
 
 on:
-  push:
-    branches: [ci/statistics-real-game-a-20261109]
-    paths: ['.github/workflows/private-statistics-smoke.yml']
   workflow_dispatch:
 
 permissions:
@@ -15,7 +12,7 @@ concurrency:
 
 jobs:
   statistics-a-smoke:
-    if: github.repository == 'pengin0503/RimWorld-for-mod-test'
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:

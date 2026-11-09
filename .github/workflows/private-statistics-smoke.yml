@@ -1,4 +1,4 @@
-name: Private Rimworld-Statistics A-level game loader smoke
+name: Private Rimworld-Statistics qualified A+B game smoke
 
 on:
   push:
@@ -127,4 +127,56 @@ jobs:
           print(json.dumps(summary,sort_keys=True))
           if r.get("status")!="passed" or r.get("fidelity")!="qualified":
               raise SystemExit("A-level qualified acceptance criterion not met")
+          PY
+      - name: Construct pinned Harmony B-level expectations (no credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path(os.environ["PRIVATE_ROOT"])
+          src=json.loads((root/"request.json").read_text())
+          src["levels"]=["A","B"]
+          src["expectations"]={"harmonyPatches":[
+              {"owner":"pengin0503.rimworldstatistics",
+               "targetAssembly":"Assembly-CSharp","targetType":"Verse.GenScene",
+               "targetMethod":"GoToMainMenu","targetParameters":[],
+               "kind":"prefix","patchType":"RimworldStatistics.Patches.GoToMainMenuPatch",
+               "patchMethod":"Prefix"},
+              {"owner":"pengin0503.rimworldstatistics",
+               "targetAssembly":"Assembly-CSharp","targetType":"Verse.OptionListingUtility",
+               "targetMethod":"DrawOptionListing",
+               "targetParameters":["UnityEngine.Rect","System.Collections.Generic.List`1[Verse.ListableOption]"],
+               "kind":"prefix","patchType":"RimworldStatistics.Patches.MainMenuButtonPatch",
+               "patchMethod":"Prefix"}
+          ]}
+          dest=root/"statistics-b-request.json"
+          dest.write_text(json.dumps(src,sort_keys=True),encoding="utf-8")
+          dest.chmod(0o600)
+          print("B-level contract created: 2 statically audited Harmony prefixes")
+          PY
+      - name: Run B-level actual-game Harmony registration checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${AWS_ACCESS_KEY_ID:-}" && test -z "${AWS_SECRET_ACCESS_KEY:-}"
+          python tools/codex_workflow.py validate --private-root "$PRIVATE_ROOT" \
+            --request "$PRIVATE_ROOT/statistics-b-request.json" \
+            --worker worker/bin --run-id statistics-b-smoke > "$RUNNER_TEMP/statistics-b-smoke.log" 2>&1 || {
+            echo 'B-level real-game validation did not pass; raw diagnostics are not published'
+            exit 1
+          }
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(os.environ["PRIVATE_ROOT"])/"results"/"statistics-b-smoke"/"result.json"
+          r=json.loads(p.read_text())
+          b=r.get("stages",{}).get("B")
+          print(json.dumps({"status":r.get("status"),"fidelity":r.get("fidelity"),
+                            "stageB":b,"reasons":[x.get("code") for x in r.get("reasons",[])]},
+                           ensure_ascii=False,sort_keys=True))
+          if r.get("status")!="passed" or r.get("fidelity")!="qualified" or \
+              not isinstance(b,dict) or b.get("status")!="completed":
+              raise SystemExit("Qualified B-level patch registration gate not met")
           PY

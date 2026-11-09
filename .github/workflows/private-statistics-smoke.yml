@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRIVATE_ROOT: ${{ runner.temp }}/rwmt-statistics-private
+      PRIVATE_ROOT: /tmp/rwmt-statistics-private-${{ github.run_id }}
       UseNuGetRefs: 'true'
     steps:
       - uses: actions/checkout@v7

@@ -1,0 +1,137 @@
+name: Pinned private R2 49-real-save Statistics reader acceptance
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/private-statistics-r2-reader.yml'
+      - 'tools/private_statistics_r2_sources.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/private-statistics-r2-reader.yml'
+      - 'tools/private_statistics_r2_sources.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rwmt-private-statistics-reader
+  cancel-in-progress: false
+
+jobs:
+  public-preflight:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      UseNuGetRefs: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: pengin0503/Rimworld-Statistics
+          ref: 91c2203e1f0c2800759f9d717f14a27b336e55fc
+          path: statistics-src
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Check immutable Statistics source and private downloader syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C statistics-src rev-parse HEAD)" = '91c2203e1f0c2800759f9d717f14a27b336e55fc'
+          python3 -m py_compile tools/private_statistics_r2_sources.py
+          test -f statistics-src/tools/RealSaveImport/RealSaveImport.csproj
+      - name: Compile production offline .NET SaveReader acceptance program (no originals)
+        run: dotnet build statistics-src/tools/RealSaveImport/RealSaveImport.csproj -c Release --nologo -p:UseNuGetRefs=true
+      - name: Run current Core regressions with private originals deliberately absent
+        run: dotnet test statistics-src/Tests/RimworldStatistics.Core.Tests/RimworldStatistics.Core.Tests.csproj -c Release --nologo -p:UseNuGetRefs=true
+
+  private-r2-originals:
+    needs: public-preflight
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      UseNuGetRefs: 'true'
+      PRIVATE_DIR: ${{ runner.temp }}/statistics-private-saves
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: pengin0503/Rimworld-Statistics
+          ref: 91c2203e1f0c2800759f9d717f14a27b336e55fc
+          path: statistics-src
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Pin and compile private production reader without cloud credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C statistics-src rev-parse HEAD)" = '91c2203e1f0c2800759f9d717f14a27b336e55fc'
+          dotnet build statistics-src/tools/RealSaveImport/RealSaveImport.csproj -c Release --nologo -p:UseNuGetRefs=true
+      - name: Install pinned R2 transport
+        run: python -m pip install --disable-pip-version-check -r requirements-r2-sdk.txt
+      - name: Fetch and size-check 49 private R2 originals (secrets scoped to this step)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AWS_ACCESS_KEY_ID" && test -n "$AWS_SECRET_ACCESS_KEY" && test -n "$R2_ENDPOINT"
+          python tools/private_statistics_r2_sources.py --private-dir "$PRIVATE_DIR" > "$RUNNER_TEMP/r2-private-preparation-summary.csv" 2>&1 || {
+            echo 'Private R2 source preparation failed (no original save names logged)'
+            exit 1
+          }
+          grep -Fxq 'verified,49,824593049' "$RUNNER_TEMP/r2-private-preparation-summary.csv"
+          echo 'Anonymous 49-original inventory size gate passed'
+      - name: Production .NET SaveReader 49-original read-only integrity and timing acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No AWS/R2 credentials exist in this step. The original object keys
+          # are not present in the temporary filenames.
+          test -z "${AWS_ACCESS_KEY_ID:-}" && test -z "${AWS_SECRET_ACCESS_KEY:-}"
+          dotnet run -c Release --no-build --no-launch-profile \
+            --project statistics-src/tools/RealSaveImport/RealSaveImport.csproj \
+            -- "$PRIVATE_DIR" > "$RUNNER_TEMP/anonymous-statistics-reader.csv" || {
+            echo 'Private original-file reader acceptance failed (raw details withheld)'
+            exit 1
+          }
+          python3 - <<'PY'
+          import csv, os
+          with open(os.path.join(os.environ['RUNNER_TEMP'], 'anonymous-statistics-reader.csv'), newline='', encoding='utf-8') as f:
+              lines = list(csv.reader(f))
+          assert len(lines) >= 2 and lines[0][:3] == ['schema','originals','parsed_ok']
+          row = lines[1]
+          assert row[0] == '1' and row[1] == '49'
+          assert int(row[5]) == 49 and int(row[4]) == 0
+          assert int(row[2]) + int(row[3]) == 49
+          print('Private original-file reader accepted:', row[1], 'files; failures:', row[4],
+                'unchanged:', row[5], 'checkpoints:', row[6],
+                'p50-ms:', row[7], 'p95-ms:', row[8], 'median-managed-alloc-bytes:', row[9])
+          print('Exact build counts (no save IDs or MOD lists):')
+          for build, count in lines[3:]:
+              print(build, count)
+          PY
+      - name: Always erase ephemeral private originals
+        if: always()
+        shell: bash
+        run: |
+          if [ "$PRIVATE_DIR" = "$RUNNER_TEMP/statistics-private-saves" ]; then
+            rm -rf -- "$PRIVATE_DIR"
+          fi
+          echo 'Private reader workspace cleanup completed'

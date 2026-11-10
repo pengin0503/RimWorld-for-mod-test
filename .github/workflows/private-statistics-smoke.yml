@@ -1,6 +1,16 @@
 name: Private Rimworld-Statistics qualified A+B game smoke
 
 on:
+  # Public, credential-free PR preflight; secrets are NEVER available to this job.
+  pull_request:
+    paths:
+      - '.github/workflows/private-statistics-smoke.yml'
+  # A merge of this reviewed workflow activates the qualified real-game gate
+  # exactly once; other main commits do not consume private R2 bandwidth.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/private-statistics-smoke.yml'
   workflow_dispatch:
 
 permissions:
@@ -11,8 +21,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # This job runs on PRs without R2 credentials and validates the exact
+  # pinned Statistics sources before a reviewer can integrate the private gate.
+  source-build-preflight:
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      UseNuGetRefs: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: pengin0503/Rimworld-Statistics
+          ref: 7f6d3df4b55a2d388c62cb5aa5d1e7541a3374a3
+          path: statistics-src
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify immutable Statistics source pin and workflow signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C statistics-src rev-parse HEAD)" = '7f6d3df4b55a2d388c62cb5aa5d1e7541a3374a3'
+          grep -Fq 'class GoToMainMenuPatch' statistics-src/Source/RimworldStatistics/Patches/GoToMainMenuPatch.cs
+          grep -Fq 'class MainMenuButtonPatch' statistics-src/Source/RimworldStatistics/Patches/MainMenuButtonPatch.cs
+      - name: Compile current Statistics production MOD using public reference assemblies
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build statistics-src/Source/RimworldStatistics/RimworldStatistics.csproj -c Release --nologo -p:UseNuGetRefs=true
+          test -f statistics-src/1.7/Assemblies/RimworldStatistics.dll
+          test -f statistics-src/1.7/Assemblies/RimworldStatistics.Core.dll
+          test -f statistics-src/1.7/Assemblies/RimworldStatistics.Api.dll
+      - name: Run current Statistics Core regression tests (private originals intentionally absent)
+        run: dotnet test statistics-src/Tests/RimworldStatistics.Core.Tests/RimworldStatistics.Core.Tests.csproj -c Release --nologo -p:UseNuGetRefs=true
+      - name: Compile host Worker without any game binaries or credentials
+        run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin --nologo
+
   statistics-a-smoke:
-    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main'
+    needs: source-build-preflight
+    if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -25,7 +77,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: pengin0503/Rimworld-Statistics
-          ref: 9e411dde8abc7e5f5f6ef6d1510835fb17788360
+          ref: 7f6d3df4b55a2d388c62cb5aa5d1e7541a3374a3
           path: statistics-src
           persist-credentials: false
       - uses: actions/setup-python@v7
@@ -39,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git -C statistics-src rev-parse HEAD)" = '9e411dde8abc7e5f5f6ef6d1510835fb17788360'
+          test "$(git -C statistics-src rev-parse HEAD)" = '7f6d3df4b55a2d388c62cb5aa5d1e7541a3374a3'
       - name: Build Statistics mod from pinned public sources without credentials
         shell: bash
         run: |

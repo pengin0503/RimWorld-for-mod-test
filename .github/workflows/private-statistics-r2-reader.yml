@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: pengin0503/Rimworld-Statistics
-          ref: 91c2203e1f0c2800759f9d717f14a27b336e55fc
+          ref: 52cb84de435e65197157a98c212b78546949715f
           path: statistics-src
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C statistics-src rev-parse HEAD)" = '91c2203e1f0c2800759f9d717f14a27b336e55fc'
+          test "$(git -C statistics-src rev-parse HEAD)" = '52cb84de435e65197157a98c212b78546949715f'
           python3 -m py_compile tools/private_statistics_r2_sources.py
           test -f statistics-src/tools/RealSaveImport/RealSaveImport.csproj
       - name: Compile production offline .NET SaveReader acceptance program (no originals)
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: pengin0503/Rimworld-Statistics
-          ref: 91c2203e1f0c2800759f9d717f14a27b336e55fc
+          ref: 52cb84de435e65197157a98c212b78546949715f
           path: statistics-src
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
@@ -83,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C statistics-src rev-parse HEAD)" = '91c2203e1f0c2800759f9d717f14a27b336e55fc'
+          test "$(git -C statistics-src rev-parse HEAD)" = '52cb84de435e65197157a98c212b78546949715f'
           dotnet build statistics-src/tools/RealSaveImport/RealSaveImport.csproj -c Release --nologo -p:UseNuGetRefs=true
       - name: Install pinned R2 transport
         run: python -m pip install --disable-pip-version-check -r requirements-r2-sdk.txt
@@ -134,6 +134,13 @@ jobs:
               '1.7.4979 rev109': 1, '1.7.4985 rev1269': 6,
           }
           assert {build: int(count) for build, count in lines[3:]} == expected
+          # New reader v11: all reconstructed research remains explicitly
+          # Partial, never silently upgraded to verified data.
+          assert len(row) == 12, 'expected v11 research evidence columns'
+          recovered, partial = int(row[10]), int(row[11])
+          assert 0 <= recovered <= 7, 'research must be 1.7-only'
+          assert recovered == partial, 'all offline recovered research is Partial'
+          print('Provisional research observations:', recovered, '; Partial:', partial)
           print('Private original-file reader accepted:', row[1], 'files; failures:', row[4],
                 'unchanged:', row[5], 'checkpoints:', row[6],
                 'p50-ms:', row[7], 'p95-ms:', row[8], 'median-managed-alloc-bytes:', row[9])

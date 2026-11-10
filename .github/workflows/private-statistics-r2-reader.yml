@@ -58,7 +58,7 @@ jobs:
     timeout-minutes: 60
     env:
       UseNuGetRefs: 'true'
-      PRIVATE_DIR: ${{ runner.temp }}/statistics-private-saves
+      PRIVATE_DIR: /tmp/rwmt-statistics-saves-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -141,7 +141,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [ "$PRIVATE_DIR" = "$RUNNER_TEMP/statistics-private-saves" ]; then
+          if [ "$PRIVATE_DIR" = "/tmp/rwmt-statistics-saves-${{ github.run_id }}" ]; then
             rm -rf -- "$PRIVATE_DIR"
           fi
           echo 'Private reader workspace cleanup completed'

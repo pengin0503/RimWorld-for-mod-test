@@ -4,11 +4,11 @@ The fixture is workflow source text, not an execution of the private game
 runtime. Tests intentionally do not resolve or print secret values.
 """
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/private-statistics-smoke.yml"
-PIN = "7f6d3df4b55a2d388c62cb5aa5d1e7541a3374a3"
 
 
 class StatisticsSmokeWorkflowContractTests(unittest.TestCase):
@@ -36,7 +36,18 @@ class StatisticsSmokeWorkflowContractTests(unittest.TestCase):
         self.assertIn('test -z "${AWS_SECRET_ACCESS_KEY:-}"', self.private)
 
     def test_pinned_current_statistics_source_matches_preflight_and_private_gate(self):
-        self.assertEqual(self.source.count("ref: " + PIN), 2)
+        # Both checkouts and both immutable-commit assertions must point to
+        # the same reviewed Statistics source. No hard-coded historical SHA.
+        pins = re.findall(r"ref: ([0-9a-f]{40})", self.source)
+        self.assertEqual(len(pins), 2)
+        self.assertEqual(pins[0], pins[1])
+        self.assertEqual(
+            self.source.count(
+                'test "$(git -C statistics-src rev-parse HEAD)" = '
+                + "'" + pins[0] + "'"
+            ),
+            2,
+        )
         self.assertIn("path: statistics-src", self.public)
         self.assertIn("RimworldStatistics.Core.Tests.csproj", self.public)
         self.assertIn("B-level actual-game Harmony registration checks", self.private)

@@ -58,7 +58,12 @@ jobs:
           test -f statistics-src/1.7/Assemblies/RimworldStatistics.Core.dll
           test -f statistics-src/1.7/Assemblies/RimworldStatistics.Api.dll
       - name: Run current Statistics Core regression tests (private originals intentionally absent)
-        run: dotnet test statistics-src/Tests/RimworldStatistics.Core.Tests/RimworldStatistics.Core.Tests.csproj -c Release --nologo -p:UseNuGetRefs=true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd statistics-src
+          # xUnit v3 requires global.json's Microsoft.Testing.Platform runner.
+          dotnet test Tests/RimworldStatistics.Core.Tests/RimworldStatistics.Core.Tests.csproj -c Release --nologo -p:UseNuGetRefs=true
       - name: Compile host Worker without any game binaries or credentials
         run: dotnet build worker/RimWorldValidation.Worker -c Release -o worker/bin --nologo
 

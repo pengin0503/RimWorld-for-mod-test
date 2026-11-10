@@ -25,7 +25,8 @@ class StatisticsSmokeWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("vars.R2_ENDPOINT", self.public)
         self.assertIn("needs: source-build-preflight", self.private)
         self.assertIn("github.ref == 'refs/heads/main'", self.private)
-        self.assertIn("github.event_name != 'pull_request'", self.private)
+        self.assertIn("if: github.repository == 'pengin0503/RimWorld-for-mod-test' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'", self.private)
+        self.assertNotIn("pull_request_target:", self.source)
         self.assertIn("github.repository == 'pengin0503/RimWorld-for-mod-test'", self.private)
 
     def test_game_resources_are_never_uploaded_or_placed_in_checkout(self):
@@ -36,7 +37,7 @@ class StatisticsSmokeWorkflowContractTests(unittest.TestCase):
 
     def test_pinned_current_statistics_source_matches_preflight_and_private_gate(self):
         self.assertEqual(self.source.count("ref: " + PIN), 2)
-        self.assertIn("stats-src", self.public.replace("statistics-src", "stats-src"))
+        self.assertIn("path: statistics-src", self.public)
         self.assertIn("RimworldStatistics.Core.Tests.csproj", self.public)
         self.assertIn("B-level actual-game Harmony registration checks", self.private)
         self.assertIn("RimworldStatistics.Patches.MainMenuButtonPatch", self.private)

@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: pengin0503/Rimworld-Statistics
-          ref: 6bff50dc31f3b971ec814a1cd08b0faca6a55c47
+          ref: 296e1ce0fedf97b2c503ae68feaa83a69b075497
           path: statistics-src
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C statistics-src rev-parse HEAD)" = '6bff50dc31f3b971ec814a1cd08b0faca6a55c47'
+          test "$(git -C statistics-src rev-parse HEAD)" = '296e1ce0fedf97b2c503ae68feaa83a69b075497'
           grep -Fq 'class GoToMainMenuPatch' statistics-src/Source/RimworldStatistics/Patches/GoToMainMenuPatch.cs
           grep -Fq 'class MainMenuButtonPatch' statistics-src/Source/RimworldStatistics/Patches/MainMenuButtonPatch.cs
       - name: Compile current Statistics production MOD using public reference assemblies
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: pengin0503/Rimworld-Statistics
-          ref: 6bff50dc31f3b971ec814a1cd08b0faca6a55c47
+          ref: 296e1ce0fedf97b2c503ae68feaa83a69b075497
           path: statistics-src
           persist-credentials: false
       - uses: actions/setup-python@v7
@@ -96,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git -C statistics-src rev-parse HEAD)" = '6bff50dc31f3b971ec814a1cd08b0faca6a55c47'
+          test "$(git -C statistics-src rev-parse HEAD)" = '296e1ce0fedf97b2c503ae68feaa83a69b075497'
       - name: Build Statistics mod from pinned public sources without credentials
         shell: bash
         run: |

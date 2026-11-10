@@ -33,3 +33,16 @@ These originals cover **12 exact builds**: 1.5 (22), 1.6 (20), 1.7 (7). Six orig
 4. No 1.7.5000 save game was loaded by the A+B smoke. The 49 R2 reader tests are **offline .NET**; the A+B smoke covers actual game load but does **not** prove stat value parity in all recorded MODs, new data UI, save performance or TPS. Record the execution outcome before claiming v11 real-game validation succeeded.
 
 **Do not retrospectively relabel** the old [v10 49-original run #42830780995](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/42830780995) as a v11 result. Append the v11 specific run ID and result separately.
+
+## Actual completed v11 game and 49-original result (2026-11-10)
+
+After merging [RWMT PR #72](https://github.com/pengin0503/RimWorld-for-mod-test/pull/72) to **`main@fdbe5d907ac380ad35c25b012a33504244549c6c`**, the two qualified jobs executed pinned `Statistics@52cb84de435e65197157a98c212b78546949715f`, **SaveReader v11**, against genuinely private R2 inputs:
+
+| GitHub Actions run | Final result | Actual evidence in safe log |
+| --- | --- | --- |
+| [#42838545431 — 49 original .NET reader](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/42838545431) | Both jobs **success** | All 49 read, all 49 unchanged SHA/size/mtime, 0 errors, 0 embedded checkpoints, 12 exact game builds match, **7/7 1.7 originals produced Partial research**; p50 **53.132 ms**, p95 **142.153 ms**, median **809,400** managed bytes |
+| [#42838545527 — actual RimWorld 1.7 A+B smoke](https://github.com/pengin0503/RimWorld-for-mod-test/actions/runs/42838545527) | Both jobs **success** | Actual game source 1.7.4985/Harmony R2; A-stage status **passed**, fidelity **qualified**, `newErrorCount=0`, `stageA.checks=0`. B-stage status **passed**, fidelity **qualified**, two expected Statistics menu-prefix patches; `unexpectedPatches=9` additional non-contract patches not individually attributed |
+
+This updates the prior 'not yet executed' wording in the preceding section. The **earlier v10 run #42830780995 remains separate, valid historical evidence**.
+
+Do **not** conflate A+B successful real-game launch/registration with per-pawn, per-research or in-game item count verification. The game smoke started **1.7.4985**, while the user's eight newest private samples are **1.7.5000** from one modded campaign. At user direction, differences within unstable 1.7 are provisionally treated as semantically irrelevant, but neither actual loaded MOD cost patches nor the exact 1.7.5000 engine were measured. The 7 reconstructed 1.7 research values remain **Partial**, and the other 42 1.5/1.6 files are not interpreted under the 1.7 reference. No source originals/credentials were uploaded.

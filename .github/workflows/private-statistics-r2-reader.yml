@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: pengin0503/Rimworld-Statistics
-          ref: 52b9b758dfdc2a641690a4527d3c11a1676f043e
+          ref: e3eea0e6fcd69faf0c8a630d5ac5ad491edfe22c
           path: statistics-src
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C statistics-src rev-parse HEAD)" = '52b9b758dfdc2a641690a4527d3c11a1676f043e'
+          test "$(git -C statistics-src rev-parse HEAD)" = 'e3eea0e6fcd69faf0c8a630d5ac5ad491edfe22c'
           python3 -m py_compile tools/private_statistics_r2_sources.py
           test -f statistics-src/tools/RealSaveImport/RealSaveImport.csproj
       - name: Compile production offline .NET SaveReader acceptance program (no originals)
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: pengin0503/Rimworld-Statistics
-          ref: 52b9b758dfdc2a641690a4527d3c11a1676f043e
+          ref: e3eea0e6fcd69faf0c8a630d5ac5ad491edfe22c
           path: statistics-src
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
@@ -83,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C statistics-src rev-parse HEAD)" = '52b9b758dfdc2a641690a4527d3c11a1676f043e'
+          test "$(git -C statistics-src rev-parse HEAD)" = 'e3eea0e6fcd69faf0c8a630d5ac5ad491edfe22c'
           dotnet build statistics-src/tools/RealSaveImport/RealSaveImport.csproj -c Release --nologo -p:UseNuGetRefs=true
       - name: Install pinned R2 transport
         run: python -m pip install --disable-pip-version-check -r requirements-r2-sdk.txt
@@ -134,10 +134,10 @@ jobs:
               '1.7.4979 rev109': 1, '1.7.4985 rev1269': 6,
           }
           assert {build: int(count) for build, count in lines[3:]} == expected
-          # Reader v14: 1.7-only research, turret, direct Silver/medicine,
+          # Reader v15: 1.7-only research, turret, direct Silver/medicine,
           # and bounded free/prisoner/slave roster are positive-only Partials.
           # No unknown or unsupported version may be mistaken for measured zero.
-          assert len(row) == 24, 'expected v14 anonymous original-save evidence columns'
+          assert len(row) == 24, 'expected v15 anonymous original-save evidence columns'
           for name, observed_column in [
               ('research', 10), ('turrets', 12), ('silver', 14), ('medicine', 16),
               ('free', 18), ('prisoner', 20), ('slave', 22)]:

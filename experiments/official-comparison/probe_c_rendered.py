@@ -19,6 +19,10 @@ listing is compared.
 This never grants C qualification, never changes product predicates or caches and is not
 part of the product flow. No input event is synthesized; the official processes quit by
 themselves. Game files, raw logs and screenshots stay in the private --out directory.
+
+``--baseline-cache`` lets the product reuse an identical baseline run, as
+``codex_workflow.py validate`` always does; the summary records whether it did. The
+official control and observer runs are never cached: they are the reference itself.
 """
 import argparse
 from collections import Counter
@@ -364,6 +368,22 @@ def gate(product, control, observer, rows, spec=FIXTURE_SPEC):
     return {'checks': checks, 'agreement': all(checks.values()), 'qualified': False}
 
 
+def cache_dir(path):
+    """The product's baseline cache: a private directory outside the checkout."""
+    path = Path(path).expanduser().resolve()
+    if path == REPO or REPO in path.parents or (path.exists() and not path.is_dir()):
+        raise ValueError('baseline cache must be a directory outside the checkout')
+    return path
+
+
+def product_summary(product):
+    return {'status': product.get('status'), 'executionStatus': product.get('executionStatus'),
+            'stageC': (product.get('stages') or {}).get('C', {}).get('status'),
+            'reasons': sorted(r.get('code') for r in product.get('reasons', []) if isinstance(r, dict)),
+            'mods': [m.get('packageId') for m in product.get('mods', []) if isinstance(m, dict)],
+            'baselineCached': (product.get('diagnostics') or {}).get('baselineCached') is True}
+
+
 def official_summary(official):
     trace = trace_of(official) or {}
     cases = []
@@ -392,6 +412,8 @@ def main(argv=None):
     p.add_argument('--spec', type=Path, help='comparison spec JSON (default: the self-made fixture rows)')
     p.add_argument('--request', type=Path, help='fetch-mods request with real MODs (default: self-made fixtures)')
     p.add_argument('--expand', action='store_true', help='compare after opening the things\' category paths')
+    p.add_argument('--baseline-cache', type=Path,
+                   help='private directory where the product reuses identical baseline runs (official runs are not cached)')
     p.add_argument('--official-root', type=Path)
     p.add_argument('--display', type=int, default=77)
     p.add_argument('--shots', type=Path)
@@ -410,6 +432,10 @@ def main(argv=None):
     a.out = a.out.resolve(); a.snapshot = a.snapshot.resolve(); a.harmony_dll = a.harmony_dll.resolve()
     if a.out.exists() or a.out == REPO or REPO in a.out.parents:
         p.error('out must be new and outside checkout')
+    try:
+        baseline_cache = cache_dir(a.baseline_cache) if a.baseline_cache else None
+    except ValueError as error:
+        p.error(str(error))
     # Real MOD DLLs run below; nothing here needs storage credentials.
     for name in CREDENTIAL_ENV:
         os.environ.pop(name, None)
@@ -434,7 +460,8 @@ def main(argv=None):
         p.error(str(error))
     official_content = tuple(request.get('official') or ('Core',))
     (a.out/'request.json').write_text(json.dumps(request))
-    product = vh.run_validation(a.snapshot, a.out/'request.json', a.out/'product', a.worker, keep_run_dirs=True)
+    product = vh.run_validation(a.snapshot, a.out/'request.json', a.out/'product', a.worker, keep_run_dirs=True,
+                                baseline_cache=baseline_cache)
     product_rows = (product.get('checks') or {}).get('billIngredients') or []
     target = a.out/'product/target'
     control = run_official(a, a.out, target, 'official-control', spec, (), official_content)
@@ -444,10 +471,7 @@ def main(argv=None):
     summary = {'schemaVersion': 2, 'research': 'c-rendered-dialog',
                'spec': {'name': spec['name'], 'expand': spec['expand'], 'allowProductMismatch': spec['allowProductMismatch'],
                         'rows': len(spec['rows'])},
-               'product': {'status': product.get('status'), 'executionStatus': product.get('executionStatus'),
-                           'stageC': (product.get('stages') or {}).get('C', {}).get('status'),
-                           'reasons': sorted(r.get('code') for r in product.get('reasons', []) if isinstance(r, dict)),
-                           'mods': [m.get('packageId') for m in product.get('mods', []) if isinstance(m, dict)]},
+               'product': product_summary(product),
                'officialControl': official_summary(control), 'officialObserver': official_summary(observed),
                'rows': rows, **gate(product, control, observed, rows, spec)}
     pv.write_json(a.out/'safe-summary.json', summary)

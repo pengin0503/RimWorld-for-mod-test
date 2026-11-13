@@ -2,6 +2,7 @@
 import copy
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -167,6 +168,33 @@ class RenderedComparisonTests(unittest.TestCase):
             rendered.launch_official(REPO, 77, None)
         with self.assertRaises(SystemExit):
             rendered.main(['--snapshot', '/nonexistent', '--out', str(REPO/'private-out'), '--harmony-dll', '/nonexistent'])
+
+    def test_baseline_cache_stays_outside_the_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(rendered.cache_dir(Path(tmp)/'new'), (Path(tmp)/'new').resolve())
+            self.assertEqual(rendered.cache_dir(tmp), Path(tmp).resolve())
+            (Path(tmp)/'file').write_text('x')
+            with self.assertRaises(ValueError):
+                rendered.cache_dir(Path(tmp)/'file')
+            out = Path(tmp)/'out'
+            with self.assertRaises(SystemExit):
+                rendered.main(['--snapshot', tmp, '--out', str(out), '--harmony-dll', tmp,
+                               '--baseline-cache', str(REPO/'private-cache')])
+            self.assertFalse(out.exists())
+        for inside in (REPO, REPO/'tests'/'cache'):
+            with self.assertRaises(ValueError):
+                rendered.cache_dir(inside)
+
+    def test_summary_records_whether_the_product_baseline_was_cached(self):
+        prod = product()
+        self.assertIs(rendered.product_summary(prod)['baselineCached'], False)
+        prod['diagnostics'] = {'baselineCached': 'yes'}
+        self.assertIs(rendered.product_summary(prod)['baselineCached'], False)
+        prod['diagnostics'] = {'baselineCached': True}
+        summary = rendered.product_summary(prod)
+        self.assertIs(summary['baselineCached'], True)
+        self.assertEqual(summary['reasons'], ['cNotQualified', 'experimental'])
+        self.assertEqual(summary['stageC'], 'completed')
 
 
 FLOUR = rendered.load_spec({'name': 'flour', 'expand': True, 'allowProductMismatch': True, 'rows': [

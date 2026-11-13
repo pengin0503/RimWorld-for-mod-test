@@ -1,0 +1,217 @@
+{
+ "name": "flour-vce-bake",
+ "expand": true,
+ "allowProductMismatch": true,
+ "rows": [
+  {
+   "recipe": "VCE_CookBakeSimple",
+   "thing": "VCE_Flour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeSimple",
+   "thing": "PFA_RiceFlour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeSimple",
+   "thing": "PFA_Cornmeal",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeSimple",
+   "thing": "RawCorn",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeSimple",
+   "thing": "Hay",
+   "visible": false,
+   "allowed": false
+  },
+  {
+   "recipe": "VCE_CookBakeSimpleBulk",
+   "thing": "VCE_Flour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeSimpleBulk",
+   "thing": "PFA_RiceFlour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeSimpleBulk",
+   "thing": "PFA_Cornmeal",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeSimpleBulk",
+   "thing": "RawCorn",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeSimpleBulk",
+   "thing": "Hay",
+   "visible": false,
+   "allowed": false
+  },
+  {
+   "recipe": "VCE_CookBakeFine",
+   "thing": "VCE_Flour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeFine",
+   "thing": "PFA_RiceFlour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeFine",
+   "thing": "PFA_Cornmeal",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeFine",
+   "thing": "RawCorn",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeFine",
+   "thing": "Hay",
+   "visible": false,
+   "allowed": false
+  },
+  {
+   "recipe": "VCE_CookBakeFineBulk",
+   "thing": "VCE_Flour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeFineBulk",
+   "thing": "PFA_RiceFlour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeFineBulk",
+   "thing": "PFA_Cornmeal",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeFineBulk",
+   "thing": "RawCorn",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeFineBulk",
+   "thing": "Hay",
+   "visible": false,
+   "allowed": false
+  },
+  {
+   "recipe": "VCE_CookBakeLavish",
+   "thing": "VCE_Flour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeLavish",
+   "thing": "PFA_RiceFlour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeLavish",
+   "thing": "PFA_Cornmeal",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeLavish",
+   "thing": "RawCorn",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeLavish",
+   "thing": "Hay",
+   "visible": false,
+   "allowed": false
+  },
+  {
+   "recipe": "VCE_CookBakeLavishBulk",
+   "thing": "VCE_Flour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeLavishBulk",
+   "thing": "PFA_RiceFlour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeLavishBulk",
+   "thing": "PFA_Cornmeal",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeLavishBulk",
+   "thing": "RawCorn",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeLavishBulk",
+   "thing": "Hay",
+   "visible": false,
+   "allowed": false
+  },
+  {
+   "recipe": "VCE_CookBakeGourmet",
+   "thing": "VCE_Flour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeGourmet",
+   "thing": "PFA_RiceFlour",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeGourmet",
+   "thing": "PFA_Cornmeal",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeGourmet",
+   "thing": "RawCorn",
+   "visible": true,
+   "allowed": true
+  },
+  {
+   "recipe": "VCE_CookBakeGourmet",
+   "thing": "Hay",
+   "visible": false,
+   "allowed": false
+  }
+ ]
+}

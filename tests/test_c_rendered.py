@@ -169,5 +169,136 @@ class RenderedComparisonTests(unittest.TestCase):
             rendered.main(['--snapshot', '/nonexistent', '--out', str(REPO/'private-out'), '--harmony-dll', '/nonexistent'])
 
 
+FLOUR = rendered.load_spec({'name': 'flour', 'expand': True, 'allowProductMismatch': True, 'rows': [
+    {'recipe': 'VCE_CookBakeSimple', 'thing': 'VCE_Flour', 'visible': True, 'allowed': True},
+    {'recipe': 'VCE_CookBakeSimple', 'thing': 'Hay', 'visible': False, 'allowed': False}]})
+
+
+def expanded_case(listed, initially=(), allowed=None):
+    c = case('VCE_CookBakeSimple', listed, allowed or {'VCE_Flour': True, 'Hay': False})
+    c['listed'] = {t: ([7, 8] if t in listed else []) for t in FLOUR['things']}
+    c.update(expanded=True, restored=True, openedCategories=['PlantMatter', 'ResourcesRaw'], categories=['PlantMatter'])
+    c['initial'] = {'pane': {'7': 4, '8': 4}, 'ui': 8, 'listing': 8, 'paneRepaints': 4, 'rowCount': len(initially),
+                    'listed': {t: ([7, 8] if t in initially else []) for t in FLOUR['things']}, 'categories': []}
+    return c
+
+
+def flour_observer(c=None):
+    obs = observer()
+    obs['rows'][0].update(expand=True, cases=[c or expanded_case({'VCE_Flour'})])
+    return obs
+
+
+def flour_product(visible=True, mismatch=False):
+    prod = product()
+    prod['checks']['billIngredients'] = [
+        {'expected': {'recipe': r, 'thing': t, 'visible': v, 'allowed': a},
+         'actual': {'visible': (visible if t == 'VCE_Flour' else v), 'allowed': a},
+         'outcome': 'mismatch' if (mismatch and t == 'VCE_Flour') else 'match'} for r, t, v, a in FLOUR['rows']]
+    if mismatch:
+        prod['stages']['C']['status'] = 'failed'
+        prod['reasons'].append({'code': 'billIngredientMismatch'})
+    return prod
+
+
+class RealModSpecTests(unittest.TestCase):
+    def evaluate(self, prod, obs, spec=FLOUR, ctrl=None):
+        rows = rendered.compare(prod['checks']['billIngredients'], obs, spec)
+        return rows, rendered.gate(prod, ctrl or control(), obs, rows, spec)
+
+    def test_expanded_listing_is_compared_and_default_state_only_recorded(self):
+        rows, result = self.evaluate(flour_product(), flour_observer())
+        self.assertTrue(result['agreement'], result)
+        self.assertIs(result['qualified'], False)
+        flour = next(r for r in rows if r['thing'] == 'VCE_Flour')
+        self.assertIs(flour['officialListedOnRepaint'], True)
+        self.assertIs(flour['officialListedInitially'], False)
+
+    def test_buggy_version_agrees_when_both_sides_hide_the_flour(self):
+        obs = flour_observer(expanded_case(set()))
+        rows, result = self.evaluate(flour_product(visible=False, mismatch=True), obs)
+        self.assertTrue(result['agreement'], result)
+        self.assertIs(next(r for r in rows if r['thing'] == 'VCE_Flour')['productOutcome'], 'mismatch')
+
+    def test_product_and_dialog_disagree_in_either_direction(self):
+        for prod_visible, listed in ((True, set()), (False, {'VCE_Flour'})):
+            _, result = self.evaluate(flour_product(visible=prod_visible, mismatch=not prod_visible),
+                                      flour_observer(expanded_case(listed)))
+            self.assertFalse(result['checks']['rowsAgree'])
+            self.assertFalse(result['agreement'])
+
+    def test_mismatch_reason_only_when_the_spec_allows_it(self):
+        _, result = self.evaluate(flour_product(visible=False, mismatch=True), flour_observer(expanded_case(set())),
+                                  spec=dict(FLOUR, allowProductMismatch=False))
+        self.assertFalse(result['checks']['productCompleted'])
+        prod = flour_product(visible=False, mismatch=True); prod['reasons'].append({'code': 'newErrors'})
+        _, result = self.evaluate(prod, flour_observer(expanded_case(set())))
+        self.assertFalse(result['checks']['productCompleted'])
+        prod = flour_product(); prod['stages']['C']['status'] = 'failed'
+        _, result = self.evaluate(prod, flour_observer())
+        self.assertFalse(result['checks']['productCompleted'])
+        prod = flour_product(); prod['reasons'].append({'code': 'billIngredientMismatch'})
+        _, result = self.evaluate(prod, flour_observer(), spec=dict(FLOUR, allowProductMismatch=False))
+        self.assertFalse(result['checks']['productCompleted'])
+
+    def test_expansion_must_happen_and_be_undone(self):
+        for mutate in (lambda c: c.update(expanded=False), lambda c: c.update(restored=False),
+                       lambda c: c.update(initial=None), lambda c: c['initial'].update(paneRepaints=1),
+                       lambda c: c.pop('openedCategories')):
+            c = expanded_case({'VCE_Flour'}); mutate(c)
+            rows, result = self.evaluate(flour_product(), flour_observer(c))
+            self.assertFalse(result['checks']['dialogsDrawn'])
+            self.assertFalse(any(r['officialObserved'] for r in rows))
+        obs = flour_observer(); obs['rows'][0]['expand'] = False
+        _, result = self.evaluate(flour_product(), obs)
+        self.assertFalse(result['checks']['dialogsDrawn'])
+        # An expanded trace is not an observation for a default-state spec either.
+        _, result = self.evaluate(flour_product(), flour_observer(), spec=dict(FLOUR, expand=False))
+        self.assertFalse(result['checks']['dialogsDrawn'])
+
+    def test_other_diagnostics_must_be_identical_to_the_control(self):
+        obs, ctrl = flour_observer(), control()
+        for run in (obs, ctrl):
+            run['errors'].append('[VEF] some MOD warning')
+        _, result = self.evaluate(flour_product(), obs, ctrl=ctrl)
+        self.assertTrue(result['checks']['diagnosticsMatchControl'])
+        ctrl['errors'][-1] = '[VEF] another MOD warning'
+        _, result = self.evaluate(flour_product(), obs, ctrl=ctrl)
+        self.assertFalse(result['checks']['diagnosticsMatchControl'])
+
+    def test_spec_validation(self):
+        good = {'recipe': 'R', 'thing': 'T', 'visible': True, 'allowed': False}
+        for bad in ({}, {'rows': []}, {'rows': [dict(good, visible=1)]}, {'rows': [dict(good, recipe='a b')]},
+                    {'rows': [good, good]}, {'rows': [good], 'expand': 'yes'}, {'rows': [good], 'extra': 1},
+                    {'rows': [dict(good, note='x')]}, {'name': 'a/b', 'rows': [good]}):
+            with self.assertRaises(ValueError):
+                rendered.load_spec(bad)
+        spec = rendered.load_spec({'rows': [good, dict(good, thing='U'), dict(good, recipe='Q')]})
+        self.assertEqual(spec['recipes'], ('R', 'Q'))
+        self.assertEqual(spec['things'], ('T', 'U'))
+        self.assertEqual(rendered.FIXTURE_SPEC['rows'], rendered.ROWS)
+        self.assertIn('<expand>true</expand><openMask>4</openMask>', rendered.config(True, ('R',), ('T',), True))
+
+    def test_real_request_puts_the_observer_after_harmony(self):
+        base = {'official': ['Core'], 'language': 'English', 'mods': [
+            {'path': '/p/h', 'packageId': 'brrainz.harmony', 'target': False},
+            {'path': '/p/v', 'packageId': 'OskarPotocki.VanillaFactionsExpanded.Core', 'target': False},
+            {'path': '/p/f', 'packageId': 'pengin0503.vce.flouralternatives', 'target': True}]}
+        request = rendered.real_request(base, Path('/p/o'), FLOUR)
+        self.assertEqual([m['path'] for m in request['mods']], ['/p/h', '/p/o', '/p/v', '/p/f'])
+        self.assertEqual(request['mods'][1], {'path': '/p/o', 'target': False})
+        self.assertEqual(request['levels'], ['A', 'C'])
+        self.assertEqual(len(request['expectations']['billIngredients']), 2)
+        self.assertEqual(request['official'], ['Core'])
+        for broken in ({'mods': base['mods'][1:]}, {'mods': [dict(m, target=False) for m in base['mods']]},
+                       {'mods': base['mods'] + [{'path': '/x', 'packageId': 'rwmodtest.crendered'}]}, {}):
+            with self.assertRaises(ValueError):
+                rendered.real_request(broken, Path('/p/o'), FLOUR)
+        about = rendered.observer_about('brrainz.harmony')
+        self.assertIn('<loadAfter><li>brrainz.harmony</li></loadAfter>', about)
+        with self.assertRaises(ValueError):
+            rendered.observer_about('someone.else')
+
+
 if __name__ == '__main__':
     unittest.main()

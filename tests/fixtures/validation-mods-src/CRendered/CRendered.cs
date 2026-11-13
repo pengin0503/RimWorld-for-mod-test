@@ -13,11 +13,16 @@ namespace RWMT.CRendered
     // It opens the real bill dialog through the real WindowStack while the official process
     // sits at the Entry state, and records which ingredient rows the dialog's own code listed
     // during the real OnGUI passes that the engine delivers. It never synthesizes input
-    // events, never calls the ingredient pane directly, never replaces a visibility predicate,
-    // never changes tree open state and never starts or ticks a game.
+    // events, never calls the ingredient pane directly, never replaces a visibility predicate
+    // and never starts or ticks a game. With `expand`, after a default-state stage it opens the
+    // category paths of the configured things with the game's own TreeNode.SetOpen (the only
+    // state change the tree's expand button makes), records a second stage, and closes those
+    // nodes again before the next dialog.
     public class ConfigDef : Def
     {
         public bool official;
+        public bool expand;
+        public int openMask = 4;
         public List<string> recipes = new List<string>();
         public List<string> things = new List<string>();
     }
@@ -45,7 +50,22 @@ namespace RWMT.CRendered
             var row = AccessTools.Method(typeof(Listing_TreeThingFilter), "DoThingDef", new[] { typeof(ThingDef), typeof(int), typeof(Map) });
             if (row == null) throw new MissingMethodException("Listing_TreeThingFilter.DoThingDef(ThingDef,int,Map)");
             harmony.Patch(row, prefix: new HarmonyMethod(typeof(Observer), nameof(Observer.RowPrefix)));
+            var category = AccessTools.Method(typeof(Listing_TreeThingFilter), "DoCategory",
+                new[] { typeof(TreeNode_ThingCategory), typeof(int), typeof(int), typeof(Map), typeof(bool) });
+            if (category == null) throw new MissingMethodException("Listing_TreeThingFilter.DoCategory(TreeNode_ThingCategory,int,int,Map,bool)");
+            harmony.Patch(category, prefix: new HarmonyMethod(typeof(Observer), nameof(Observer.CategoryPrefix)));
         }
+    }
+
+    // What the dialog drew during one stage of one case.
+    internal sealed class StageRecord
+    {
+        public readonly SortedDictionary<int, int> contents = new SortedDictionary<int, int>();
+        public readonly SortedDictionary<int, int> pane = new SortedDictionary<int, int>();
+        public int ui, listing, paneRepaints;
+        public readonly SortedDictionary<string, SortedSet<int>> listed = new SortedDictionary<string, SortedSet<int>>();
+        public readonly HashSet<string> anyRow = new HashSet<string>();
+        public readonly SortedSet<string> categories = new SortedSet<string>();
     }
 
     internal sealed class CaseRecord
@@ -54,11 +74,10 @@ namespace RWMT.CRendered
         public string setup = "notStarted";
         public bool opened, openedOnMainThread, freshGameKept = true;
         public int openEventType = -1, windowsBeforeOpen, otherDialogsBeforeOpen, repaintsWhileOpen;
-        public readonly SortedDictionary<int, int> contents = new SortedDictionary<int, int>();
-        public readonly SortedDictionary<int, int> pane = new SortedDictionary<int, int>();
-        public int ui, listing, paneRepaints;
-        public readonly SortedDictionary<string, SortedSet<int>> listed = new SortedDictionary<string, SortedSet<int>>();
-        public readonly HashSet<string> anyRow = new HashSet<string>();
+        public readonly StageRecord initial = new StageRecord(), compared = new StageRecord();
+        public StageRecord stage;
+        public bool expanded, restored;
+        public readonly List<string> openedCategories = new List<string>();
         public readonly SortedDictionary<string, bool> allowed = new SortedDictionary<string, bool>();
         public bool exception, removed;
         public string exceptionKind = "none";
@@ -67,9 +86,10 @@ namespace RWMT.CRendered
     public static class Observer
     {
         private const int Repaint = 7;
-        private const int IdleRepaintsBeforeOpen = 30, RepaintsPerCase = 3, MaxRepaintsPerCase = 600, MaxRepaints = 20000;
-        // Keep each dialog on screen long enough for the private external screen capture.
-        private const double MinOpenSeconds = 6, MaxOpenSeconds = 120;
+        private const int IdleRepaintsBeforeOpen = 30, RepaintsPerStage = 3, MaxRepaintsPerCase = 900, MaxRepaints = 40000;
+        // Keep each stage on screen long enough for the private external screen capture.
+        private const double MinInitialSeconds = 4, MinComparedSeconds = 6, MaxOpenSeconds = 150;
+        private const int MaxRecorded = 20000;
         private static readonly System.Diagnostics.Stopwatch openClock = new System.Diagnostics.Stopwatch();
         private static readonly PropertyInfo CurrentEvent = AccessTools.Property(AccessTools.TypeByName("UnityEngine.Event"), "current");
         private static PropertyInfo eventType;
@@ -79,6 +99,7 @@ namespace RWMT.CRendered
         // it was removed. Keep the fresh Game current until such passes are over, and count them.
         private const int DrainRepaints = 5;
         private static readonly HashSet<Dialog_BillConfig> closed = new HashSet<Dialog_BillConfig>();
+        private static readonly List<TreeNode> openedNodes = new List<TreeNode>();
         private static Game previousGame, freshGame;
         private static Dialog_BillConfig dialog;
         private static Bill_Production bill;
@@ -128,12 +149,49 @@ namespace RWMT.CRendered
             }
             current.repaintsWhileOpen++;
             if (!ReferenceEquals(Current.Game, freshGame)) current.freshGameKept = false;
-            bool enough = current.paneRepaints >= RepaintsPerCase && openClock.Elapsed.TotalSeconds >= MinOpenSeconds;
-            if (enough || current.exception || ++openRepaints > MaxRepaintsPerCase || openClock.Elapsed.TotalSeconds > MaxOpenSeconds)
+            double seconds = openClock.Elapsed.TotalSeconds;
+            bool limit = current.exception || ++openRepaints > MaxRepaintsPerCase || seconds > MaxOpenSeconds;
+            if (!limit && ReferenceEquals(current.stage, current.initial))
+            {
+                if (current.initial.paneRepaints >= RepaintsPerStage && seconds >= MinInitialSeconds) Expand(config);
+                return;
+            }
+            if (limit || (current.compared.paneRepaints >= RepaintsPerStage && seconds >= MinComparedSeconds))
             {
                 CloseCurrent(config);
                 OpenNext(config);
             }
+        }
+
+        // The game's own expand-button effect for every category on the configured things' paths.
+        private static void Expand(ConfigDef config)
+        {
+            var seen = new HashSet<ThingCategoryDef>();
+            foreach (string name in config.things)
+            {
+                ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(name);
+                if (def?.thingCategories == null) continue;
+                foreach (ThingCategoryDef start in def.thingCategories)
+                    for (ThingCategoryDef cat = start; cat != null && seen.Add(cat); cat = cat.parent)
+                    {
+                        TreeNode node = cat.treeNode;
+                        if (node == null || node.IsOpen(config.openMask)) continue;
+                        node.SetOpen(config.openMask, true);
+                        openedNodes.Add(node);
+                        current.openedCategories.Add(cat.defName);
+                    }
+            }
+            current.openedCategories.Sort(StringComparer.Ordinal);
+            current.expanded = true;
+            current.stage = current.compared;
+            openClock.Restart();
+        }
+
+        private static void RestoreTree(ConfigDef config)
+        {
+            foreach (TreeNode node in openedNodes) node.SetOpen(config.openMask, false);
+            if (current != null) current.restored = openedNodes.All(n => !n.IsOpen(config.openMask));
+            openedNodes.Clear();
         }
 
         private static void OpenNext(ConfigDef config)
@@ -141,6 +199,7 @@ namespace RWMT.CRendered
             while (recipeIndex < config.recipes.Count)
             {
                 current = new CaseRecord { recipe = config.recipes[recipeIndex] };
+                current.stage = config.expand ? current.initial : current.compared;
                 RecipeDef recipe = DefDatabase<RecipeDef>.GetNamedSilentFail(current.recipe);
                 if (recipe == null) { current.setup = "defMissing"; done.Add(current); recipeIndex++; continue; }
                 try
@@ -182,31 +241,45 @@ namespace RWMT.CRendered
             }
             current.removed = Find.WindowStack.TryRemove(dialog, doCloseSound: false);
             closed.Add(dialog);
+            RestoreTree(config);
             done.Add(current);
             dialog = null; bill = null; current = null; inPane = false;
             recipeIndex++;
         }
 
+        private static object Stage(StageRecord s, ConfigDef config) => new
+        {
+            contents = s.contents.ToDictionary(p => p.Key.ToString(), p => p.Value),
+            pane = s.pane.ToDictionary(p => p.Key.ToString(), p => p.Value),
+            s.ui, s.listing, s.paneRepaints, rowCount = s.anyRow.Count,
+            listed = config.things.ToDictionary(t => t, t => s.listed.TryGetValue(t, out var types) ? types.ToArray() : new int[0]),
+            categories = s.categories.ToArray(),
+        };
+
         private static void Finish(string stop)
         {
             if (phase == 2) return;
             phase = 2;
+            ConfigDef config = Config;
             if (current != null && !done.Contains(current)) done.Add(current);
             if (dialog != null) Find.WindowStack.TryRemove(dialog, doCloseSound: false);
+            RestoreTree(config);
             if (freshGame != null) Current.Game = previousGame;
-            ConfigDef config = Config;
             var cases = done.Select(c => new
             {
                 c.recipe, c.setup, c.opened, c.openedOnMainThread, c.openEventType, c.windowsBeforeOpen,
                 c.otherDialogsBeforeOpen, c.repaintsWhileOpen, c.freshGameKept, c.removed,
-                contents = c.contents.ToDictionary(p => p.Key.ToString(), p => p.Value),
-                pane = c.pane.ToDictionary(p => p.Key.ToString(), p => p.Value),
-                c.ui, c.listing, c.paneRepaints, rowCount = c.anyRow.Count,
-                listed = config.things.ToDictionary(t => t, t => c.listed.TryGetValue(t, out var types) ? types.ToArray() : new int[0]),
+                contents = c.compared.contents.ToDictionary(p => p.Key.ToString(), p => p.Value),
+                pane = c.compared.pane.ToDictionary(p => p.Key.ToString(), p => p.Value),
+                c.compared.ui, c.compared.listing, c.compared.paneRepaints, rowCount = c.compared.anyRow.Count,
+                listed = config.things.ToDictionary(t => t, t => c.compared.listed.TryGetValue(t, out var types) ? types.ToArray() : new int[0]),
+                categories = c.compared.categories.ToArray(),
                 allowed = c.allowed, c.exception, c.exceptionKind,
+                c.expanded, c.restored, openedCategories = c.openedCategories.ToArray(),
+                initial = config.expand ? Stage(c.initial, config) : null,
             }).ToList();
             Log.Message("[RWMT-RENDERED] " + JsonSerializer.Serialize(new { phase = "rendered", stop = stop ?? "none", totalRepaints,
-                drainRepaints, lateContents, cases }));
+                drainRepaints, lateContents, expand = config.expand, openMask = config.openMask, cases }));
             AccessTools.Method(AccessTools.TypeByName("UnityEngine.Application"), "Quit", Type.EmptyTypes).Invoke(null, null);
         }
 
@@ -221,7 +294,7 @@ namespace RWMT.CRendered
         public static void ContentsPrefix(Dialog_BillConfig __instance)
         {
             if (closed.Contains(__instance)) lateContents++;
-            else if (current != null && ReferenceEquals(__instance, dialog)) Count(current.contents, EventType());
+            else if (current != null && ReferenceEquals(__instance, dialog)) Count(current.stage.contents, EventType());
         }
 
         public static void PanePrefix(Dialog_BillConfig __instance)
@@ -229,8 +302,8 @@ namespace RWMT.CRendered
             if (current == null || !ReferenceEquals(__instance, dialog)) return;
             inPane = true;
             int type = EventType();
-            Count(current.pane, type);
-            if (type == Repaint) current.paneRepaints++;
+            Count(current.stage.pane, type);
+            if (type == Repaint) current.stage.paneRepaints++;
         }
 
         public static Exception PaneFinalizer(Dialog_BillConfig __instance, Exception __exception)
@@ -248,16 +321,27 @@ namespace RWMT.CRendered
             return __exception;
         }
 
-        public static void UiPrefix() { if (inPane) current.ui++; }
-        public static void ListingPrefix() { if (inPane) current.listing++; }
+        public static void UiPrefix() { if (inPane) current.stage.ui++; }
+        public static void ListingPrefix() { if (inPane) current.stage.listing++; }
 
         public static void RowPrefix(object[] __args)
         {
             if (!inPane || __args.Length == 0 || !(__args[0] is ThingDef def)) return;
-            if (current.anyRow.Count < 20000) current.anyRow.Add(def.defName);
-            if (!current.listed.TryGetValue(def.defName, out SortedSet<int> types))
-                current.listed[def.defName] = types = new SortedSet<int>();
+            StageRecord s = current.stage;
+            if (s.anyRow.Count < MaxRecorded) s.anyRow.Add(def.defName);
+            if (!s.listed.TryGetValue(def.defName, out SortedSet<int> types))
+            {
+                if (s.listed.Count >= MaxRecorded) return;
+                s.listed[def.defName] = types = new SortedSet<int>();
+            }
             types.Add(EventType());
+        }
+
+        // Categories the dialog's own code reached (drawn as a row) during a Repaint pass.
+        public static void CategoryPrefix(object[] __args)
+        {
+            if (!inPane || __args.Length == 0 || !(__args[0] is TreeNode_ThingCategory node) || EventType() != Repaint) return;
+            if (current.stage.categories.Count < MaxRecorded) current.stage.categories.Add(node.catDef.defName);
         }
     }
 }

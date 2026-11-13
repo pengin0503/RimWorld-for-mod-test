@@ -1,1 +1,1 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><AssemblyName>RWMT.CRendered</AssemblyName><UsesHarmony>true</UsesHarmony></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><AssemblyName>RWMT.CRendered</AssemblyName><UsesHarmony>true</UsesHarmony><!-- Keep the DLL and PDB identical across commits that do not change them: the product's baseline cache key includes their hashes. --><IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion><EnableSourceLink>false</EnableSourceLink></PropertyGroup></Project>

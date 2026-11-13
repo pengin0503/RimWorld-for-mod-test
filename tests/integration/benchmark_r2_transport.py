@@ -57,10 +57,10 @@ def benchmark(root, endpoint):
         dest = root / f'trial-{trial}'
         if dest.exists():
             raise ra.AssetError('benchmark requires fresh destinations')
-        started = time.monotonic()
+        started = time.perf_counter()  # monotonic() ticks every 15.6 ms on Windows before Python 3.13
         with ra.R2(endpoint=endpoint, bucket='rimworld-17', transport=mode) as client:
             counts = cw._download(client, PREFIX, dest, items)
-        elapsed = time.monotonic() - started
+        elapsed = time.perf_counter() - started
         if counts != {'downloaded': 32, 'cached': 0}:
             raise ra.AssetError('cached input contaminated the benchmark')
         hashes = [hashlib.sha256((dest / i['key'][len(PREFIX):]).read_bytes()).hexdigest() for i in items]

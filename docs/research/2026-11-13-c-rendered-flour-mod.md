@@ -1,0 +1,89 @@
+# C材料：小麦粉MODを描画ありの公式画面と比較（研究）
+
+2026-11-13。[比較設計](../superpowers/specs/2026-11-13-c-rendered-real-mod-design.md)に従い、ユーザー自作の小麦粉MOD（[rimworld-VCE-Flour-Patch](https://github.com/pengin0503/rimworld-VCE-Flour-Patch)）の3版で、製品の非描画C（`bill-ingredient-options.v1`）の答えと、描画ありの公式processで実際の製造指示ダイアログが列挙した行を並べた。方式は[描画ありの公式processの研究](2026-11-13-c-rendered-dialog.md)と同じで、C材料の参照に限ってユーザーが許可したもの（条件はAGENTS.md）。開発用の比較であり、C資格・cache・製品の判定式は変えていない。
+
+結論：**3版とも、35行すべてで製品と公式の実画面が一致した（`agreement: true`、全ゲート条件true）。** 版ごとに3回ずつ実行した。行・許可状態・開いた分類・辿った分類・診断は毎回同じで、違ったのは描画回数と秒数だけだった。各段階は秒数で区切るため、描画回数は実行ごとに変わる（paneのRepaintは展開前20〜22回、展開後29〜32回）。
+
+- 不具合版：粉3種は製品でも公式でも出ない。
+- v0.1.0とmain：粉3種は製品でも公式でも出る。
+- 対照の2品目（トウモロコシ・干し草）は、3版とも両側で同じ。
+
+10月26日の[実MOD記録](2026-10-26-flour-mod-c-run.md)で、製品が不具合版を検出し、修正版を検出しないことを確かめていた。今回は、その結論を同じビルド・同じ条件の実画面で裏づけたことになる。
+
+## 構成
+
+- Linux、RimWorld 1.7.4985 rev1269、Coreのみ、English、DLCなし。私有の仮想画面（Xvfb）とCPU描画（lavapipe）を使用。
+- 依存MODは索引（2026-10-26版のZIP）で名前とIDを照合し、`codex_workflow.py fetch-mods`（R2はSDK経路）で必要分だけ取得した。
+
+| MOD | Workshop ID | 取得 | 読込フォルダ |
+|---|---|---|---|
+| Harmony | 2009463077 | 4ファイル・2,549,516 bytes | `1.7`、root |
+| Vanilla Expanded Framework | 2023507013 | 204ファイル・4,271,285 bytes | `1.7`、root |
+| Vanilla Cooking Expanded | 2134308519 | 345ファイル・2,880,144 bytes | `1.6`、root（R2の版に1.7フォルダなし。`loadFolders.xml` の1.7指定どおり） |
+
+  2版目以降は取得済みのファイルを再利用し、新規取得は0件。
+- 小麦粉MODは索引・R2にないユーザー自作MODなので、公開リポジトリを読み取り専用で取得した。各版をMOD自身のcsprojで `dotnet build Source/VCEFlourAlternatives.csproj -c Release -p:RimWorldVersion=1.7` としてビルドし（警告0）、配布と同じ構成に並べて `--local-target` で使った。
+
+| 版 | コミット | DLL SHA-256（先頭12桁） |
+|---|---|---|
+| 不具合版 | `28cb8e5` | `0cbeca6b1952` |
+| v0.1.0 | `54767b2` | `6da471785284` |
+| main（v0.3.0） | `20d4ae9` | `d93901140972` |
+
+  10月26日の記録とはDLLのハッシュが異なる（同じコミットの2版とも）。ビルド環境の違いによると考えられるが、原因は調べていない。
+- 読込順：Core、Harmony、観測fixture、VEF、VCE、小麦粉MOD。製品の実ロード順は計画と一致した。観測fixtureはWorkshop版Harmonyの `0Harmony.dll` に対してビルドし、製品側では動かない設定にした。
+- 比較仕様：[flour-vce-bake.json](../../experiments/official-comparison/specs/flour-vce-bake.json)。VCEの焼き料理7レシピ×5品目（`VCE_Flour`、`PFA_RiceFlour`、`PFA_Cornmeal`、`RawCorn`、`Hay`）の35行。`expand: true`、`allowProductMismatch: true`。期待値は「あるべき姿」（粉3種と `RawCorn` は表示・許可、`Hay` は非表示・不許可）。
+
+## 結果
+
+| 版 | 製品のC | 粉3種（製品 / 公式・展開後） | RawCorn | Hay | 一致 |
+|---|---|---|---|---|---|
+| 不具合版 | failed（`billIngredientMismatch`） | 非表示 / 列挙なし（21行） | 表示 / 列挙 | 非表示 / 列挙なし | 35/35 |
+| v0.1.0 | completed | 表示 / 列挙（21行） | 表示 / 列挙 | 非表示 / 列挙なし | 35/35 |
+| main | completed | 表示 / 列挙（21行） | 表示 / 列挙 | 非表示 / 列挙なし | 35/35 |
+
+- 許可状態は3版とも、粉3種・`RawCorn` がtrue、`Hay` がfalseで、両側一致。
+- 不具合版の製品の理由は、粉21行すべてで `categoryNotVisible`・`specialFilterDisallows`・`itemNotVisible` だった（10月26日と同じ）。製品の新規診断・翻訳エラーは0。
+- 公式の観測は、全ダイアログが開き、メインスレッド上でfresh Gameを保ったまま描画した。各段階でpaneのRepaintが3回以上、例外0。閉じた後に開閉状態を元へ戻した。
+- 診断（ERROR/WARN）は3版とも、ダイアログを開かない対照と完全に同じだった（Steam 2、GLFW Wayland 2、UnityData 1、GpuProbe 1。その他0）。VEF・VCE・小麦粉MODによるERROR/WARNは、公式のログにも出ていない。
+- 所要時間（9回）：製品は19〜21秒、公式の対照は35〜41秒、観測は107〜109秒。
+
+### 既定の開閉状態と展開
+
+| 版 | 既定状態で列挙された対象行 | 展開した分類 | 展開後にダイアログが辿った分類（抜粋） | 展開後の行数 |
+|---|---|---|---|---|
+| 不具合版 | 0 / 35 | FoodRaw、PlantFoodRaw、PlantMatter、ResourcesRaw、Root | Foods、FoodRaw、PlantFoodRaw（ResourcesRawは辿られない） | 8 |
+| v0.1.0・main | 0 / 35 | 上記＋PFA_GrainFlour | 上記＋ResourcesRaw、PlantMatter、PFA_GrainFlour | 11 |
+
+- 設計で静的に読んだとおり、既定状態では3版とも対象の行は1つも列挙されなかった（トウモロコシも含む）。既定で辿られたのは、Foods・FoodMeals・FoodRaw（修正版ではさらにResourcesRaw、Gourmetではさらに `VCE_Condiments`）の分類行だけで、物の行は0だった。展開しない観測では版を区別できない。
+- 不具合版では展開しても、「生の資源」（ResourcesRaw）の分類自体がダイアログのコードで辿られなかった。中に見える物がないため、分類が表示されないことによる。製品の `categoryNotVisible` と同じ向きである。
+- 私有スクリーンショットでも、展開後の不具合版には「Raw resources」の分類がなく、修正版にはある。粉の行はその分類の下、スクロールしないと見えない位置にある。この研究の「列挙」は、ダイアログのコードがその行を辿ったこと（スクロールで見える行を含む）を指す。製品の「表示候補」も同じ意味である。
+
+### fixtureでの回帰確認
+
+一般化したスクリプトで、自作fixtureの4行を展開なし・展開ありの2通りで実行した。どちらも従来どおり4行が一致し、診断は対照と同じだった。展開ありの場合、開いた分類はFoodRaw・PlantFoodRaw・Rootで、列挙される行は変わらなかった（fixtureの物は表示ルートの直下にあるため）。合成データの単体試験は21件、リポジトリ全体では525件が通過した（AWS系の環境変数を外した場合。外さないと、mainでも失敗する既知の2件が落ちる）。
+
+## 分かったことと限界
+
+- 製品の非描画Cは、この3版・35行について、実際の製造指示ダイアログと同じ答えを返した。不具合の有無で答えが分かれる行（粉21行）と、分かれない対照行（14行）の両方を含む。
+- **これはC資格ではない。** 資格には、独立process 3回・期待値の変異・対象の不在など、別途の条件と判断が必要。
+- 範囲はCore・English・DLCなしのLinux、新規Billの材料欄だけ。既存セーブのBill、製粉レシピ、実際の調理、日本語表示、DLC有効時（Ideologyでは静的に例外が読める）は確かめていない。
+- 展開は、ゲーム自身の `TreeNode.SetOpen(4, true)` を対象の分類の祖先に呼ぶことで行った。開閉ボタンを押したときと同じ状態変化だが、入力イベントそのものではない。
+- VCEはR2の版（1.6フォルダ）を使った。Workshopの最新版とは異なる可能性がある。
+
+## 再現
+
+ゲームの準備とWorkerのビルドの後、私有領域で次を行う。
+
+1. 依存MODと小麦粉MODのビルドを用意し、`fetch-mods --local-target` で版ごとの `request.json` を作る。
+2. 次を実行する。
+
+```
+python3 experiments/official-comparison/probe_c_rendered.py \
+  --snapshot "$RWMT_PRIVATE/game-snapshot" --out "$RWMT_PRIVATE/runs/flour-main" \
+  --harmony-dll <Harmony MODの1.7/Assemblies/0Harmony.dll> \
+  --spec experiments/official-comparison/specs/flour-vce-bake.json \
+  --request <版ごとのrequest.json>
+```
+
+スクリプトは、製品と公式processへ渡す前に、R2・AWSの資格情報を自分の環境変数から除く。

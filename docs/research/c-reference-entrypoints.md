@@ -1,5 +1,7 @@
 # C0：独立参照経路の確認状況
 
+> **2026-11-13 描画ありの研究:** [描画ありの公式process](2026-11-13-c-rendered-dialog.md)（私有の仮想画面・CPU描画、入力なし・自動終了）で、材料は実際の `Dialog_BillConfig` を実WindowStackから開き、実Repaint/Layoutでダイアログ自身が列挙した行を記録できた。fixture 4行は製品と一致し、診断はダイアログを開かない対照と同一。開発用比較で、資格は変更していない。この方式はC材料の参照に限りユーザーが許可した（2026-11-13、AGENTS.mdに条件を記載）。同日、[小麦粉MODの3版](2026-11-13-c-rendered-flour-mod.md)でも35行すべてで製品と一致した（対象の分類をゲーム自身の開閉処理で展開して比較）。イベントは対象外。
+
 > **2026-10-30 継続調査の更新:** [継続実測](2026-10-30-c-context-continuation.md)で、材料は公式headlessに自然なGUIパス（OnGUI配信・Event.current）がないこと、イベントは公式のFinalizeInit前の自然な観測点がすべて非同期スレッド・MapInitializing中で製品の観測文脈と一致しないことを確認し、両ケースとも停止した。C0は両ケース未通過、資格は変更していない。
 
 > **2026-10-30 動的調査までの更新:** [初回動的実測](2026-10-30-c-context-first-measurement.md)で、製品と公式のqueued markerがFinalizeInitの異なる側にあることを確認。材料は[constructorの実署名と修正](2026-10-30-c-dialog-constructor.md)まで進めた。修正後の実ゲーム再実測、実UI行への到達、未分類のSteam/Texture診断の解決は次回へ持ち越す。C0は両ケース未通過、資格は変更していない。

@@ -26,6 +26,7 @@
 - C は `bill-ingredient-options.v1` と自作 fixture 限定の `event-choice.v1` を実装（Linux 非描画・experimental、適格化未完了）。新規 Bill の材料表示候補/許可状態だけを扱い、実画面や MOD 全体の合格と呼ばない。D（有限tick）はLinux対応ビルドの `bounded-tick.v1` を実装（自作fixture観測限定・experimental、独立適格化未完了）。任意の MOD のイベント/クエスト検証、Windows の描画（W3）は未実装。W2 の画面（`gui/RimWorldValidation.Gui`）はゲームの DLL を参照するので公開 CI ではビルドしない（CI はゲームを参照しない `gui/RimWorldValidation.Gui.Model` だけをテスト）。画面は判定せず、遊べる状態（メインメニュー・Game の作成・devMode・Steam）にしない。ユーザーの明示的な指示なしに範囲を広げない。
 - passed は依頼された検証範囲だけの合格。failed、blocked、incomplete を区別。静的検査や単なるロード成功を実ゲームの全機能検証と呼ばない。
 - ゲームとして遊べる機能・無期限 tick を作らない。公式 -headless -quicktest は適格化の**開発用比較**に限り使用してよい。
+- C 材料（製造指示の材料欄）の公式参照に限り、公式実行ファイルを**描画あり**（`-headless` なし）で起動してよい（ユーザー許可 2026-11-13）。条件：私有の仮想画面（Xvfb 等）だけに描画する、入力イベントを送らない、観測後に自動で終了する、ゲームの開始・tick・セーブをしない、`experiments/official-comparison/` の開発用比較からだけ起動し製品の検証フローからは起動しない、生ログ・スクリーンショットは私有領域だけに置く。手順と根拠は docs/research/2026-11-13-c-rendered-dialog.md。他の C ケースや別の用途へ広げるときは改めて確認する。
 
 ## R2・索引・秘密情報
 

@@ -1,0 +1,9 @@
+<ModMetaData>
+  <name>RWMT development rendered bill dialog observer</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <packageId>rwmodtest.crendered</packageId>
+  <description>Finite development-only research: records which ingredient rows the real bill dialog lists in a rendering official process. Does not grant qualification.</description>
+  <supportedVersions><li>1.7</li></supportedVersions>
+  <modDependencies><li><packageId>rwmodtest.harmonylib</packageId><displayName>RWMT Harmony fixture</displayName><downloadUrl>https://github.com/pengin0503/RimWorld-for-mod-test</downloadUrl></li></modDependencies>
+  <loadAfter><li>rwmodtest.harmonylib</li></loadAfter>
+</ModMetaData>

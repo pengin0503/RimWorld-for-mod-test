@@ -284,9 +284,10 @@ class RealModSpecTests(unittest.TestCase):
             {'path': '/p/h', 'packageId': 'brrainz.harmony', 'target': False},
             {'path': '/p/v', 'packageId': 'OskarPotocki.VanillaFactionsExpanded.Core', 'target': False},
             {'path': '/p/f', 'packageId': 'pengin0503.vce.flouralternatives', 'target': True}]}
-        request = rendered.real_request(base, Path('/p/o'), FLOUR)
-        self.assertEqual([m['path'] for m in request['mods']], ['/p/h', '/p/o', '/p/v', '/p/f'])
-        self.assertEqual(request['mods'][1], {'path': '/p/o', 'target': False})
+        observer = Path('/p/o')  # str() is platform-specific (backslashes on Windows)
+        request = rendered.real_request(base, observer, FLOUR)
+        self.assertEqual([m['path'] for m in request['mods']], ['/p/h', str(observer), '/p/v', '/p/f'])
+        self.assertEqual(request['mods'][1], {'path': str(observer), 'target': False})
         self.assertEqual(request['levels'], ['A', 'C'])
         self.assertEqual(len(request['expectations']['billIngredients']), 2)
         self.assertEqual(request['official'], ['Core'])

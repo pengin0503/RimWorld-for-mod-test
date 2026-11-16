@@ -4,6 +4,18 @@
     "source": "docs/contracts/mod-validation-v1.md: official Core; docs/research/test-host-qualification.md: real headless qualified comparison"
   },
   {
+    "symbol": "ludeon.rimworld.biotech",
+    "source": "docs/research/split-data-inventory.json: inspected official Linux DLC About/packageId for 1.7.4985 rev1269"
+  },
+  {
+    "symbol": "ludeon.rimworld.ideology",
+    "source": "docs/research/split-data-inventory.json: inspected official Linux DLC About/packageId for 1.7.4985 rev1269"
+  },
+  {
+    "symbol": "ludeon.rimworld.odyssey",
+    "source": "docs/research/split-data-inventory.json: inspected official Linux DLC About/packageId for 1.7.4985 rev1269"
+  },
+  {
     "symbol": "ludeon.rimworld.royalty",
     "source": "docs/contracts/mod-validation-v1.md: official Royalty; docs/research/2026-11-05-private-14985-acceptance.md: Core+Royalty S/M real-game measurements"
   }

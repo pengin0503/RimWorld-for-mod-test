@@ -11,6 +11,7 @@ RimWorld MODの読み込みや一部のゲーム処理をLinux環境で検証す
     python tools/knowledge_preflight.py validate-db
     python tools/knowledge_preflight.py query --kind method --symbol Verse.GenText.ToSpaceList
     python tools/codex_workflow.py static-preflight --mod ./MyMod
+    python tools/codex_workflow.py static-preflight --mod ./MyMod.zip
 
 **知識データは一部の実証済み項目に限定されています。** 未収録の名前は「未確認」であり「存在しない」ではありません。静的合格は実ゲームによるpassed/qualifiedを意味しません。対応範囲、機械可読出力、将来のバージョン拡張は[内蔵検証データベース](docs/knowledge-database.md)を参照してください。
 

@@ -392,8 +392,20 @@ def main(argv=None) -> int:
             result = db.query(args.kind, args.symbol)
             code = 0 if result["status"] == "present" else 3
         elif args.command == "scan":
-            result = inspect_mod(args.mod, db,
-                                 active_packages=args.active, complete_set=args.complete_set)
+            # Local ZIPs can be screened without R2 or unpacking opaque assets.
+            # The same version-pinned scanner and uncertainty rules apply.
+            if args.mod.suffix.casefold() == ".zip":
+                try:
+                    from tools import offline_mod_archive
+                except ImportError:
+                    import offline_mod_archive
+                with offline_mod_archive.stage_mod_archive(args.mod) as staged:
+                    result = inspect_mod(staged, db,
+                                         active_packages=args.active,
+                                         complete_set=args.complete_set)
+            else:
+                result = inspect_mod(args.mod, db,
+                                     active_packages=args.active, complete_set=args.complete_set)
             code = {"staticChecksPassed": 0, "staticIssuesFound": 1, "staticIncomplete": 3}[result["status"]]
         elif args.command == "check":
             result = check_requirements(args.requirements, db)

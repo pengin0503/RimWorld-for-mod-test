@@ -310,6 +310,76 @@ class KnowledgeDatabaseTests(unittest.TestCase):
         with self.assertRaises(kp.KnowledgeError):
             kp.load_database(build=BUILD, pack_dir=folder)
 
+    def test_custom_future_pack_cannot_reuse_4985_mod_loader(self):
+        """Query/check are pack-specific; scan must not claim a future loader."""
+        import shutil
+
+        mod = self.make_mod()
+        (mod / "1.7" / "Defs").mkdir(parents=True)
+        (mod / "1.7" / "Defs" / "Older.xml").write_text("<Defs/>", encoding="utf-8")
+        (mod / "1.8" / "Defs").mkdir(parents=True)
+        (mod / "1.8" / "Defs" / "Future.xml").write_text("<Defs><broken>", encoding="utf-8")
+        (mod / "LoadFolders.xml").write_text(
+            "<loadFolders>"
+            "<v1.7.4985><li>1.7</li></v1.7.4985>"
+            "<v1.7.4995><li>1.8</li></v1.7.4995>"
+            "</loadFolders>", encoding="utf-8")
+        for build, minor in (("1.7.4995 rev1300", "1.7"), ("1.8.1000 rev1", "1.8")):
+            with self.subTest(build=build):
+                pack = self.root / ("pack-" + minor.replace(".", "-"))
+                shutil.copytree(kp.DATABASE_ROOT / "1.7.4985-rev1269", pack)
+                manifest_path = pack / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["gameBuild"] = build
+                manifest["gameVersion"] = minor
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                (mod / "About" / "About.xml").write_text(
+                    "<ModMetaData><packageId>example.synthetic</packageId>"
+                    f"<supportedVersions><li>{minor}</li></supportedVersions></ModMetaData>",
+                    encoding="utf-8")
+                db = kp.load_database(build=build, pack_dir=pack)
+                self.assertEqual(db.query("type", "Verse.GenText")["status"], "present")
+                req = self.root / "requires-future.json"
+                req.write_text(json.dumps({
+                    "schemaVersion": 1, "gameBuild": build,
+                    "requires": [{"kind": "type", "symbol": "Verse.GenText"}],
+                }), encoding="utf-8")
+                self.assertEqual(kp.check_requirements(req, db)["status"], "staticChecksPassed")
+                with self.assertRaisesRegex(kp.KnowledgeError, "loader"):
+                    kp.inspect_mod(mod, db)
+                output = StringIO()
+                with redirect_stdout(output):
+                    code = kp.main([
+                        "scan", "--build", build, "--pack-dir", str(pack),
+                        "--mod", str(mod),
+                    ])
+                self.assertEqual(code, 2)
+                self.assertEqual(json.loads(output.getvalue())["status"], "blocked")
+
+    def test_invalid_active_package_is_a_blocked_request_not_a_mod_defect(self):
+        mod = self.make_mod()
+        with self.assertRaisesRegex(kp.KnowledgeError, "active package"):
+            kp.inspect_mod(mod, self.db, active_packages=("bad/package",), complete_set=True)
+        output = StringIO()
+        with redirect_stdout(output):
+            code = kp.main([
+                "scan", "--mod", str(mod), "--active", "bad/package",
+                "--complete-set",
+            ])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(output.getvalue())["status"], "blocked")
+
+    def test_exceeded_xml_scan_budget_is_incomplete_not_mod_invalidity(self):
+        mod = self.make_mod()
+        with patch.object(kp, "MAX_SCAN_XML_BYTES", 2):
+            report = kp.inspect_mod(mod, self.db)
+        self.assertEqual(report["status"], "staticIncomplete")
+        self.assertIn(
+            {"code": "xmlInputLimit", "certainty": "unknown"},
+            report["issues"],
+        )
+        self.assertFalse(report["runtimeQualified"])
+
     def test_real_cli_process_without_game_files_or_r2_credentials(self):
         """Exercise both Python script entrypoints, not only direct module imports."""
         repository = Path(__file__).resolve().parents[1]

@@ -19,6 +19,18 @@
 - `Verse.Log` は Brutal LogSystem のカテゴリ `Verse` を通り、10,000 件で記録を止める。
 - Harmony は `GenTypes` 経由で `HarmonyLib.Harmony` を名前解決する（ゲーム自身は Harmony を同梱しない。MOD が持ち込む）。
 
+### 1.7.5014 で増えた起動工程
+
+1.7.5014 rev1195（Assembly-CSharp 1.7.9819）の `Bootstrap.Initialize` は、毎フレームの処理を `OnUpdate` に足した直後に次を行う（[1.7.5014 の記録](2026-11-21-build-1.7.5014.md)）。
+
+1. `OnUpdate` にさらに `Waylith.Injection.Injection.ApplyPendingAtFrameBoundary` を足す（フレームの区切りで、保留中のフィールド注入を適用）。
+2. `RimWorldWaylith.PrepatcherCompat.Install()`：注入のログ出力先、Prepatcher 形式の属性の解釈、`HarmonyReapply`、コンポーネント注入先（`ThingWithComps.InitializeComps`、`Map`・`World`・`Game` の `FillComponents`）の登録。
+3. `UnityStubs.ModLoadingHooks.AfterAssembliesLoaded = PrepatcherCompat.ProcessModAssemblies`。`LoadedModManager` が MOD のアセンブリを読み込んだ直後に呼び、フィールド・コンポーネントの注入と free patch を MOD のアセンブリに適用する。
+
+runtimeconfig の `WaylithClr.AssemblyNameRedirects` に `0PrepatcherAPI`・`PrepatcherImpl`・`Prestarter`・`0PrepatcherDataAssembly` → `RimWorldWaylith.PrepatcherCompat` が加わり、`WaylithClr.FieldInjection=true` も加わった。Worker は互換層のアセンブリがあるビルドでだけ、この 3 工程を同じ順で行う（`GameApi.PrepatcherCompatApi`、`workerStages.engineInit.evidence.prepatcherCompat`）。1.7.4985 にはどれもない。
+
+同じビルドの headless では、`InputSystem.BeginFrame` が `PrePollEvents` からフレームの最後へ移った。Worker は 1.7.4985 の順（`PrePollEvents`）のままで、これを `deviations` に記録する。headless の環境は入力イベントを出さないので、どちらの順でも空のフレーム単位の入力状態を消すだけになる。
+
 ## Worker の手順
 
 製品の Worker（`worker/RimWorldValidation.Worker`）は公式実行ファイルを使わず、自前の apphost から同じエンジン API を呼ぶ。ゲーム型への参照はコンパイル時に持たず、`GameApi.Bind()` が全メンバーをリフレクションで事前に結び付ける。欠けていれば起動前に `adapterMismatch`（終了コード 4）。
@@ -43,6 +55,7 @@
 - DevMode を true にする。公式の `ErrorCheckAllDefs` を走らせるため。通常のプレイヤー設定より厳しい。
 - `resetModsConfigOnCrash=false`。対象が黙って外れる回復を起こさないため。
 - シェーダープリウォーム無効（公式 headless と同じ）。
+- `InputSystem.BeginFrame` を各フレームの入力処理の前に呼ぶ（1.7.4985 の順。1.7.5014 はフレームの最後。上記）。
 
 ## 省略した公式工程（結果の `skippedOfficialSteps` に毎回記録）
 

@@ -1,0 +1,91 @@
+{
+  "recordType": "rwmtBuildQualification",
+  "schemaVersion": 1,
+  "gameVersion": "1.7.5014 rev1195",
+  "buildId": "1.7.5014-rev1195",
+  "method": "automatic",
+  "identitySha256": {
+    "Assembly-CSharp.dll": "aed36980a0a6a0469432d2cd062e0917102b0019d07afc832b2c959c362273bb",
+    "RimWorld.dll": "e625a485b6a8e725116736c17be4b15cf85713d4b734f960427d5d36f5b7b453",
+    "Waylith.dll": "d5afbc0a4fb098a9f2b8f3aad63a35abe7292aee716faa976130f1ec31b46c99",
+    "UnityStubs.dll": "c41dd32121542064cc73a56316eb0e6fd34958082a08e333db28ee9bf6d3b7f2",
+    "Waylith.UnityCompat.dll": "c9d236c888b78ab500c476b2c12039f1e16edb491273af765e7839bf39842023"
+  },
+  "experimentalFeatures": [
+    "bounded-tick.v1",
+    "bounded-tick.v2"
+  ],
+  "qualified": [
+    {
+      "platform": "linux-x64",
+      "runtime": "waylith",
+      "levels": [
+        "A",
+        "B"
+      ],
+      "features": [
+        "map"
+      ],
+      "runtimeSha256": {
+        "libcoreclr.so": "d4d02e470aa0b6f941d4d9dfab3a4bc4d8ed8e186ff880f4d5d56b3d069107dd",
+        "System.Private.CoreLib.dll": "b642f0792595b45fbf1a26b998b6bf8f52dcb6ef1da285c9c75c8811894403be"
+      },
+      "evidence": "automatic: experiments/official-comparison/qualify_build.py (summary in comparison)",
+      "featureEvidence": {
+        "map": "automatic: compare_official.py --map (summary in comparison.map)"
+      }
+    }
+  ],
+  "createdAt": "2026-11-21T07:24:47Z",
+  "note": "Automatic comparison with the official game of this build (qualify_build.py, 2026-11-21, clean commit 0874091, Worker SHA-256 fba9ab46d621ddb9282a9d1749da9dd70e986d9c5d731b3e8f35202dc7e5ddce). Matrix 23/23 and official A/B 10/10 (fourth agreeing run); D acceptance 10/10 and v2 3/3. Map: compared map for map with the generation seeds .NET randomizes per process (Map.NextGenSeed, LayoutWorker.FillAllRooms) made deterministic in both runs and salted per run; 4 cases x 5 salts, every product map identical to the official one. An earlier distribution comparison (permutation test) had flagged map-genstep-throws; the cause of the run-to-run variation it measured is documented in docs/research/2026-11-21-build-1.7.5014.md.",
+  "comparison": {
+    "tool": "qualify_build.py/1",
+    "repositoryCommit": "0874091e1ec42a6dc1c86d8fb1f188a4366184a5",
+    "repositoryClean": true,
+    "platform": "linux-x64",
+    "runtime": "waylith",
+    "matrix": {
+      "cases": 23,
+      "asExpected": 23,
+      "notAsExpected": [],
+      "seconds": 343.4
+    },
+    "officialAB": {
+      "cases": 10,
+      "matched": 10,
+      "notMatched": [],
+      "seconds": 262.3
+    },
+    "map": {
+      "cases": 4,
+      "repeat": 5,
+      "judgement": "sameMapEveryRun",
+      "equivalent": 4,
+      "notEquivalent": [],
+      "seconds": 1111.8
+    },
+    "boundedTickV1": {
+      "ok": true,
+      "cases": 10,
+      "asExpected": 10,
+      "seconds": 361.1
+    },
+    "boundedTickV2": {
+      "ok": true,
+      "cases": 3,
+      "asExpected": 3,
+      "seconds": 79.3
+    },
+    "officialTickComparison": {
+      "informationOnly": true,
+      "agrees": false,
+      "runs": 3,
+      "faults": [
+        "official.diagnosticsOrExit",
+        "product.diagnosticsOrExit"
+      ],
+      "seconds": 181.5
+    },
+    "seconds": 2339.5
+  }
+}

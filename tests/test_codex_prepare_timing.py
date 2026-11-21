@@ -5,6 +5,7 @@ import time
 
 from test_validation_host import TempCase
 from tools import codex_workflow as cw
+from r2_fakes import with_game_files
 
 
 class PrepareTimingTests(TempCase):
@@ -24,14 +25,14 @@ class PrepareTimingTests(TempCase):
                 return "cached"
 
         args = SimpleNamespace(private_root=self.root, aws="aws", refresh=False)
-        with patch.object(cw, "r2_client", return_value=FakeR2()):
+        with patch.object(cw, "r2_client", return_value=with_game_files(FakeR2)()):
             result = cw.prepare(args)
 
         self.assertEqual(result["status"], "prepared")
         self.assertEqual(result["r2"]["cached"], 1)
         self.assertIn("timings", result)
         timings = result["timings"]
-        self.assertEqual(set(timings), {"fetchSeconds", "snapshotCopySeconds",
+        self.assertEqual(set(timings), {"fetchSeconds", "provenanceVerifySeconds", "snapshotCopySeconds",
                                         "snapshotHashSeconds", "snapshotTotalSeconds",
                                         "totalSeconds"})
         self.assertGreaterEqual(timings["fetchSeconds"], 0.025)

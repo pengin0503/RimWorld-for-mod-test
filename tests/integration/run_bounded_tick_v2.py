@@ -44,8 +44,8 @@ def case_accepted(case: str, result: dict, *, expected_cached: bool) -> bool:
     if len(codes)!=len(reasons):
         return False
     mismatch=case=="mismatch"
-    # These codes describe the known experimental status on the pinned
-    # 1.7.4985 runtime. Any other failure/incomplete reason makes this
+    # These codes describe the known experimental status of D on a 1.7 build
+    # whose A/B (and map) are qualified. Any other failure/incomplete reason makes this
     # specific smoke acceptance invalid, even if tick observations match.
     allowed={"experimental", "dNotQualified", "mapNotQualified"}
     if mismatch:

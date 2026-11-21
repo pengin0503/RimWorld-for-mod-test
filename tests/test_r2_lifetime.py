@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from test_codex_workflow import sample_index
 from tools import codex_workflow as cw
+from r2_fakes import with_game_files
 
 
 class LifetimeTests(unittest.TestCase):
@@ -17,7 +18,7 @@ class LifetimeTests(unittest.TestCase):
                 raise cw.r2_assets.AssetError('synthetic')
             def close(self):
                 self.closed = True
-        client = Client()
+        client = with_game_files(Client)()
         with tempfile.TemporaryDirectory() as directory, patch.object(cw, 'r2_client', return_value=client):
             with self.assertRaises(cw.r2_assets.AssetError):
                 cw.prepare(SimpleNamespace(private_root=Path(directory), aws='aws', refresh=False))
@@ -53,7 +54,7 @@ class LifetimeTests(unittest.TestCase):
                         return 'downloaded'
                     def close(self):
                         self.closed = True
-                client = Client()
+                client = with_game_files(Client)()
                 args = SimpleNamespace(private_root=root / 'private', index_zip=root / 'index.zip',
                     aws='aws', target='Example', local_target=None, dependency=[],
                     official=['Core'], language='English', scope='validation', refresh=False)

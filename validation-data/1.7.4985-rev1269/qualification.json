@@ -1,0 +1,33 @@
+{
+  "recordType": "rwmtBuildQualification",
+  "schemaVersion": 1,
+  "gameVersion": "1.7.4985 rev1269",
+  "buildId": "1.7.4985-rev1269",
+  "method": "manual",
+  "createdAt": "2026-10-25",
+  "note": "Moved unchanged from the former ADAPTERS table in tools/validation_host.py. A/B compared with the official -headless boot on 9 fixture cases; map compared with the official -quicktest as distributions over repeated runs.",
+  "identitySha256": {
+    "Assembly-CSharp.dll": "0be7a7ea4b3111d4430f45b36c234a5e43287880b0514b23915f2ef9a0629e16",
+    "RimWorld.dll": "39bd67253a7fa5503ff7f2b51bc3ab5983fb1430acf57d7e8bb322d20e380555",
+    "Waylith.dll": "c69c2a2828c5594b58c9b28f0d19d5b25ff5cb16ceb46dc64f34dd59b7affc26",
+    "UnityStubs.dll": "ea962c9274514e0633d4e4c5471a1a98aff5fc52af20ca2e506c16dcd8be6f81",
+    "Waylith.UnityCompat.dll": "de9bcdb4399caac13435840b007994d054d4ffce9b0081ae5fcd3eb1479c10e0"
+  },
+  "experimentalFeatures": ["bounded-tick.v1", "bounded-tick.v2"],
+  "qualified": [
+    {
+      "platform": "linux-x64",
+      "runtime": "waylith",
+      "levels": ["A", "B"],
+      "features": ["map"],
+      "runtimeSha256": {
+        "libcoreclr.so": "eef17620f564c69d67ad9dcdef241902e9c12fef1cd090c973ab12a551f603d3",
+        "System.Private.CoreLib.dll": "d2075bc8fd8e2f0b4780ec248034b30e33d4cdd72513730886c5989d1f8008b7"
+      },
+      "evidence": "docs/research/test-host-qualification.md#linux-x64-waylithclr",
+      "featureEvidence": {
+        "map": "docs/research/map-qualification.md"
+      }
+    }
+  ]
+}

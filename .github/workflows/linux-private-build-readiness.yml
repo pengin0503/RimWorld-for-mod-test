@@ -1,4 +1,4 @@
-name: Private RimWorld 1.7.4995 readiness
+name: Private RimWorld build readiness
 
 on:
   workflow_dispatch:

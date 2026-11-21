@@ -9,6 +9,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from tools import codex_workflow as cw
+from r2_fakes import with_game_files
 
 
 def sample_index(path, schema_version=1):
@@ -283,7 +284,7 @@ class CodexWorkflowTests(unittest.TestCase):
 
             args = SimpleNamespace(private_root=private, index_zip=str(archive), aws="aws",
                                    dependency=[], target="Example", language="English", scope="validation", refresh=False)
-            with patch.object(cw, "r2_client", return_value=FakeR2()):
+            with patch.object(cw, "r2_client", return_value=with_game_files(FakeR2)()):
                 result = cw.fetch_mods(args)
             request_path = Path(result["request"])
             request = json.loads(request_path.read_text(encoding="utf-8"))
@@ -316,7 +317,7 @@ class CodexWorkflowTests(unittest.TestCase):
 
             args = SimpleNamespace(private_root=private, index_zip=str(archive), aws="aws",
                                    dependency=[], target="Example", language="English", scope="validation", refresh=False)
-            with patch.object(cw, "r2_client", return_value=FakeR2()):
+            with patch.object(cw, "r2_client", return_value=with_game_files(FakeR2)()):
                 with self.assertRaises(cw.WorkflowError):
                     cw.fetch_mods(args)
             self.assertFalse((private / "request.json").exists())
@@ -390,7 +391,7 @@ class CodexWorkflowTests(unittest.TestCase):
             args = SimpleNamespace(private_root=root / "private", index_zip=str(archive),
                                    aws="aws", dependency=[], target="Example",
                                    language="English", scope="validation", refresh=False)
-            with patch.object(cw, "r2_client", return_value=FakeR2()):
+            with patch.object(cw, "r2_client", return_value=with_game_files(FakeR2)()):
                 result = cw.fetch_mods(args)
             self.assertEqual(result["fetched"][0]["r2"]["selected"], 3)
             self.assertEqual(result["fetched"][0]["r2"]["skipped"], 1)

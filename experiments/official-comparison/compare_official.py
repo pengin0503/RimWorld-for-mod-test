@@ -55,6 +55,8 @@ COMPARISON_CASES = {
     'init-exception': (['*initthrow', 'comparisonprobe'], ('Core',), 'English', 'A'),
     'harmony-ok': (['harmonylib', '*harmonyok', 'comparisonprobe'], ('Core',), 'English', 'AB'),
     'harmony-missing': (['harmonylib', '*harmonymissing', 'comparisonprobe'], ('Core',), 'English', 'AB'),
+    # Prepatcher-style field injection, which the official boot supports from 1.7.5014 on.
+    'prepatcher-field': (['*prepatcherfield', 'comparisonprobe'], ('Core',), 'English', 'A'),
 }
 # Map stage vs the official developer quick test (-quicktest). The mapprobe fixture makes the
 # official quick test use the product's default seed and logs a map fingerprint in both runs.
@@ -185,8 +187,16 @@ def compare_case(name, request, official, case_dir, args):
 
 # Probe lines that identify the map setup; equal in every run of a case.
 MAP_IDENTITY = re.compile(r'^\[RWMT-PROBE\] (map world |mods )')
-# Probe lines with counts; compared as distributions because generation is not reproducible.
+# The mapprobe fixture makes the generation seeds .NET would randomize deterministic, salted per run
+# (DeterministicGenerationSeeds in tests/fixtures/validation-mods-src/MapProbe/MapProbe.cs).
+MAP_SEEDS = re.compile(r'^\[RWMT-PROBE\] map seeds nextGenSeed=(\S+) layoutRoomSeeds=(\d+) salt=(-?\d+)$')
+# What the probe logs about the generated map: hashes of every cell's terrain and roof and of every
+# thing (def, position, rotation, stuff, faction, stack count), counts, and every pawn's kind and cell.
+MAP_CONTENT = re.compile(r'^\[RWMT-PROBE\] map (?!world |seeds )')
+# Count lines, used to say what differs when two maps are not the same.
 MAP_METRIC = re.compile(r'^\[RWMT-PROBE\] map (things count|category [^=\s]+|thing-count [^=\s]+|terrain-cells [^=\s]+|roofed-cells)=(\d+)')
+# Runs per side and case: each run uses its own salt, so each is a different map drawn on both sides.
+MAP_MIN_RUNS = 2
 
 
 def map_metrics(probes):
@@ -198,56 +208,56 @@ def map_metrics(probes):
     return metrics
 
 
-def compare_distributions(product_runs, official_runs):
-    """Per metric: is the product's median inside the official runs' range, widened by a tolerance?
+def map_content(probes):
+    return [p for p in probes if MAP_CONTENT.match(p)]
 
-    The median keeps one rare outcome (a ruin that happens to pick the same floor as a fixed
-    structure) from moving the comparison. The tolerance is the official range itself (at least
-    2 % of the official mean and at least 2), so a metric that does not vary in the official runs
-    must match within that small margin.
-    A metric missing from a run counts as 0. Metrics present in some but not all runs of a side
-    (intermittent kinds, e.g. which stone a ruin's floor happens to use) are not judged one by
-    one: a handful of runs cannot tell a rare kind from a missing one. Their per-run sum per
-    metric group is judged instead, so a side that drops or adds such content still shows.
-    A kind present in every run of one side and in none of the other is always judged.
-    """
-    names = sorted({k for run in product_runs + official_runs for k in run})
-    values = {name: ([run.get(name, 0) for run in product_runs], [run.get(name, 0) for run in official_runs])
-              for name in names}
-    def partial(side):
-        return 0 in side and any(side)
 
-    intermittent = [name for name, (p, o) in values.items() if partial(p) or partial(o)]
-    for group in sorted({name.split(' ', 1)[0] for name in intermittent}):
-        members = [name for name in intermittent if name.split(' ', 1)[0] == group]
-        values[f'{group} (sum of intermittent kinds)'] = tuple(
-            [sum(values[name][side][i] for name in members) for i in range(len(values[members[0]][side]))] for side in (0, 1))
-    rows, outside = {}, []
-    for name, (p, o) in values.items():
-        o_mean, p_median = sum(o) / len(o), statistics.median(p)
-        tolerance = max(max(o) - min(o), 0.02 * o_mean, 2)
-        judged = name not in intermittent
-        ok = min(o) - tolerance <= p_median <= max(o) + tolerance
-        rows[name] = {'product': p, 'official': o, 'productMedian': p_median, 'officialMedian': statistics.median(o),
-                      'tolerance': round(tolerance, 1), 'judged': judged, 'withinTolerance': ok}
-        if judged and not ok:
-            outside.append(name)
-    return rows, outside
+def map_seeds(probes):
+    found = [MAP_SEEDS.match(p) for p in probes]
+    found = [m.groups() for m in found if m]
+    return found[0] if len(found) == 1 else None
+
+
+def content_difference(product_probes, official_probes, limit=20):
+    """What differs between two generated maps, for the report: count metrics first, then other lines."""
+    p, o = map_metrics(product_probes), map_metrics(official_probes)
+    metrics = {name: [p.get(name, 0), o.get(name, 0)] for name in sorted(set(p) | set(o)) if p.get(name, 0) != o.get(name, 0)}
+    other = sorted(set(map_content(product_probes)) ^ set(map_content(official_probes)))
+    other = [line for line in other if not MAP_METRIC.match(line)]
+    return {'metrics': dict(list(metrics.items())[:limit]), 'metricsDiffering': len(metrics), 'otherLines': other[:limit]}
+
+
+def map_salt_fixture(staged_probe, run_dir, salt):
+    """A copy of the built mapprobe fixture whose Salt.txt makes run ``salt`` draw its own reproducible map."""
+    target = run_dir / 'mapprobe'
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(staged_probe, target)
+    (target / 'Salt.txt').write_text(f'{salt}\n', encoding='utf-8')
+    return target
 
 
 def compare_map_case(name, request, official, case_dir, args):
-    """Map stage vs official -quicktest, repeated: generation differs from run to run on this build
-    (the official quick test too), so single fingerprints cannot match. Compared instead:
-    the setup lines (identical), the errors up to the end of map generation (identical in every run),
-    and the count metrics as distributions (compare_distributions)."""
+    """Map stage vs official -quicktest, run for run. Map generation on 1.7 is not reproducible from
+    run to run, the official quick test included: Map.NextGenSeed and LayoutWorker.FillAllRooms seed
+    Rand with System.HashCode, which .NET seeds randomly in each process. The mapprobe fixture replaces
+    that combiner in both runs with a deterministic one salted by the run number, so every run is one
+    reproducible map drawn on both sides. The two maps of a run must be the same cell for cell and
+    thing for thing, with the same setup and the same errors up to the end of map generation."""
     if case_dir.exists():
         shutil.rmtree(case_dir)
     case_dir.mkdir(parents=True)
-    (case_dir / 'request.json').write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding='utf-8')
+    probe = next(Path(m['path']) for m in request['mods'] if Path(m['path']).name == 'mapprobe')
     statuses = []
     for i in range(args.repeat):
         run_dir = case_dir / f'run{i + 1}'
-        result = validation_host.run_validation(args.snapshot, case_dir / 'request.json', run_dir / 'product', args.worker,
+        run_dir.mkdir()
+        salted = json.loads(json.dumps(request))
+        for mod in salted['mods']:
+            if Path(mod['path']) == probe:
+                mod['path'] = str(map_salt_fixture(probe, run_dir, i + 1))
+        (run_dir / 'request.json').write_text(json.dumps(salted, ensure_ascii=False, indent=2), encoding='utf-8')
+        result = validation_host.run_validation(args.snapshot, run_dir / 'request.json', run_dir / 'product', args.worker,
                                                 keep_run_dirs=True, baseline_cache=case_dir / 'baseline-cache')
         statuses.append(result['status'])
         if result['status'] == 'blocked':
@@ -291,9 +301,10 @@ def summarize_map_runs(name, runs, statuses):
     identity = {side: sorted({tuple(sorted(p for p in r['probes'] if MAP_IDENTITY.match(p))) for r in rs})
                 for side, rs in runs.items()}
     errors = {side: sorted({tuple(r['errors']) for r in rs}) for side, rs in runs.items()}
-    metrics, outside = compare_distributions([map_metrics(r['probes']) for r in runs['product']],
-                                             [map_metrics(r['probes']) for r in runs['official']])
-    fingerprints = {side: len({tuple(p for p in r['probes'] if ' sha=' in p) for r in rs}) for side, rs in runs.items()}
+    pairs = list(zip(runs['product'], runs['official']))
+    seeds = [(map_seeds(p['probes']), map_seeds(o['probes'])) for p, o in pairs]
+    differing = [{'run': i + 1, **content_difference(p['probes'], o['probes'])}
+                 for i, (p, o) in enumerate(pairs) if map_content(p['probes']) != map_content(o['probes'])]
     repeat = len(statuses)
     row = {
         'case': name, 'repeat': repeat, 'productStatuses': statuses,
@@ -303,16 +314,23 @@ def summarize_map_runs(name, runs, statuses):
         'identity': [list(x) for x in identity['product']],
         'errorsMatch': len(errors['product']) == 1 and errors['product'] == errors['official'],
         'errors': {side: [list(x) for x in v] for side, v in errors.items()},
-        'distinctFingerprints': fingerprints,
-        'metricsOutsideTolerance': outside, 'metrics': metrics,
+        # The probe's seeds replaced in both runs of every pair, each pair with its own salt.
+        'deterministicSeeds': len(pairs) == repeat and all(
+            p is not None and p == o and p[0] == 'replaced' and p[2] == str(i + 1) for i, (p, o) in enumerate(seeds)),
+        'seeds': [list(p) if p else None for p, _ in seeds],
+        'runsMatching': len(pairs) - len(differing),
+        'runsDiffering': differing,
+        # Information: how many different maps the salts drew (one per run if they reach the content).
+        'distinctMaps': len({tuple(map_content(p['probes'])) for p, _ in pairs}),
     }
-    row['equivalent'] = all(row['mapGeneratedInAllRuns'].values()) and row['identityMatch'] and row['errorsMatch'] \
-        and not outside
-    print(f'{name:24} equivalent={row["equivalent"]} generated={row["mapGeneratedInAllRuns"]} identity={row["identityMatch"]} errors={row["errorsMatch"]} '
-          f'outside={outside} distinct fingerprints product/official={fingerprints["product"]}/{fingerprints["official"]} '
-          f'of {repeat}', flush=True)
+    row['equivalent'] = repeat >= MAP_MIN_RUNS and len(pairs) == repeat and all(row['mapGeneratedInAllRuns'].values()) \
+        and row['identityMatch'] and row['errorsMatch'] and row['deterministicSeeds'] and not differing
+    print(f'{name:24} equivalent={row["equivalent"]} generated={row["mapGeneratedInAllRuns"]} identity={row["identityMatch"]} '
+          f'errors={row["errorsMatch"]} seeds={row["deterministicSeeds"]} same maps={row["runsMatching"]}/{repeat} '
+          f'distinct maps={row["distinctMaps"]}', flush=True)
+    for d in differing:
+        print(f'    run {d["run"]}: {d["metricsDiffering"]} metrics differ {list(d["metrics"].items())[:5]} {d["otherLines"][:3]}', flush=True)
     return row
-
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
@@ -323,7 +341,8 @@ def main(argv=None):
     parser.add_argument('--cases')
     parser.add_argument('--map', action='store_true',
                         help='compare the map stage with the official -quicktest map (MAP_COMPARISON_CASES)')
-    parser.add_argument('--repeat', type=int, default=5, help='with --map: runs per side for the distribution comparison')
+    parser.add_argument('--repeat', type=int, default=5,
+                        help=f'with --map: runs per case, each a different salted map on both sides (at least {MAP_MIN_RUNS})')
     parser.add_argument('--reanalyze', action='store_true',
                         help='with --map: recompute comparison.json from the runs already kept under --out')
     parser.add_argument('--official-timeout', type=int, default=180)
@@ -335,6 +354,8 @@ def main(argv=None):
         name, _, path = item.partition('=')
         if not CASE_NAME.fullmatch(name) or name in ('.', '..') or not path:
             parser.error(f'--request needs NAME=PATH with NAME made of letters, digits, ".", "_" or "-": {item!r}')
+    if args.map and args.repeat < MAP_MIN_RUNS:
+        parser.error(f'--repeat must be at least {MAP_MIN_RUNS}')
     out = Path(args.out).resolve()
     if REPO in out.parents:
         parser.error('--out must be outside the repository')

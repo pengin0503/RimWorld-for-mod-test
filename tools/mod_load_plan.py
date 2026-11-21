@@ -1,12 +1,22 @@
-"""Fail-closed input planning for the qualified 1.7.4985 Linux loader.
+"""Fail-closed input planning for the RimWorld 1.7 Linux loader.
 
-Rules are paraphrased in docs/research/2026-10-26-load-folder-rules.md.
+Rules are paraphrased in docs/research/2026-10-26-load-folder-rules.md and, for what
+changed in 1.7.5014, docs/research/2026-11-21-build-1.7.5014.md. Every function takes
+the game version it plans for as ``game=(major, minor, build)``; the planned folders are
+still compared with what the real loader chose (expectedLoadFolders), so a rule that
+changes in a later build shows as loadFolderMismatch instead of a silent pass.
 No game implementation or private assets are included here.
 """
 import re
 import xml.etree.ElementTree as ET
 
-CURRENT = (1, 7, 4985)
+# The newest build whose loader rules were checked; the default when a caller does not know the build.
+CURRENT = (1, 7, 5014)
+# Versioned About data (modDependenciesByVersion, loadBefore/AfterByVersion, ...) falls back
+# to the highest supported version below the running game when the mod lists none of the
+# running major.minor. Seen in 1.7.5014 rev1195 (ModMetaData.InitVersionedData), absent in
+# 1.7.4985 rev1269; no build in between was available to check.
+VERSIONED_DATA_FALLBACK_SINCE = (1, 7, 5014)
 
 class LoadPlanError(ValueError):
     def __init__(self, code, detail):
@@ -43,8 +53,18 @@ def _condition(item, active):
     return enabled
 
 
-def load_folders(paths, xml, active):
+def _game(game):
+    if (not isinstance(game, tuple) or len(game) != 3
+            or any(type(part) is not int or part < 0 for part in game)):
+        raise ValueError('game must be (major, minor, build)')
+    return game
+
+
+def load_folders(paths, xml, active, game=CURRENT):
     """Return game precedence order (highest first), relative to the MOD root."""
+    game = _game(game)
+    full = '%d.%d.%d' % game
+    major_minor = '%d.%d' % game[:2]
     active = {x.casefold() for x in active}
     directories = {''}
     for path in paths:
@@ -66,9 +86,9 @@ def load_folders(paths, xml, active):
                 raise LoadPlanError('invalidLoadFolders', 'Duplicate or attributed LoadFolders version')
             sections[name] = section
             for item in section: _condition(item, active)
-        selected = sections.get('1.7.4985')
+        selected = sections.get(full)
         if selected is None or not len(selected):
-            eligible = sorted((n for n in sections if n!='default' and _version(n)<=CURRENT),reverse=True)
+            eligible = sorted((n for n in sections if n!='default' and _version(n)<=game),reverse=True)
             selected = sections[eligible[0]] if eligible else sections.get('default')
         if selected is not None:
             roots = []
@@ -94,9 +114,9 @@ def load_folders(paths, xml, active):
         if int(name.split(".")[0]) > 0:
             candidates.append(name)
     roots=[]
-    if '1.7' in directories: roots.append('1.7')
+    if major_minor in directories: roots.append(major_minor)
     elif candidates:
-        older=[n for n in candidates if _version(n)<=CURRENT]
+        older=[n for n in candidates if _version(n)<=game]
         choice=max(older,key=_version) if older else min(candidates,key=_version)
         if str(int(choice.split('.')[0]))+'.'+str(int(choice.split('.')[1])) != choice:
             raise LoadPlanError('unsupportedVersionDirectory','Noncanonical version directory')
@@ -118,7 +138,7 @@ def select_asset(relative, folders, language):
         if top=='textures' and name.endswith(('.png','.jpg','.jpeg','.tga','.dds','.psd')): return True
         # ModContentLoader's audio list plus formats the earlier filter already kept.
         if top=='sounds' and name.endswith(('.wav','.ogg','.mp3','.xm','.it','.mod','.s3m','.aif','.aiff','.flac')): return True
-        # Other per-load-folder content the 1.7.4985 loader reads: Strings/*.txt,
+        # Other per-load-folder content the 1.7 loader reads (checked on 1.7.4985): Strings/*.txt,
         # extensionless AssetBundles (OS suffix chosen by the game), and Shaders/ sources.
         if top=='strings' and name.endswith('.txt'): return True
         if top=='assetbundles' and '.' not in parts[-1]: return True
@@ -135,9 +155,37 @@ def select_asset(relative, folders, language):
     return False
 
 
-def missing_dependencies(metadata, active):
+def supported_versions(metadata):
+    """The (major, minor) pairs the game parses from <supportedVersions> (VersionControl.TryParseVersionString)."""
+    found = []
+    node = metadata.find('supportedVersions')
+    for item in (node if node is not None else []):
+        parts = (item.text or '').strip().split('.')
+        # int.TryParse with the default style: optional surrounding blanks and sign, Int32 range, then >= 0.
+        if len(parts) < 2 or not all(re.fullmatch(r'[\t\n\v\f\r ]*[+-]?[0-9]+[\t\n\v\f\r ]*', p) for p in parts[:2]):
+            continue
+        numbers = [int(p) for p in parts[:2]]
+        if all(0 <= n <= 2**31 - 1 for n in numbers) and tuple(numbers) not in found:
+            found.append(tuple(numbers))
+    return found
+
+
+def versioned_fallback(metadata, game=CURRENT):
+    """The version key the game falls back to for versioned About data, or None."""
+    game = _game(game)
+    if game < VERSIONED_DATA_FALLBACK_SINCE:
+        return None
+    versions = supported_versions(metadata)
+    if any(v == game[:2] for v in versions):
+        return None
+    older = [v for v in versions if v < game[:2]]
+    return '%d.%d' % max(older) if older else None
+
+
+def missing_dependencies(metadata, active, game=CURRENT):
     if metadata.tag != 'ModMetaData':
         raise LoadPlanError('invalidModMetadata','Unsupported About root')
+    game = _game(game)
     active={x.casefold() for x in active}
     for tag in ('modDependencies', 'modDependenciesByVersion'):
         if len(metadata.findall(tag)) > 1:
@@ -148,14 +196,18 @@ def missing_dependencies(metadata, active):
     if versions is not None:
         if versions.attrib or (versions.text or '').strip():
             raise LoadPlanError('invalidDependencies', 'Malformed versioned dependency list')
-        seen=set()
+        seen={}
         for item in versions:
             name=item.tag.lower().removeprefix('v')
             if item.attrib or (item.text or '').strip() or any((li.tail or '').strip() for li in item):
                 raise LoadPlanError('invalidDependencies', 'Malformed versioned dependency section')
             if name in seen: raise LoadPlanError('invalidDependencies','Duplicate versioned dependencies')
-            seen.add(name)
-            if name=='1.7': section=item
+            seen[name]=item
+        fallback=versioned_fallback(metadata, game)
+        chosen=seen.get('%d.%d' % game[:2])
+        if chosen is None and fallback is not None:
+            chosen=seen.get(fallback)
+        if chosen is not None: section=chosen
     missing=[]
     if section is not None:
         if section.attrib or (section.text or '').strip() or any((li.tail or '').strip() for li in section):

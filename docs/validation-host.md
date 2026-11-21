@@ -2,7 +2,9 @@
 
 `tools/validation_host.py` は、利用者が用意した RimWorld Linux 版のゲーム DLL を使い、MOD の実際の読み込み（A）と DLL・Harmony の登録（B）を検証して終了します。公式ゲーム実行ファイルは起動しません。ゲーム画面・メインメニュー・プレイ機能はありません。判定の意味は [契約](contracts/mod-validation-v1.md) を参照してください。
 
-A/B とマップ生成の現在の対応：Linux x86_64、ゲーム同梱の WaylithClr、RimWorld 1.7.4985 rev1269。この組だけが `qualified` です。
+A/B とマップ生成の現在の対応：Linux x86_64、ゲーム同梱の WaylithClr、そしてそのビルドの適格記録（`validation-data/<ビルド>/qualification.json`）があるビルド。記録があるビルドとその根拠は [ゲームの更新への追従](build-updates.md) にまとめています。記録の組だけが `qualified` です。
+
+RimWorld 1.7 系の新しいビルドは、コードを変えずにそのまま動きます（`Version.txt` から版を読みます）。そのビルドの記録がないあいだは `experimental`（全体は `incomplete`）で、公式ゲームの同じビルドとの自動比較（`experiments/official-comparison/qualify_build.py`）が全部一致したときだけ記録ができて `qualified` になります。版番号だけで適格にはしません。1.8 など別の major.minor は `unknownBuild` で `blocked` です。
 
 Windows x64 でも `run` は動きます（W1。描画なし）。2026-10-26 にユーザーの PC の実ゲームで、fixture 行列 22 ケースと C の 6 ケースが Linux と同じ判定になりました（[記録](research/2026-10-26-windows-w1-real-game.md)）。ただし公式との比較はまだなので、結果は常に `experimental`（全体は `incomplete`）です。Linux での合格を Windows の合格とは読み替えません。Windows では次の点が Linux と違います（[設計](superpowers/specs/2026-10-26-windows-host-design.md)）。
 
@@ -69,7 +71,7 @@ python3 tools/validation_host.py prepare-game --source /private/rimworld-linux -
 
 `--out/map.png` が対象込みのマップ、`--out/map-baseline.png` が対象を外したマップです。対象 MOD の物はマゼンタで描かれます。ゲームの見た目ではなく、地形・岩・建物・植物・物・石の破片・ポーン・屋根を色分けした模式図です。詳しい項目と判定は [契約のマップ生成](contracts/mod-validation-v1.md#マップ生成) を参照してください。
 
-マップ生成は Linux x64＋WaylithClr＋1.7.4985 rev1269 で公式の quick test と比べて適格化済みです（[マップ生成の適格化](research/map-qualification.md)）。このビルドでは**同じ種でも実行のたびに少し違うマップになります（公式も同じ）**。2 枚の画像は MOD と関係のない場所でも違って見えます。ランダムに置かれる物の正確な個数を `mapThings` の期待値にしないでください。
+マップ生成は、記録に `map` があるビルド（Linux x64＋WaylithClr）で公式の quick test と比べて適格化済みです（[マップ生成の適格化](research/map-qualification.md)、[ゲームの更新への追従](build-updates.md)）。これまでのビルドでは**同じ種でも実行のたびに少し違うマップになります（公式も同じ）**。2 枚の画像は MOD と関係のない場所でも違って見えます。ランダムに置かれる物の正確な個数を `mapThings` の期待値にしないでください。
 
 ### クラフト材料の表示候補を調べる（C・実験）
 
@@ -94,7 +96,8 @@ python3 tools/validation_host.py run --snapshot /private/rw-snapshot --request r
 | `--runtime standard` | 通常の .NET 10 で実行（実験。常に `incomplete`） |
 | `--verify-full` | 実行前にスナップショット全体を再ハッシュ |
 | `--keep-run-dirs` | 調査用に run ディレクトリを残す |
-| `--allow-unknown-build` | Adapter のないビルドを実験扱いで実行 |
+| `--allow-unknown-build` | 対応する系列にないビルド（1.7 以外の major.minor）を実験扱いで実行 |
+| `--qualification-store DIR` | 自動比較で作った私有の適格記録の置き場（既定は環境変数 `RWMT_QUALIFICATION_STORE`）。記録は比較に使った Worker のビルドにだけ効く |
 
 ## 4. 結果の読み方
 

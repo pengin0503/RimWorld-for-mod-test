@@ -25,7 +25,9 @@ import validation_host  # noqa: E402
 FIXTURES = REPO / 'tests' / 'fixtures' / 'validation-mods'
 SOURCES = REPO / 'tests' / 'fixtures' / 'validation-mods-src'
 ASSEMBLIES = {'initthrow': 'InitThrow', 'harmonyok': 'HarmonyOk', 'harmonymissing': 'HarmonyMissing',
-              'mapgenthrow': 'MapGenThrow', 'mapprobe': 'MapProbe'}
+              'mapgenthrow': 'MapGenThrow', 'mapprobe': 'MapProbe', 'prepatcherfield': 'PrepatcherField'}
+# Build-time only references, built first and never copied into a mod (see PrepatcherApi.csproj).
+REFERENCE_ASSEMBLIES = {'PrepatcherApiDll': ('PrepatcherApi', '0PrepatcherAPI.dll')}
 
 OK_EXPECTATIONS = {
     'defs': [{'type': 'ThingDef', 'defName': 'RWMT_Widget', 'exists': True}],
@@ -62,7 +64,7 @@ def case(levels, mods, expectations=None, *, official=('Core',), language='Engli
 
 
 MONOLITH = {'mapThings': [{'type': 'ThingDef', 'defName': 'RWMT_Monolith', 'minCount': 1}]}
-# Map generation is qualified for Linux x64 + WaylithClr on 1.7.4985 rev1269 (docs/research/map-qualification.md).
+# Map generation is qualified per build (validation-data/<build>/qualification.json; docs/research/map-qualification.md).
 MAP_LIMITS = {'timeoutSeconds': 300}
 
 
@@ -89,7 +91,7 @@ CASES = {
                 'blocked', ['invalidRequest'], 'waylith'),
     # All DLCs take longer than the 5 s Worker deadline that a 10 s limit leaves.
     'timeout': (case('A', ['*okxml'], official=('Core', 'Royalty', 'Ideology', 'Biotech', 'Odyssey'),
-                     limits={'timeoutSeconds': 10}), 'incomplete', ['workerInterrupted'], 'waylith'),
+                     limits={'timeoutSeconds': 10}), 'incomplete', ['workerInterrupted', 'baselineIncomplete'], 'waylith'),
     'standard-runtime-ok': (case('A', ['*okxml'], OK_EXPECTATIONS), 'incomplete', ['experimental'], 'standard'),
     'standard-runtime-bad-reference': (case('A', ['*badref']), 'incomplete', ['experimental', 'newErrors'], 'standard'),
     'map-ok': (case('A', ['*okxml'], map={}, limits=MAP_LIMITS), 'passed', [], 'waylith'),
@@ -103,19 +105,44 @@ CASES = {
                            'failed', ['newErrors'], 'waylith'),
     'map-unknown-biome': (case('A', ['*okxml'], map={'biome': 'RWMT_NoSuchBiome'}, limits=MAP_LIMITS),
                           'incomplete', ['mapNotGenerated'], 'waylith'),
+    # A Prepatcher-style injected field. Builds with the game's own Prepatcher layer
+    # (1.7.5014 and later) load it; older builds cannot resolve its API (see expected_case).
+    'prepatcher-field': (case('A', ['*prepatcherfield']), 'passed', [], 'waylith'),
 }
+
+
+def has_prepatcher_compat(snapshot):
+    return (Path(snapshot) / 'game' / 'RimWorldWaylith.PrepatcherCompat.dll').is_file()
+
+
+def expected_case(name, snapshot):
+    """(request, expected status, reason codes, runtime) for this snapshot's build."""
+    request, status, codes, runtime = CASES[name]
+    if name == 'prepatcher-field' and not has_prepatcher_compat(snapshot):
+        status, codes = 'failed', ['newErrors']
+    return request, status, codes, runtime
 
 
 # Reasons a run on a platform/runtime that is not qualified adds on its own.
 UNQUALIFIED_REASONS = {'experimental', 'mapNotQualified'}
+# Reasons that say a Worker run itself broke (no or a partial result). A case accepts them
+# only when it names them: otherwise an `incomplete` expectation would also accept a crash.
+RUN_BROKEN_REASONS = {'workerFailed', 'workerInterrupted', 'workerUnknown', 'workerExitCode', 'workerResultMissing',
+                      'workerResultUnreadable', 'workerResultInvalid', 'workerResultStale', 'baselineIncomplete',
+                      'timeout', 'memoryLimit', 'logLimit'}
 
 
-def matches(expected_status, expected_codes, status, codes, *, experimental):
+def matches(expected_status, expected_codes, status, codes, *, experimental, map_unqualified=False):
     """Whether a case behaved as expected. On an unqualified platform the Controller turns
-    passed/failed into incomplete; the run must then show the same findings and nothing else."""
-    if not experimental or expected_status in ('incomplete', 'blocked'):
+    passed/failed into incomplete; the run must then show the same findings and nothing else.
+    The same holds for a map case on a build whose A/B are qualified but whose map stage is not
+    (``map_unqualified``): the run is then incomplete with mapNotQualified."""
+    if any(c in RUN_BROKEN_REASONS and c not in expected_codes for c in codes):
+        return False
+    marker = 'experimental' if experimental else 'mapNotQualified' if map_unqualified else None
+    if marker is None or expected_status in ('incomplete', 'blocked'):
         return status == expected_status and all(c in codes for c in expected_codes)
-    if status != 'incomplete' or 'experimental' not in codes:
+    if status != 'incomplete' or marker not in codes:
         return False
     if expected_status == 'passed':
         return set(codes) <= UNQUALIFIED_REASONS
@@ -129,12 +156,19 @@ def build_fixtures(out, snapshot, harmony_dll):
     shutil.copytree(FIXTURES, staged)
     (staged / 'harmonylib' / 'Assemblies').mkdir(exist_ok=True)
     shutil.copyfile(harmony_dll, staged / 'harmonylib' / 'Assemblies' / '0Harmony.dll')
-    for mod, project in ASSEMBLIES.items():
+    def dotnet_build(project, extra=()):
         build = out / 'fixture-build' / project
         subprocess.run(['dotnet', 'build', '-c', 'Release', '--nologo', '-v', 'q', str(SOURCES / project / f'{project}.csproj'),
                         f'-p:GameManagedDir={Path(snapshot) / "game"}', f'-p:HarmonyDll={harmony_dll}', '-o', str(build),
-                        f'-p:BaseIntermediateOutputPath={out / "fixture-build" / "obj" / project}/'], check=True,
+                        f'-p:BaseIntermediateOutputPath={out / "fixture-build" / "obj" / project}/', *extra], check=True,
                        stdout=subprocess.DEVNULL)
+        return build
+
+    references = []
+    for prop, (project, file_name) in REFERENCE_ASSEMBLIES.items():
+        references.append(f'-p:{prop}={dotnet_build(project) / file_name}')
+    for mod, project in ASSEMBLIES.items():
+        build = dotnet_build(project, references)
         (staged / mod / 'Assemblies').mkdir(exist_ok=True)
         shutil.copyfile(build / f'RWMT.{project}.dll', staged / mod / 'Assemblies' / f'RWMT.{project}.dll')
     return staged
@@ -156,7 +190,7 @@ def main(argv=None):
     selected = args.cases.split(',') if args.cases else list(CASES)
     rows, ok = [], True
     for name in selected:
-        request, expected_status, expected_codes, runtime = CASES[name]
+        request, expected_status, expected_codes, runtime = expected_case(name, args.snapshot)
         case_dir = out / 'cases' / name
         if case_dir.exists():
             shutil.rmtree(case_dir)
@@ -170,7 +204,9 @@ def main(argv=None):
                                                 baseline_cache=out / 'baseline-cache')
         codes = [r['code'] for r in result.get('reasons', [])]
         experimental = result.get('fidelity') == 'experimental' and runtime == 'waylith'
-        good = matches(expected_status, expected_codes, result['status'], codes, experimental=experimental)
+        map_unqualified = (result.get('map') or {}).get('fidelity') == 'experimental' and runtime == 'waylith'
+        good = matches(expected_status, expected_codes, result['status'], codes, experimental=experimental,
+                       map_unqualified=map_unqualified)
         ok &= good
         rows.append({'case': name, 'platform': result.get('platform'), 'runtime': runtime, 'expected': expected_status,
                      'status': result['status'],

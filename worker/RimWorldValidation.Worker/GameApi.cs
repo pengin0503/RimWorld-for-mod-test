@@ -9,7 +9,9 @@ namespace RimWorldValidation.Worker;
 /// place. Binding happens before the engine starts, so a game build that lacks
 /// a member is reported as an adapter mismatch instead of failing mid-run.
 /// Names are from RimWorld 1.7.4985 rev1269 (Assembly-CSharp 1.7.9790,
-/// commit 535691cc); see docs/research/test-host-entrypoints.md.
+/// commit 535691cc) and still bind unchanged on 1.7.5014 rev1195 (Assembly-CSharp
+/// 1.7.9819); see docs/research/test-host-entrypoints.md. Members that only some
+/// 1.7 builds have are optional and null on the others (see <see cref="Prepatcher"/>).
 /// </summary>
 public sealed class GameApi
 {
@@ -73,6 +75,9 @@ public sealed class GameApi
     public required FieldInfo ActiveLanguage { get; init; }
     public required PropertyInfo CurrentGame { get; init; }
     public required MethodInfo AllSubclasses { get; init; }
+
+    // Official boot steps that only newer 1.7 builds have (null on builds without them).
+    public required PrepatcherCompatApi? Prepatcher { get; init; }
 
     public static GameApi Bind()
     {
@@ -167,11 +172,69 @@ public sealed class GameApi
             ActiveLanguage = Reflect.StaticField(languages, "activeLanguage"),
             CurrentGame = Reflect.StaticProperty(current, "Game"),
             AllSubclasses = Reflect.StaticMethod(genTypes, "AllSubclasses", typeof(Type)),
+            Prepatcher = PrepatcherCompatApi.Bind(),
         };
     }
 
     public IEnumerable<Type> DefTypes()
     {
         return ((IEnumerable)AllSubclasses.Invoke(null, [Def])!).Cast<Type>().Prepend(Def);
+    }
+}
+
+/// <summary>
+/// The Prepatcher compatibility layer that RimWorld 1.7.5014 added to its boot
+/// (RimWorldWaylith.Bootstrap.Initialize): <c>PrepatcherCompat.Install()</c>, then
+/// <c>ModLoadingHooks.AfterAssembliesLoaded = PrepatcherCompat.ProcessModAssemblies</c>
+/// (called by LoadedModManager after the mod assemblies load: field/component
+/// injection and free patches for mods written for Prepatcher), and
+/// <c>Injection.ApplyPendingAtFrameBoundary</c> after every frame. 1.7.4985 has none of
+/// this. When the compatibility assembly exists, every member must bind; a partial set
+/// means the API changed and is an adapter mismatch.
+/// </summary>
+public sealed class PrepatcherCompatApi
+{
+    public required Action Install { get; init; }
+    public required FieldInfo AfterAssembliesLoaded { get; init; }
+    public required MethodInfo ProcessModAssemblies { get; init; }
+    public required Action ApplyPendingAtFrameBoundary { get; init; }
+
+    public static PrepatcherCompatApi? Bind()
+    {
+        Type? compat = Reflect.OptionalType("RimWorldWaylith.PrepatcherCompat, RimWorldWaylith.PrepatcherCompat");
+        if (compat == null)
+        {
+            return null;
+        }
+        Type hooks = Reflect.Type("UnityStubs.ModLoadingHooks, UnityStubs");
+        Type injection = Reflect.Type("Waylith.Injection.Injection, Waylith.Injection");
+        FieldInfo after = Reflect.StaticField(hooks, "AfterAssembliesLoaded");
+        Type assemblies = typeof(IReadOnlyList<Assembly>);
+        if (after.FieldType != typeof(Action<>).MakeGenericType(assemblies))
+        {
+            throw new AdapterMismatchException("UnityStubs.ModLoadingHooks.AfterAssembliesLoaded: Action<IReadOnlyList<Assembly>>");
+        }
+        return new PrepatcherCompatApi
+        {
+            Install = Reflect.Delegate<Action>(Reflect.StaticMethod(compat, "Install")),
+            AfterAssembliesLoaded = after,
+            ProcessModAssemblies = Reflect.StaticMethod(compat, "ProcessModAssemblies", assemblies),
+            ApplyPendingAtFrameBoundary = Reflect.Delegate<Action>(Reflect.StaticMethod(injection, "ApplyPendingAtFrameBoundary")),
+        };
+    }
+
+    /// <summary>
+    /// Whether this runtime has WaylithClr field injection (WaylithClr.FieldInjection in
+    /// System.Private.CoreLib), which Waylith.Injection needs. The bundled WaylithClr has it;
+    /// the standard .NET runtime does not, and there the official boot fails in
+    /// <c>PrepatcherCompat.Install</c> with a TypeLoadException.
+    /// </summary>
+    public static bool RuntimeHasFieldInjection => typeof(object).Assembly.GetType("WaylithClr.FieldInjection") != null;
+
+    /// <summary>The same two boot steps as the official Bootstrap, in its order.</summary>
+    public void InstallLikeOfficialBoot()
+    {
+        Install();
+        AfterAssembliesLoaded.SetValue(null, Delegate.CreateDelegate(AfterAssembliesLoaded.FieldType, ProcessModAssemblies));
     }
 }

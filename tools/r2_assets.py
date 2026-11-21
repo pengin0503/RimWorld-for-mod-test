@@ -29,6 +29,11 @@ class AssetError(Exception):
 
 PRIVATE_INDEX_KEY = "rimworld-mod-index.zip"
 LEGACY_PRIVATE_INDEX_KEY = "PrivateIndex/rimworld-mod-index-2026-10-26.zip"
+# The owner's upload tool records the exact file list and SHA-256 of the build in Game-Linux/.
+GAME_PROVENANCE_KEY = "_manifests/game-linux/source-provenance.json.gz"
+GAME_VERSION_KEY = "Game-Linux/Version.txt"
+# Single objects whose size may be listed without listing a whole prefix.
+EXACT_LISTING_KEYS = STATIC_AUDIT_KEYS | {GAME_PROVENANCE_KEY}
 
 
 def validate_key(key: str) -> str:
@@ -38,7 +43,7 @@ def validate_key(key: str) -> str:
     parts = key.split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise AssetError("object key contains an unsafe path component")
-    if key in (PRIVATE_INDEX_KEY, LEGACY_PRIVATE_INDEX_KEY):
+    if key in (PRIVATE_INDEX_KEY, LEGACY_PRIVATE_INDEX_KEY, GAME_PROVENANCE_KEY):
         return key
     if parts[0] == "Game-Linux" and len(parts) >= 2:
         return key
@@ -123,9 +128,15 @@ class R2:
     def list_static_audit_key(self, key: str) -> list[dict]:
         if key not in STATIC_AUDIT_KEYS:
             raise AssetError('static audit listing requires a fixed key')
-        return [item for item in self._list_prefix(key) if item['key'] == key]
+        return self._list_prefix(key, exact=True)
 
-    def _list_prefix(self, prefix: str) -> list[dict]:
+    def list_exact_key(self, key: str) -> list[dict]:
+        """The listing entry of one fixed object (empty when it does not exist)."""
+        if key not in EXACT_LISTING_KEYS:
+            raise AssetError('exact listing requires a fixed approved key')
+        return self._list_prefix(key, exact=True)
+
+    def _list_prefix(self, prefix: str, *, exact: bool = False) -> list[dict]:
         entries = []
         token = None
         while True:
@@ -143,6 +154,8 @@ class R2:
                 key = item["Key"]
                 if not key.startswith(prefix):
                     raise AssetError("R2 listing escaped requested prefix")
+                if exact and key != prefix:
+                    continue
                 if key.endswith("/"):
                     continue
                 validate_key(key)

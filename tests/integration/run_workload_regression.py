@@ -53,12 +53,17 @@ def check_request_digest(manifest: dict, request_path: Path):
         raise ValueError("private request changed since preparation")
 
 
-PINNED_VERSION = "1.7.4985 rev1269"
+QUALIFIED_STATES = ("reviewedRecord", "privateRecord")
 
 
 def require_pinned_game(prepared: dict) -> None:
-    if not isinstance(prepared, dict) or prepared.get("version") != PINNED_VERSION:
-        raise ValueError("P4 only supports the qualified Linux RimWorld 1.7.4985 rev1269 snapshot")
+    """P4 measures only a 1.7 build with a qualification record for exactly its files
+    (codex_workflow.prepare reports which); an unqualified build is refused, not measured."""
+    state = (prepared.get("qualification") or {}).get("state") if isinstance(prepared, dict) else None
+    version = prepared.get("version") if isinstance(prepared, dict) else None
+    if not isinstance(version, str) or cw.game_builds.family(version) is None or state not in QUALIFIED_STATES:
+        raise ValueError("P4 only supports a qualified Linux RimWorld 1.7 snapshot "
+                         f"(this one: {version!r}, qualification {state!r})")
 
 
 def prepare_profile(root: Path, profile: str):

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RWMT.PrepatcherField</AssemblyName>
+    <!-- CS0626: the accessor is extern on purpose; the game's Prepatcher layer gives it a body. -->
+    <NoWarn>$(NoWarn);CS0626</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="0PrepatcherAPI">
+      <HintPath>$(PrepatcherApiDll)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

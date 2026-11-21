@@ -9,6 +9,7 @@
 - `TryParseVersionString` は最初の major/minor を使う一方、選択されたフォルダは正規化された版名で構築される。今回の取得器は非正規の数値版ディレクトリを安全に再現できない場合、推測せず `unsupportedVersionDirectory` で止める。
 - `Verse.ModLoadFolders.LoadDataFromXmlCustom`：版タグは小文字化し、先頭の `v` を外す。`/` と `\` は root 指定。`Verse.LoadFolder.ShouldLoad`：`IfModActive` はカンマ区切りのどれか、`IfModActiveAll` は全部、`IfModNotActive` はどれも有効でない場合。複数属性は AND。判定は `ModLister.AnyModActiveNoSuffix` / `AllModsActiveNoSuffix` による有効 MOD の識別子照合。
 - `Verse.ModMetaData.ModMetaDataInternal.InitVersionedData` と `VersionedData<T>.GetItemForVersion`：`modDependenciesByVersion` の現在の major/minor（1.7）に対するリストがあれば、空リストでも通常の `modDependencies` を置き換える。依存不足を自動で解決・追加する処理ではない。
+- 1.7.5014 での変更（2026-11-21 追記、[記録](2026-11-21-build-1.7.5014.md)）：MOD の `supportedVersions` に現在の major/minor がないときは、その中で現在版より古い最新の版（例 1.6）を代わりの鍵にする。現在版のリストがなければその版のリストを使う。対象は `modDependenciesByVersion`・`loadBeforeByVersion`・`loadAfterByVersion`・`incompatibleWithByVersion`・`descriptionsByVersion`。ロードフォルダの選択（上記）は 1.7.4985 と同じ。`tools/mod_load_plan.py` は計画するビルドを受け取り、1.7.5014 以降でだけこの規則を使う。
 - `Verse.ModContentPack.AllDefs` は当該 MOD が読み込んだ Def の一覧。比較用にその件数と実際の `foldersToLoadDescendingOrder` を Worker の `runningMods` に観測値として記録する。Def の内容や値を書き換えない。
 
 ## 取得器での対応

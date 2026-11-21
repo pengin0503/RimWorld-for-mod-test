@@ -60,6 +60,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 - `status`、`executionStatus`（`completed` / `failed` / `notStarted` / `interrupted`）、`fidelity`（`qualified` / `experimental`）、`reasons[]`（`code` と `detail`）。
 - `stages.A/B/C/D`：`completed` / `failed` / `incomplete` / `blocked` / `notRequested`。
 - `request`（sha256、正規化後の levels/official/language/limits）、`game`（版、fingerprint、adapter、照合方法）、`platform`、`runtime`（実際の CLR 記述と WaylithClr 設定）、`tool.workerSha256`。
+- `game.family`（対応する系列。今は `rimworld-1.7`）、`game.qualificationRecord`（適格の根拠にした記録。`{"source": "committed" | "private", "method": "manual" | "automatic", "file"?}`。記録がなければ `null` で `fidelity=experimental`）、`game.qualificationNotes`（記録を使わなかった理由など。あるときだけ）。1.7 系の未登録ビルドは `blocked` にせず実験として動かします（[ゲームの更新への追従](../build-updates.md)）。
 - `mods[]`（packageId、元パス、ZIP 入力なら `archive` の元パスと sha256、ファイル数、内容 sha256、同梱 0Harmony.dll）、`modOrder`（要求と実際）、`runningMods`、`modClasses`、`activeLanguage`、`loadedAssemblies`（mvid）。
 - `checks`：期待値ごとの実値と `match` / `mismatch` / `missing` / `error`。Harmony は登録一覧、期待外の登録、読み込まれた Harmony の版も含む。
 - `diagnostics.newInTarget`：ベースラインにない error/warning（多重集合の差）。`mentionsTargets` は本文に対象の packageId/フォルダ名が出るものの目安で、責任の確定ではない。
@@ -71,7 +72,7 @@ Controller と Worker の間の内部ファイル（`rwmtWorkerRequest` / `rwmtW
 
 ## 判定順序
 
-1. **blocked**（`executionStatus=notStarted`）：要求不正、出力先が空でない（このときは出力先に何も書かず、何も消さない）、Linux x64・Windows x64 以外（`platformUnsupported`）、スナップショットが別 OS 用（`platformMismatch`）、未知の C ケース、Worker なし、スナップショット改変、公式コンテンツ・言語・MOD の不足、対応 Adapter のないビルド（`--allow-unknown-build` なし）、B で Harmony を同梱した MOD がない。
+1. **blocked**（`executionStatus=notStarted`）：要求不正、出力先が空でない（このときは出力先に何も書かず、何も消さない）、Linux x64・Windows x64 以外（`platformUnsupported`）、スナップショットが別 OS 用（`platformMismatch`）、未知の C ケース、Worker なし、スナップショット改変、公式コンテンツ・言語・MOD の不足、対応する系列にないビルド（`unknownBuild`。1.7 以外の major.minor や読めない Version.txt。`--allow-unknown-build` なし）、B で Harmony を同梱した MOD がない。
 2. **incomplete**：Controller による停止（timeout/memoryLimit/logLimit）、Worker 結果の欠落・不正・古い nonce、Worker の未完了、ベースラインの未完了または信頼できないベースライン（診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、翻訳エラーの切り詰め。キャッシュもしない）、`experimental`、診断の取りこぼし、Verse ログ上限、MOD 順序の不一致、計画したロードフォルダとの不一致（`loadFolderMismatch`）、言語が適用されない、期待値を評価できない、B で期待パッチ未指定。
 3. **failed**：上記がなく、qualified な範囲で期待値の不一致、期待パッチの未登録、ロード例外、対象で新たに出た error/warning（`allow` で外したものを除く）、対象で増えた翻訳エラー（同）のいずれかを確認。
 4. **passed**：上記のいずれもない。限定範囲の合格で、`scope.notChecked` は未検証。
@@ -107,7 +108,7 @@ incomplete でも、確認できた不一致や新しい診断は `reasons` と 
 - `stages.map`：`completed` / `failed` / `incomplete` / `notStarted` と `fidelity`。
 - `map.image`（`--out/map.png`）と `map.baselineImage`（対象を外したベースラインのマップ）。1 セル 1 色の模式図で、ゲームの描画ではありません。対象 MOD の物はマゼンタ、対象 MOD の地形は薄いマゼンタ。凡例とセル数は `map.legend`。
 - `map.summary`（タイル、バイオーム、地形の特徴、MapGeneratorDef、実行した GenStep 数、物の数）、`map.targetContent`（MOD 別の数、対象 MOD の物・地形と位置、対象 MOD の GenStep）、`map.checks`（`mapThings` の結果）、`map.observationFile`（全セルの層とパレット）。
-- `map.fidelity`（`qualified` なら `map.qualificationEvidence` に根拠の文書）と `map.variation`。対応ビルドのマップ生成は、同じ種でも実行ごとに少し違うマップになります（公式の quick test も同じ）。対象込みのマップとベースラインはそれぞれ 1 回分の標本で、MOD と関係のない場所も違います。
+- `map.fidelity`（`qualified` なら `map.qualificationEvidence` に根拠の文書）と `map.variation`。対応ビルドのマップ生成は、同じ種でも実行ごとに少し違うマップになります（公式の quick test も同じ。ゲームの `Map.NextGenSeed` などが、.NET がプロセスごとに無作為にする `System.HashCode` で乱数の種を作るため）。対象込みのマップとベースラインはそれぞれ 1 回分の標本で、MOD と関係のない場所も違います。
 - マップ生成中に出た error/warning は通常の診断として扱い、同じ種で生成したベースラインとの差分で判定します（例：対象 MOD の GenStep が例外を出すと `newErrors`）。
 
 判定への追加：

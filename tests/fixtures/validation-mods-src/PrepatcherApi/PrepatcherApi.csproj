@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Build-time stand-in for the Prepatcher API that mods written for Prepatcher reference
+    (assembly 0PrepatcherAPI). Only the attribute names the prepatcherfield fixture uses.
+    It is never copied into a mod: RimWorld 1.7.5014's runtimeconfig redirects
+    0PrepatcherAPI to the game's own RimWorldWaylith.PrepatcherCompat.
+  -->
+  <PropertyGroup>
+    <AssemblyName>0PrepatcherAPI</AssemblyName>
+    <RootNamespace>Prepatcher</RootNamespace>
+  </PropertyGroup>
+</Project>

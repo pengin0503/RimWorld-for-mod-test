@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from test_codex_workflow import sample_index
 from test_validation_host import TempCase
+from r2_fakes import with_game_files
 
 SCRIPT = Path(__file__).parent / 'integration' / 'run_preparation_measurement.py'
 
@@ -125,7 +126,7 @@ class PreparationMeasurementFlowTests(TempCase):
                     raise AssertionError('unexpected key')
                 return 'downloaded'
 
-        with patch.object(m.cw, 'r2_client', return_value=FakeR2()):
+        with patch.object(m.cw, 'r2_client', return_value=with_game_files(FakeR2)()):
             self.assertEqual(m.main(['prepare', '--root', str(self.root)]), 0)
         prepared = m.read_summary(self.root)
         self.assertTrue(prepared['snapshotReused'])

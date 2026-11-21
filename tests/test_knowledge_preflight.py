@@ -298,6 +298,24 @@ class KnowledgeDatabaseTests(unittest.TestCase):
         with self.assertRaises(kp.KnowledgeError):
             kp.check_requirements(requirements, self.db)
 
+    def test_dependency_rules_follow_the_build_of_the_pack(self):
+        """1.7.5014 falls back to the newest older supported version's dependencies; 1.7.4985 does not."""
+        import shutil
+        extra = ("<modDependencies><li><packageId>generic.dep</packageId></li></modDependencies>"
+                 "<modDependenciesByVersion><v1.6><li><packageId>six.dep</packageId></li></v1.6></modDependenciesByVersion>")
+        mod = self.make_mod(version="1.6", extra=extra)
+        active = ("ludeon.rimworld", "generic.dep")
+        self.assertNotIn("dependencyMissing", {i["code"] for i in kp.inspect_mod(
+            mod, self.db, active_packages=active, complete_set=True)["issues"]})
+        folder = self.root / "pack-5014"
+        shutil.copytree(kp.DATABASE_ROOT / "1.7.4985-rev1269", folder)
+        manifest = json.loads((folder / "manifest.json").read_text())
+        manifest["gameBuild"] = "1.7.5014 rev1195"
+        (folder / "manifest.json").write_text(json.dumps(manifest))
+        later = kp.load_database(build="1.7.5014 rev1195", pack_dir=folder)
+        self.assertIn("dependencyMissing", {i["code"] for i in kp.inspect_mod(
+            mod, later, active_packages=active, complete_set=True)["issues"]})
+
     def test_explicit_newer_build_pack_is_opt_in_never_fallback(self):
         import shutil
         folder = self.root / "later"

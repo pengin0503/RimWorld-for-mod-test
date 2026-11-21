@@ -84,15 +84,15 @@ class RecordTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(gb.RecordError):
                 gb.validate_record(body)
 
-    def test_the_committed_5014_record_qualifies_a_b_only(self):
+    def test_the_committed_5014_record_qualifies_a_b_and_map(self):
         adapter = gb.committed_adapters(REPO / 'validation-data')['rimworld-1.7.5014-rev1195']
         self.assertEqual(adapter['version'], '1.7.5014 rev1195')
         self.assertEqual(adapter['record'], {'source': 'committed', 'method': 'automatic'})
         self.assertNotIn('worker', adapter)
         self.assertEqual(set(adapter['qualified']), {('linux-x64', 'waylith')})
         row = adapter['qualified'][('linux-x64', 'waylith')]
-        # The map comparison did not agree on this build (docs/research/2026-11-21-build-1.7.5014.md).
-        self.assertEqual((row['levels'], row['features']), (('A', 'B'), ()))
+        # Map compared map for map with deterministic generation seeds (docs/research/2026-11-21-build-1.7.5014.md).
+        self.assertEqual((row['levels'], row['features']), (('A', 'B'), ('map',)))
         self.assertEqual(adapter['experimentalFeatures'], ('bounded-tick.v1', 'bounded-tick.v2'))
         self.assertEqual(adapter['sha256']['Assembly-CSharp.dll'],
                          'aed36980a0a6a0469432d2cd062e0917102b0019d07afc832b2c959c362273bb')
@@ -102,7 +102,7 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(record['comparison']['officialAB']['notMatched'], [])
         self.assertTrue(record['comparison']['repositoryClean'])
         self.assertEqual(record['comparison']['map'] | {'seconds': None},
-                         {'cases': 4, 'repeat': 10, 'equivalent': 3, 'notEquivalent': ['map-genstep-throws'],
+                         {'cases': 4, 'repeat': 5, 'judgement': 'sameMapEveryRun', 'equivalent': 4, 'notEquivalent': [],
                           'seconds': None})
 
     def test_the_committed_4985_record_is_the_former_adapter_unchanged(self):

@@ -23,20 +23,24 @@
         "A",
         "B"
       ],
-      "features": [],
+      "features": [
+        "map"
+      ],
       "runtimeSha256": {
         "libcoreclr.so": "d4d02e470aa0b6f941d4d9dfab3a4bc4d8ed8e186ff880f4d5d56b3d069107dd",
         "System.Private.CoreLib.dll": "b642f0792595b45fbf1a26b998b6bf8f52dcb6ef1da285c9c75c8811894403be"
       },
       "evidence": "automatic: experiments/official-comparison/qualify_build.py (summary in comparison)",
-      "featureEvidence": {}
+      "featureEvidence": {
+        "map": "automatic: compare_official.py --map (summary in comparison.map)"
+      }
     }
   ],
-  "createdAt": "2026-11-21T06:14:49Z",
-  "note": "Automatic comparison with the official game of this build (qualify_build.py, 2026-11-21, clean commit 2c26a72, Worker SHA-256 fba9ab46d621ddb9282a9d1749da9dd70e986d9c5d731b3e8f35202dc7e5ddce). Matrix 23/23 and official A/B 10/10 agreed in three separate runs; D acceptance 10/10 and v2 3/3 in two. Map is not qualified: judged by the permutation test fixed before this run (10 runs per side), 3 of 4 cases were equivalent and map-genstep-throws differed (p = 0.0026, thing-count Plant_TreeDrago) (docs/research/2026-11-21-build-1.7.5014.md).",
+  "createdAt": "2026-11-21T07:24:47Z",
+  "note": "Automatic comparison with the official game of this build (qualify_build.py, 2026-11-21, clean commit 0874091, Worker SHA-256 fba9ab46d621ddb9282a9d1749da9dd70e986d9c5d731b3e8f35202dc7e5ddce). Matrix 23/23 and official A/B 10/10 (fourth agreeing run); D acceptance 10/10 and v2 3/3. Map: compared map for map with the generation seeds .NET randomizes per process (Map.NextGenSeed, LayoutWorker.FillAllRooms) made deterministic in both runs and salted per run; 4 cases x 5 salts, every product map identical to the official one. An earlier distribution comparison (permutation test) had flagged map-genstep-throws; the cause of the run-to-run variation it measured is documented in docs/research/2026-11-21-build-1.7.5014.md.",
   "comparison": {
     "tool": "qualify_build.py/1",
-    "repositoryCommit": "2c26a7288acd4f01b550b963d97c9bdd8c4b390a",
+    "repositoryCommit": "0874091e1ec42a6dc1c86d8fb1f188a4366184a5",
     "repositoryClean": true,
     "platform": "linux-x64",
     "runtime": "waylith",
@@ -44,46 +48,44 @@
       "cases": 23,
       "asExpected": 23,
       "notAsExpected": [],
-      "seconds": 333.4
+      "seconds": 343.4
     },
     "officialAB": {
       "cases": 10,
       "matched": 10,
       "notMatched": [],
-      "seconds": 257.1
+      "seconds": 262.3
     },
     "map": {
       "cases": 4,
-      "repeat": 10,
-      "equivalent": 3,
-      "notEquivalent": [
-        "map-genstep-throws"
-      ],
-      "seconds": 1528.7
+      "repeat": 5,
+      "judgement": "sameMapEveryRun",
+      "equivalent": 4,
+      "notEquivalent": [],
+      "seconds": 1111.8
     },
     "boundedTickV1": {
       "ok": true,
       "cases": 10,
       "asExpected": 10,
-      "seconds": 353.3
+      "seconds": 361.1
     },
     "boundedTickV2": {
       "ok": true,
       "cases": 3,
       "asExpected": 3,
-      "seconds": 79.6
+      "seconds": 79.3
     },
     "officialTickComparison": {
       "informationOnly": true,
       "agrees": false,
       "runs": 3,
       "faults": [
-        "independentObservationsDiffer",
         "official.diagnosticsOrExit",
         "product.diagnosticsOrExit"
       ],
-      "seconds": 180.7
+      "seconds": 181.5
     },
-    "seconds": 2732.7
+    "seconds": 2339.5
   }
 }

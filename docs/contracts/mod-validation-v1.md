@@ -108,7 +108,7 @@ incomplete でも、確認できた不一致や新しい診断は `reasons` と 
 - `stages.map`：`completed` / `failed` / `incomplete` / `notStarted` と `fidelity`。
 - `map.image`（`--out/map.png`）と `map.baselineImage`（対象を外したベースラインのマップ）。1 セル 1 色の模式図で、ゲームの描画ではありません。対象 MOD の物はマゼンタ、対象 MOD の地形は薄いマゼンタ。凡例とセル数は `map.legend`。
 - `map.summary`（タイル、バイオーム、地形の特徴、MapGeneratorDef、実行した GenStep 数、物の数）、`map.targetContent`（MOD 別の数、対象 MOD の物・地形と位置、対象 MOD の GenStep）、`map.checks`（`mapThings` の結果）、`map.observationFile`（全セルの層とパレット）。
-- `map.fidelity`（`qualified` なら `map.qualificationEvidence` に根拠の文書）と `map.variation`。対応ビルドのマップ生成は、同じ種でも実行ごとに少し違うマップになります（公式の quick test も同じ）。対象込みのマップとベースラインはそれぞれ 1 回分の標本で、MOD と関係のない場所も違います。
+- `map.fidelity`（`qualified` なら `map.qualificationEvidence` に根拠の文書）と `map.variation`。対応ビルドのマップ生成は、同じ種でも実行ごとに少し違うマップになります（公式の quick test も同じ。ゲームの `Map.NextGenSeed` などが、.NET がプロセスごとに無作為にする `System.HashCode` で乱数の種を作るため）。対象込みのマップとベースラインはそれぞれ 1 回分の標本で、MOD と関係のない場所も違います。
 - マップ生成中に出た error/warning は通常の診断として扱い、同じ種で生成したベースラインとの差分で判定します（例：対象 MOD の GenStep が例外を出すと `newErrors`）。
 
 判定への追加：

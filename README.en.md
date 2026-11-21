@@ -14,7 +14,7 @@ See the [validation host guide](docs/validation-host.md) for setup and execution
 
 ## Supported scope
 
-On Linux x86_64 with the bundled WaylithClr, mod loading, XML patches, reference resolution, Def checks and selected Harmony checks are qualified per game build. Qualified builds: RimWorld 1.7.4985 rev1269 (map generation qualified too) and 1.7.5014 rev1195 (map generation experimental).
+On Linux x86_64 with the bundled WaylithClr, mod loading, XML patches, reference resolution, Def checks and selected Harmony checks are qualified per game build. Qualified builds: RimWorld 1.7.4985 rev1269 and 1.7.5014 rev1195, both including map generation.
 
 A new RimWorld 1.7 build runs without code changes, as experimental. It becomes qualified only when an automatic comparison with the official game of the same build agrees in every stage; see [following game updates](docs/build-updates.md). Another major.minor (such as 1.8) stops with `unknownBuild`.
 

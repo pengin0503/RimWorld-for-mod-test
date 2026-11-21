@@ -132,14 +132,17 @@ RUN_BROKEN_REASONS = {'workerFailed', 'workerInterrupted', 'workerUnknown', 'wor
                       'timeout', 'memoryLimit', 'logLimit'}
 
 
-def matches(expected_status, expected_codes, status, codes, *, experimental):
+def matches(expected_status, expected_codes, status, codes, *, experimental, map_unqualified=False):
     """Whether a case behaved as expected. On an unqualified platform the Controller turns
-    passed/failed into incomplete; the run must then show the same findings and nothing else."""
+    passed/failed into incomplete; the run must then show the same findings and nothing else.
+    The same holds for a map case on a build whose A/B are qualified but whose map stage is not
+    (``map_unqualified``): the run is then incomplete with mapNotQualified."""
     if any(c in RUN_BROKEN_REASONS and c not in expected_codes for c in codes):
         return False
-    if not experimental or expected_status in ('incomplete', 'blocked'):
+    marker = 'experimental' if experimental else 'mapNotQualified' if map_unqualified else None
+    if marker is None or expected_status in ('incomplete', 'blocked'):
         return status == expected_status and all(c in codes for c in expected_codes)
-    if status != 'incomplete' or 'experimental' not in codes:
+    if status != 'incomplete' or marker not in codes:
         return False
     if expected_status == 'passed':
         return set(codes) <= UNQUALIFIED_REASONS
@@ -201,7 +204,9 @@ def main(argv=None):
                                                 baseline_cache=out / 'baseline-cache')
         codes = [r['code'] for r in result.get('reasons', [])]
         experimental = result.get('fidelity') == 'experimental' and runtime == 'waylith'
-        good = matches(expected_status, expected_codes, result['status'], codes, experimental=experimental)
+        map_unqualified = (result.get('map') or {}).get('fidelity') == 'experimental' and runtime == 'waylith'
+        good = matches(expected_status, expected_codes, result['status'], codes, experimental=experimental,
+                       map_unqualified=map_unqualified)
         ok &= good
         rows.append({'case': name, 'platform': result.get('platform'), 'runtime': runtime, 'expected': expected_status,
                      'status': result['status'],

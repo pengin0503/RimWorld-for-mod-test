@@ -17,6 +17,16 @@ class ExperimentalExpectationTests(unittest.TestCase):
         self.assertTrue(matrix.matches('passed', [], 'incomplete', ['experimental', 'mapNotQualified'], experimental=True))
         self.assertFalse(matrix.matches('passed', [], 'incomplete', ['experimental', 'newErrors'], experimental=True))
         self.assertFalse(matrix.matches('passed', [], 'passed', [], experimental=True))
+        # A/B qualified, map stage not (e.g. 1.7.5014 before the map comparison agreed).
+        self.assertTrue(matrix.matches('passed', [], 'incomplete', ['mapNotQualified'], experimental=False,
+                                       map_unqualified=True))
+        self.assertFalse(matrix.matches('passed', [], 'passed', [], experimental=False, map_unqualified=True))
+        self.assertFalse(matrix.matches('passed', [], 'incomplete', ['mapNotQualified', 'newErrors'], experimental=False,
+                                        map_unqualified=True))
+        self.assertTrue(matrix.matches('failed', ['newErrors'], 'incomplete', ['mapNotQualified', 'newErrors'],
+                                       experimental=False, map_unqualified=True))
+        self.assertFalse(matrix.matches('passed', [], 'incomplete', ['experimental'], experimental=False,
+                                        map_unqualified=True))
 
     def test_failure_must_still_be_found(self):
         self.assertTrue(matrix.matches('failed', ['newErrors'], 'incomplete', ['experimental', 'newErrors'], experimental=True))

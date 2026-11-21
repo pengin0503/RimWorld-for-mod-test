@@ -100,7 +100,10 @@ class RecordTests(unittest.TestCase):
         self.assertEqual({k: record['comparison'][k]['ok'] for k in ('boundedTickV1', 'boundedTickV2')},
                          {'boundedTickV1': True, 'boundedTickV2': True})
         self.assertEqual(record['comparison']['officialAB']['notMatched'], [])
-        self.assertNotIn('map', record['comparison'])
+        self.assertTrue(record['comparison']['repositoryClean'])
+        self.assertEqual(record['comparison']['map'] | {'seconds': None},
+                         {'cases': 4, 'repeat': 10, 'equivalent': 3, 'notEquivalent': ['map-genstep-throws'],
+                          'seconds': None})
 
     def test_the_committed_4985_record_is_the_former_adapter_unchanged(self):
         adapters = gb.committed_adapters(REPO / 'validation-data')

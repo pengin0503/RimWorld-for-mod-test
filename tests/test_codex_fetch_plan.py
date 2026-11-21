@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
 from tools import codex_workflow as c
+from r2_fakes import with_game_files
 
 class FetchPlanTests(unittest.TestCase):
     def run_fetch(self, extra, about=None, official=None, stale_directory=None, local=None):
@@ -30,7 +31,7 @@ class FetchPlanTests(unittest.TestCase):
                 (local_target/name).parent.mkdir(parents=True,exist_ok=True);(local_target/name).write_bytes(data)
             target,dependency=None,['Example']
         args=SimpleNamespace(private_root=root/'private',index_zip=str(archive),aws='aws',refresh=False,target=target,local_target=local_target,dependency=dependency,scope='validation',language='English',official=official or ['Core'])
-        with patch.object(c,'r2_client',return_value=R2()):return c.fetch_mods(args)
+        with patch.object(c,'r2_client',return_value=with_game_files(R2)()):return c.fetch_mods(args)
     def test_default_downloads_fallback_version(self):
         result=self.run_fetch({'1.6/Defs/A.xml':b'<Defs/>','1.5/Defs/B.xml':b'<Defs/>'})
         self.assertIn('1.6/Defs/A.xml',self.pulled)

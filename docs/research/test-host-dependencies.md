@@ -42,6 +42,8 @@ Controller の Adapter 表（`tools/validation_host.py` の `ADAPTERS`）は、�
 - 実害の例：`ProfilerBootStart` の静的コンストラクタが `TypeLoadException`（System.Runtime に `WaylithClr.MethodBodyUpdater` がない）で失敗する。
 - 製品の Worker で確認した 2 ケース（`standard-runtime-ok`、`standard-runtime-bad-reference`）と、試作段階の 6 構成では、fixture の故障検出結果は WaylithClr と同じだった。上記の `ProfilerBootStart` エラーはベースラインにも出るため、差分判定では新しいエラーにならない。ただし差の影響範囲を証明していないため、標準 .NET の結果は常に `fidelity=experimental`、`status=incomplete` とする。
 
+1.7.5014 からは、公式の起動（`PrepatcherCompat.Install`）が WaylithClr のフィールド注入 API（`System.Private.CoreLib` の `WaylithClr.FieldInjection`）を必要とし、通常の .NET では `TypeLoadException` で止まる。公式の実行ファイルも通常の .NET では起動できない。この場合の Worker は Prepatcher 互換層の 3 工程を行わず、`skippedOfficialSteps` に理由を書き、`prepatcherCompat=skippedRuntimeLacksFieldInjection` を記録して続ける。Prepatcher 用に書かれた MOD は、注入されるフィールド・コンポーネント・free patch がない状態で読まれ（`0PrepatcherAPI` などの参照の振り替えも代行しない）、結果は WaylithClr と違い得る。標準 .NET の結果は従来どおり常に `experimental` / `incomplete`。
+
 ## 不足・未確認
 
 - 実際の利用者 MOD の検証には、その MOD 一式と依存 MOD（多くは `brrainz.harmony`）が必要。まだ受け取っていない。

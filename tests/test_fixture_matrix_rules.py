@@ -28,6 +28,25 @@ class ExperimentalExpectationTests(unittest.TestCase):
         self.assertTrue(matrix.matches('blocked', ['harmonyMissing'], 'blocked', ['harmonyMissing'], experimental=True))
         self.assertFalse(matrix.matches('blocked', ['harmonyMissing'], 'incomplete', ['experimental'], experimental=True))
 
+    def test_a_broken_run_never_matches_unless_the_case_names_it(self):
+        # standard-runtime-ok expects incomplete+experimental; a crashed Worker must not satisfy it.
+        self.assertFalse(matrix.matches('incomplete', ['experimental'], 'incomplete',
+                                        ['workerFailed', 'baselineIncomplete', 'experimental'], experimental=True))
+        self.assertFalse(matrix.matches('passed', [], 'incomplete', ['experimental', 'workerResultMissing'],
+                                        experimental=True))
+        self.assertTrue(matrix.matches('incomplete', ['workerInterrupted', 'baselineIncomplete'], 'incomplete',
+                                       ['workerInterrupted', 'baselineIncomplete', 'experimental'], experimental=True))
+
+    def test_build_dependent_expectation_for_prepatcher_fixture(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp) / 'game'
+            game.mkdir()
+            self.assertEqual(matrix.expected_case('prepatcher-field', tmp)[1:3], ('failed', ['newErrors']))
+            (game / 'RimWorldWaylith.PrepatcherCompat.dll').write_bytes(b'')
+            self.assertEqual(matrix.expected_case('prepatcher-field', tmp)[1:3], ('passed', []))
+            self.assertEqual(matrix.expected_case('ok', tmp)[1], 'passed')
+
 
 if __name__ == '__main__':
     unittest.main()

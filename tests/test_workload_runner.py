@@ -44,6 +44,8 @@ class WorkloadRunnerTests(unittest.TestCase):
         args = runner["parser"]().parse_args(
             ["cow", "--profile", "S", "--private-root", "/tmp/root"])
         self.assertEqual(args.phase, "cow")
+        # The machine running the tests may hold real R2 keys: compare, never print, the value.
+        before = os.environ.get("AWS_SECRET_ACCESS_KEY")
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root/"mods").mkdir()
@@ -55,7 +57,7 @@ class WorkloadRunnerTests(unittest.TestCase):
                 patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "fake"}, clear=False),
             ):
                 bench.side_effect = lambda private: (
-                    self.assertIsNone(os.environ.get("AWS_SECRET_ACCESS_KEY")) or
+                    self.assertTrue("AWS_SECRET_ACCESS_KEY" not in os.environ, "credential visible to the phase") or
                     {"status": "unsupportedFilesystem", "complete": False,
                      "samples": {"copy": 0, "reflink": 0},
                      "medianCopySeconds": None, "medianReflinkSeconds": None,
@@ -71,7 +73,7 @@ class WorkloadRunnerTests(unittest.TestCase):
                 (root/"cow-summary.json").unlink()
                 runner["run_cow_profile"](root, "S", mount)
                 self.assertEqual(bench.call_args.kwargs["btrfs_root"], mount)
-            self.assertEqual(os.environ.get("AWS_SECRET_ACCESS_KEY"), None)
+            self.assertTrue(os.environ.get("AWS_SECRET_ACCESS_KEY") == before, "credential not restored")
 
     def test_observation_only_counts_real_passed_results(self):
         build = self.code()["parse_measurement"]
@@ -89,12 +91,17 @@ class WorkloadRunnerTests(unittest.TestCase):
         result["status"] = "incomplete"
         self.assertEqual(build("cached-1", result, request, 2.25)["status"], "incomplete")
 
-    def test_profile_pins_exact_qualified_14985_build(self):
+    def test_profile_requires_a_qualified_1_7_build(self):
         runner = self.code()
-        runner["require_pinned_game"]({"version": "1.7.4985 rev1269"})
-        for bad in ("1.7.4995 rev0", "1.7.4985", None, "", 1.7):
-            with self.subTest(version=bad), self.assertRaises(ValueError):
-                runner["require_pinned_game"]({"version": bad})
+        for state in ("reviewedRecord", "privateRecord"):
+            runner["require_pinned_game"]({"version": "1.7.5014 rev1195", "qualification": {"state": state}})
+        for bad in ({"version": "1.7.4985 rev1269"},
+                    {"version": "1.7.6000 rev1", "qualification": {"state": "notQualified"}},
+                    {"version": "1.8.1 rev1", "qualification": {"state": "reviewedRecord"}},
+                    {"version": "1.7.4985", "qualification": {"state": "reviewedRecord"}},
+                    {"version": None}, None, "1.7.4985 rev1269"):
+            with self.subTest(prepared=bad), self.assertRaises(ValueError):
+                runner["require_pinned_game"](bad)
 
     def test_memory_sample_requires_both_baseline_and_target_rss(self):
         build = self.code()["parse_measurement"]
@@ -167,6 +174,7 @@ class WorkloadRunnerTests(unittest.TestCase):
     def test_run_separates_credentials_and_never_counts_failed_rows(self):
         runner = self.code()
         calls = []
+        before = os.environ.get("AWS_SECRET_ACCESS_KEY")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "game-snapshot").mkdir()
@@ -179,7 +187,7 @@ class WorkloadRunnerTests(unittest.TestCase):
             worker = root / "worker"
             worker.mkdir()
             def fake_validate(snapshot, request, out, worker_dir, **kwargs):
-                self.assertIsNone(os.environ.get("AWS_SECRET_ACCESS_KEY"))
+                self.assertTrue("AWS_SECRET_ACCESS_KEY" not in os.environ, "credential visible to the run")
                 name = out.name
                 calls.append((name, kwargs.get("baseline_cache")))
                 return {"status": "incomplete" if name == "uncached-3" else "passed",
@@ -201,7 +209,7 @@ class WorkloadRunnerTests(unittest.TestCase):
             self.assertFalse(summary["complete"])
             self.assertEqual(len(json.loads((root / "workload-rows.json").read_text())), 6)
             self.assertIsNone(summary["medianUncachedSeconds"])
-            self.assertEqual(os.environ.get("AWS_SECRET_ACCESS_KEY"), None)
+            self.assertTrue(os.environ.get("AWS_SECRET_ACCESS_KEY") == before, "credential not restored")
             self.assertTrue((root / "workload-summary.json").exists())
 
 

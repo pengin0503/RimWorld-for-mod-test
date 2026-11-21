@@ -2,6 +2,7 @@
 import unittest
 import xml.etree.ElementTree as ET
 from tools import codex_workflow as cw
+from r2_fakes import with_game_files
 
 
 def metadata(package, children=''):
@@ -49,7 +50,7 @@ class DependencyResolutionTests(unittest.TestCase):
                     return 'downloaded'
             args = SimpleNamespace(private_root=root / 'private', index_zip=str(archive), aws='aws',
                                    dependency=[], target='Example', language='English', scope='validation', refresh=False)
-            with patch.object(cw, 'r2_client', return_value=FakeR2()):
+            with patch.object(cw, 'r2_client', return_value=with_game_files(FakeR2)()):
                 result = cw.fetch_mods(args)
             request = json.loads(Path(result['request']).read_text())
             self.assertEqual([m['packageId'] for m in request['mods']], ['brrainz.harmony', 'author.example'])

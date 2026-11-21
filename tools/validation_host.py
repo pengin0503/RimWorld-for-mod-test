@@ -31,8 +31,9 @@ import zipfile
 try:
     import map_render
     import bounded_tick
+    import game_builds
 except ImportError:  # imported as tools.validation_host
-    from tools import map_render, bounded_tick
+    from tools import map_render, bounded_tick, game_builds
 
 TOOL_VERSION = '0.1.0'
 WORKER_NAME = 'RimWorldValidationWorker'
@@ -79,36 +80,12 @@ def detect_build_platform(files):
     found = [name for name, layout in BUILD_FILES.items() if layout['coreclr'] in present]
     return found[0] if len(found) == 1 else None
 
-# Builds the Worker has been checked against. ``qualifiedLevels`` is only granted
-# for the platform/runtime pair that was compared with the official headless boot
-# (docs/research/test-host-qualification.md); anything else runs as experimental.
-ADAPTERS = {
-    'rimworld-1.7.4985-rev1269': {
-        'version': '1.7.4985 rev1269',
-        'experimentalFeatures': ('bounded-tick.v1', 'bounded-tick.v2'),
-        'sha256': {
-            'Assembly-CSharp.dll': '0be7a7ea4b3111d4430f45b36c234a5e43287880b0514b23915f2ef9a0629e16',
-            'RimWorld.dll': '39bd67253a7fa5503ff7f2b51bc3ab5983fb1430acf57d7e8bb322d20e380555',
-            'Waylith.dll': 'c69c2a2828c5594b58c9b28f0d19d5b25ff5cb16ceb46dc64f34dd59b7affc26',
-            'UnityStubs.dll': 'ea962c9274514e0633d4e4c5471a1a98aff5fc52af20ca2e506c16dcd8be6f81',
-            'Waylith.UnityCompat.dll': 'de9bcdb4399caac13435840b007994d054d4ffce9b0081ae5fcd3eb1479c10e0',
-        },
-        'qualified': {
-            ('linux-x64', 'waylith'): {
-                'levels': ('A', 'B'),
-                'runtimeSha256': {
-                    'libcoreclr.so': 'eef17620f564c69d67ad9dcdef241902e9c12fef1cd090c973ab12a551f603d3',
-                    'System.Private.CoreLib.dll': 'd2075bc8fd8e2f0b4780ec248034b30e33d4cdd72513730886c5989d1f8008b7',
-                },
-                'evidence': 'docs/research/test-host-qualification.md#linux-x64-waylithclr',
-                # Map generation: compared with the official -quicktest as distributions over
-                # repeated runs, because generation is not reproducible on this build.
-                'features': ('map',),
-                'featureEvidence': {'map': 'docs/research/map-qualification.md'},
-            },
-        },
-    },
-}
+# Builds with a reviewed qualification record (validation-data/<build id>/qualification.json),
+# keyed ``rimworld-<build id>``. ``qualified`` is only granted for the platform/runtime pair
+# that was compared with the official game (docs/research/test-host-qualification.md).
+# Any other 1.7 build still runs: resolve_adapter gives it a family adapter, and it is
+# experimental until a record for exactly its files exists (tools/game_builds.py).
+ADAPTERS = game_builds.committed_adapters()
 
 DEFAULT_LIMITS = {'timeoutSeconds': 180, 'memoryMiB': 4096, 'logMiB': 32, 'diagnostics': 2000, 'messageKiB': 16}
 LIMIT_RANGES = {
@@ -198,16 +175,17 @@ def prepare_game(source, snapshot, *, log=print):
         path.chmod(stat.S_IMODE(mode) & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
     for current, dirs, _ in os.walk(game, topdown=False):
         Path(current).chmod(0o555)
+    version = (game / 'Version.txt').read_text(encoding='utf-8').strip()
     info = {
         'recordType': 'rwmtGameSnapshot', 'schemaVersion': 1,
         'createdAt': _now(), 'sourcePath': str(source),
-        'version': (game / 'Version.txt').read_text(encoding='utf-8').strip(),
+        'version': version,
         'officialContent': _official_folders(game),
         'fileCount': len(manifest), 'totalBytes': sum(e['size'] for e in manifest.values()),
         'symlinks': links,
         'buildPlatform': build_platform,
         'fingerprint': _fingerprint(manifest, build_platform),
-        'adapter': match_adapter(manifest)[0],
+        'adapter': resolve_adapter(manifest, version, store='')[0],
         'timings': {'copySeconds': round(copied - started, 3), 'hashSeconds': round(hashed - copied, 3),
                     'totalSeconds': round(time.monotonic() - started, 3)},
         'files': manifest,
@@ -232,11 +210,61 @@ def _fingerprint(manifest, platform):
 
 
 def match_adapter(manifest, adapters=None):
+    """The registered adapter whose identity hashes all match the snapshot (exact build only)."""
     adapters = ADAPTERS if adapters is None else adapters
     for name, adapter in adapters.items():
-        if all(manifest.get(rel, {}).get('sha256') == value for rel, value in adapter['sha256'].items()):
+        if adapter['sha256'] and all(manifest.get(rel, {}).get('sha256') == value for rel, value in adapter['sha256'].items()):
             return name, adapter
     return None, None
+
+
+def resolve_adapter(manifest, version, adapters=None, *, store=None, worker_sha256=None):
+    """The adapter for a snapshot: ``(name, adapter, notes)``; ``(None, None, notes)`` if unsupported.
+
+    1. A registered adapter (a reviewed record) for exactly these files.
+    2. Otherwise, for a build of a supported family (1.7.x): a private record from the
+       qualification store for exactly these files and this Worker build, else a family
+       adapter without qualification, so the build runs as experimental.
+    3. Otherwise none: another major.minor version or an unreadable Version.txt.
+    """
+    notes = []
+    name, adapter = match_adapter(manifest, adapters)
+    if adapter is not None:
+        return name, adapter, notes
+    family = game_builds.family(version)
+    if family is None:
+        return None, None, notes
+    build = game_builds.build_id(version)
+    name = f'rimworld-{build}'
+    registered = ADAPTERS if adapters is None else adapters
+    if any(a.get('version') == version for a in registered.values()):
+        notes.append(f'a reviewed record exists for {version}, but its file hashes differ from this snapshot; '
+                     'it is not used')
+    records, problems = game_builds.private_records(store)
+    notes.extend(f'qualification store: {problem}' for problem in problems)
+    for path, record in records:
+        if record['gameVersion'] != version or not game_builds.identity_matches(manifest, record):
+            continue
+        if (record.get('worker') or {}).get('sha256') != worker_sha256:
+            notes.append(f'qualification store: {path.name} was made with another Worker build; not used')
+            continue
+        found = game_builds.adapter_from_record(record, source='private')
+        found['record']['file'] = path.name
+        return name, {**found, 'family': family['id']}, notes
+    return name, {'version': version, 'buildId': build, 'family': family['id'], 'sha256': {},
+                  'experimentalFeatures': (), 'qualified': {}, 'record': None}, notes
+
+
+def unsupported_build_detail(version):
+    supported = ', '.join(f'{major}.{minor}' for major, minor in game_builds.FAMILIES)
+    parsed = game_builds.parse_version(version)
+    if parsed is None:
+        why = f'Version.txt {version!r} is not a RimWorld build version (expected like "1.7.5014 rev1195")'
+    else:
+        why = (f'RimWorld {parsed[0]}.{parsed[1]} is a different major/minor version; this host follows every '
+               f'{supported} build automatically, but a new major/minor version needs the Worker and the loader '
+               'rules checked first')
+    return why + '; pass --allow-unknown-build to run it as experimental'
 
 
 def load_snapshot(snapshot, *, full=False, official=()):
@@ -1623,7 +1651,7 @@ class EventTail:
 
 def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='waylith', baseline_cache=None,
                    allow_unknown_build=False, verify_full=False, keep_run_dirs=False, adapters=None, platform=None,
-                   progress_stream=None, hash_cache=None):
+                   progress_stream=None, hash_cache=None, qualification_store=None):
     started_wall = time.time()
     started = time.monotonic()
     out_dir = Path(out_dir).resolve()
@@ -1675,12 +1703,16 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
             raise Blocked('officialContentMissing', 'snapshot lacks official content: ' + ', '.join(missing))
         request['language'] = resolve_language(Path(snapshot['path']) / 'game', request['language'])
         result['request']['language'] = request['language']
-        adapter_name, adapter = match_adapter(snapshot['files'], adapters)
+        adapter_name, adapter, adapter_notes = resolve_adapter(
+            snapshot['files'], snapshot['version'], adapters, store=qualification_store,
+            worker_sha256=result['tool']['workerSha256'])
         result['game'] = {'snapshot': snapshot['path'], 'version': snapshot['version'], 'fingerprint': snapshot['fingerprint'],
-                          'adapter': adapter_name, 'verification': snapshot['verification']}
+                          'adapter': adapter_name, 'verification': snapshot['verification'],
+                          'family': (adapter or {}).get('family'), 'qualificationRecord': (adapter or {}).get('record')}
+        if adapter_notes:
+            result['game']['qualificationNotes'] = adapter_notes
         if adapter is None and not allow_unknown_build:
-            raise Blocked('unknownBuild', f'no adapter for game build {snapshot["version"]}; '
-                          'pass --allow-unknown-build to run it as experimental')
+            raise Blocked('unknownBuild', unsupported_build_detail(snapshot['version']))
         qualification = (adapter or {}).get('qualified', {}).get((result['platform'], runtime))
         if qualification:
             runtime_ok = all(snapshot['files'].get(rel, {}).get('sha256') == value
@@ -1951,7 +1983,10 @@ def main(argv=None):
                      help='waylith: the runtime shipped with the game (default); standard: stock .NET 10 (experimental)')
     run.add_argument('--baseline-cache', help='directory to reuse identical baseline runs')
     run.add_argument('--hash-cache', help='private file for reusing MOD file hashes')
-    run.add_argument('--allow-unknown-build', action='store_true', help='run a build without an adapter (experimental)')
+    run.add_argument('--allow-unknown-build', action='store_true',
+                     help='run a build of an unsupported major/minor version (experimental)')
+    run.add_argument('--qualification-store', help='private directory of automatic build qualification records '
+                     f'(default: ${game_builds.STORE_ENV})')
     run.add_argument('--verify-full', action='store_true', help='re-hash every snapshot file before running')
     run.add_argument('--keep-run-dirs', action='store_true', help='keep the per-run host directories for debugging')
     args = parser.parse_args(argv)
@@ -1965,7 +2000,8 @@ def main(argv=None):
     result = run_validation(args.snapshot, args.request, args.out, args.worker, runtime=args.runtime,
                             baseline_cache=args.baseline_cache, allow_unknown_build=args.allow_unknown_build,
                             verify_full=args.verify_full, keep_run_dirs=args.keep_run_dirs,
-                            progress_stream=sys.stderr, hash_cache=args.hash_cache)
+                            progress_stream=sys.stderr, hash_cache=args.hash_cache,
+                            qualification_store=args.qualification_store)
     print(_summary(result))
     if any(r['code'] == 'outputNotEmpty' for r in result.get('reasons', [])):
         print('result: not written (the output directory was not empty)')

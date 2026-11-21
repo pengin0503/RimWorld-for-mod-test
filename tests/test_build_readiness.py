@@ -1,4 +1,4 @@
-"""RimWorld 1.7.4995 readiness never upgrades qualification by inference."""
+"""Build readiness never upgrades qualification by inference."""
 from pathlib import Path
 import tempfile
 import unittest
@@ -48,11 +48,22 @@ class ReadinessTests(unittest.TestCase):
 
     def test_unknown_target_and_unsafe_payload_rejected(self):
         with tempfile.TemporaryDirectory() as d:
-            with self.assertRaises(ValueError):
-                br.inspect(FakeR2(b"1.7.4995 rev1300\n"), Path(d), "1.7.6000")
+            for target in ("1.8.6000", "1.7", "1.7.4995 rev1", "latest"):
+                with self.subTest(target=target), self.assertRaises(ValueError):
+                    br.inspect(FakeR2(b"1.7.4995 rev1300\n"), Path(d), target)
             self.assertEqual(
                 br.inspect(FakeR2(b"1.7.4995 rev1300\nEXTRA"), Path(d), "1.7.4995")["state"],
                 "invalidVersion")
+
+    def test_without_target_any_1_7_build_is_ready_but_never_qualified(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = br.inspect(FakeR2(b"1.7.6000 rev7\r\n"), Path(d))
+            self.assertEqual((result["state"], result["version"], result["buildId"], result["qualified"]),
+                             ("readyForAudit", "1.7.6000 rev7", "1.7.6000-rev7", False))
+            self.assertFalse(result["reviewedRecord"])
+            for version in (b"1.7.4985 rev1269\n", b"1.7.5014 rev1195\r\n"):
+                self.assertTrue(br.inspect(FakeR2(version), Path(d))["reviewedRecord"])
+            self.assertEqual(br.inspect(FakeR2(b"1.8.100 rev1\n"), Path(d))["state"], "unsupportedFamily")
 
     def test_version_not_present_requires_zero_gets(self):
         with tempfile.TemporaryDirectory() as d:

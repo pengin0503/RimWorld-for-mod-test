@@ -55,6 +55,8 @@ COMPARISON_CASES = {
     'init-exception': (['*initthrow', 'comparisonprobe'], ('Core',), 'English', 'A'),
     'harmony-ok': (['harmonylib', '*harmonyok', 'comparisonprobe'], ('Core',), 'English', 'AB'),
     'harmony-missing': (['harmonylib', '*harmonymissing', 'comparisonprobe'], ('Core',), 'English', 'AB'),
+    # Prepatcher-style field injection, which the official boot supports from 1.7.5014 on.
+    'prepatcher-field': (['*prepatcherfield', 'comparisonprobe'], ('Core',), 'English', 'A'),
 }
 # Map stage vs the official developer quick test (-quicktest). The mapprobe fixture makes the
 # official quick test use the product's default seed and logs a map fingerprint in both runs.

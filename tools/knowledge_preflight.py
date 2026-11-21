@@ -139,6 +139,13 @@ def load_database(*, build: str = PINNED_BUILD, pack_dir: Path | None = None) ->
     return KnowledgeDatabase(manifest, result)
 
 
+def _build_numbers(build: str) -> tuple:
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+) rev(\d+)", build)
+    if match is None:
+        raise KnowledgeError("knowledge pack build is not exact")
+    return tuple(int(part) for part in match.groups()[:3])
+
+
 def _static_issue(issues: list, code: str, *, definite: bool = True):
     # Deliberately omit private paths, raw XML, package descriptions and symbols.
     # Codes are the only publicly safe diagnostic interface by default.
@@ -164,6 +171,8 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
     stats = {"filesConsidered": 0, "xmlFilesChecked": 0, "definitionsFound": 0}
     pack_id = None
     files = []
+    # Loader rules of the build the knowledge pack describes (not the newest build the planner knows).
+    game = _build_numbers(db.metadata["gameBuild"])
     try:
         if not root.is_dir() or root.is_symlink() or any(p.is_symlink() for p in root.parents):
             raise KnowledgeError("MOD folder is unavailable or linked")
@@ -217,7 +226,7 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                 if pack_id and PACKAGE_ID.fullmatch(pack_id):
                     active.add(pack_id.casefold())
                 try:
-                    for dep in mod_load_plan.missing_dependencies(meta, active):
+                    for dep in mod_load_plan.missing_dependencies(meta, active, game):
                         _static_issue(issues, "dependencyMissing" if complete_set else "dependencyNotChecked",
                                       definite=bool(complete_set))
                 except mod_load_plan.LoadPlanError:
@@ -245,7 +254,7 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                            for item in load_xml.iter("li")):
                         _static_issue(issues, "conditionalLoadFoldersNotChecked",
                                       definite=False)
-                folders = mod_load_plan.load_folders(names, load_data, active)
+                folders = mod_load_plan.load_folders(names, load_data, active, game)
             except mod_load_plan.LoadPlanError as exc:
                 # A parser refusing to model a loader condition or version
                 # cannot prove the MOD invalid. Preserve unknown rather than

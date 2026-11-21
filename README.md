@@ -6,7 +6,7 @@ RimWorld MODの読み込みや一部のゲーム処理をLinux環境で検証す
 
 ## 内蔵・オフライン検証データベース（ゲーム本体不要）
 
-既存の実ゲーム検証とは別に、**1.7.4985 rev1269用**の公開可能な検証知識をリポジトリ内に収録しました。R2・ゲーム本体・非公開MOD索引を取得せず、ローカルMODのAbout/LoadFolders/選択XMLや、収録済みAPI・Def・Harmony対象名を確認できます。
+既存の実ゲーム検証とは別に、**1.7.4985 rev1269用**（後続ビルドへは流用しない）の公開可能な検証知識をリポジトリ内に収録しました。R2・ゲーム本体・非公開MOD索引を取得せず、ローカルMODのAbout/LoadFolders/選択XMLや、収録済みAPI・Def・Harmony対象名を確認できます。
 
     python tools/knowledge_preflight.py validate-db
     python tools/knowledge_preflight.py query --kind method --symbol Verse.GenText.ToSpaceList
@@ -20,7 +20,9 @@ RimWorld MODの読み込みや一部のゲーム処理をLinux環境で検証す
 
 ## 対応範囲
 
-Linux x86_64、RimWorld 1.7.4985 rev1269、同梱WaylithClrの組み合わせで、MODのロード、XMLパッチ、参照解決、Def検査、指定したHarmonyパッチの確認を適格化しています。マップ生成も別途適格化済みです。
+Linux x86_64と同梱WaylithClrで、MODのロード、XMLパッチ、参照解決、Def検査、指定したHarmonyパッチの確認を、ゲームのビルドごとに適格化しています。適格化済みのビルドは RimWorld 1.7.4985 rev1269（マップ生成も適格）と 1.7.5014 rev1195（マップ生成は実験段階）です。
+
+1.7 系の新しいビルドは、コードを変えずにそのまま検証できます（結果は実験段階）。公式ゲームの同じビルドと自動で比べて全て一致したときだけ、そのビルドを適格にします。手順は[ゲームの更新への追従](docs/build-updates.md)。1.8 など別の major.minor は `unknownBuild` で止まります。
 
 製造指示の材料候補と限定的なイベント選択肢、有限tickの検証は実験段階で、独立した適格化は未完了です。任意のMOD機能全体を検証するものではありません。単なる静的検査では `gameVerification=notRun` となり、実ゲーム処理の検証成功を意味しません。
 

@@ -7,7 +7,7 @@
     python3 tools/codex_workflow.py static-preflight --mod ./MyMod
     python3 tools/knowledge_preflight.py query --kind def --symbol ThingDef:Steel
 
-現行1.7 unstable（1.7.4985 rev1269）の**一部**の既知シンボルのみ内蔵。未収録はunknown扱いであり、静的合格は実ゲームの動作保証ではない。入力がローカルにない外部MODの特定や実ゲーム検証が必要なら、従来どおり非公開MOD索引から特定し、R2経由で必要ファイルのみ取得する。詳細は[内蔵検証データベース](knowledge-database.md)。
+1.7.4985 rev1269 の**一部**の既知シンボルのみ内蔵（後続ビルド用の知識パックはまだない。結果の `gameBuild` は常に 4985 で、ロードフォルダと依存の規則も 4985 のものを使う）。未収録はunknown扱いであり、静的合格は実ゲームの動作保証ではない。入力がローカルにない外部MODの特定や実ゲーム検証が必要なら、従来どおり非公開MOD索引から特定し、R2経由で必要ファイルのみ取得する。詳細は[内蔵検証データベース](knowledge-database.md)。
 
 ## 確認済みと未確認を分ける
 
@@ -66,7 +66,7 @@ ZIPに同梱された index_mods.py も私有領域で利用できる。正確�
       --official Core Royalty \
       --language English
 
-対象と明示した依存の About.xml から必須依存（1.7の版別指定を含む）だけを辿り、索引で正確に特定する。`loadAfter/loadBefore` は、選択済みMODと必須依存の間の順序にのみ適用し、それだけを理由に別MODを追加取得しない。必須依存が曖昧・索引になし、または選択済みMOD間の順序が循環する場合は blocked とする。重複、不明、曖昧なIDを拒否する。MODの取得は Workshop/<ID>/ の prefix に限定し、最初に About の XML/TXT を取得して PackageId を索引と照合する。不一致なら DLL 等を取得せず停止する。
+対象と明示した依存の About.xml から必須依存（1.7の版別指定を含む）だけを辿り、ゲームのビルドに合わせて計画する（準備済みスナップショットの版、なければ R2 の `Game-Linux/Version.txt`。結果の `gameVersion`）。1.7.5014 からは、MOD が 1.7 を対応版に挙げていないとき、版別の依存・順序指定は対応版のうち現在より古い最新の版（例 1.6）の指定を使う（1.7.4985 にはない規則）。1.7 以外の major.minor では `unsupportedGameVersion` で止まる。索引で正確に特定する。`loadAfter/loadBefore` は、選択済みMODと必須依存の間の順序にのみ適用し、それだけを理由に別MODを追加取得しない。必須依存が曖昧・索引になし、または選択済みMOD間の順序が循環する場合は blocked とする。重複、不明、曖昧なIDを拒否する。MODの取得は Workshop/<ID>/ の prefix に限定し、最初に About の XML/TXT を取得して PackageId を索引と照合する。不一致なら DLL 等を取得せず停止する。
 
 既定の `--scope validation` は、列挙結果と実ゲームに合わせて解釈した `LoadFolders.xml` から有効フォルダを確定する。現在版のフォルダがなければゲームと同じ版選択を行い、root・Common・1.7 に固定しない。`IfModActive` / `IfModActiveAll` / `IfModNotActive` は要求内の全 MOD と `--official` の DLC で評価する。その配下の Defs/Patches XML、Assemblies DLL、指定言語と英語フォールバックの XML/TXT に加え、実測で A のロード時にも必要と分かった Textures 画像・Sounds 音声を取得する。非選択版、ソース、デバッグ情報、無関係な言語は省く。`--scope all` は明示した場合だけ使用する。
 
@@ -94,9 +94,11 @@ ZIPに同梱された index_mods.py も私有領域で利用できる。正確�
 
 Game-Linux/ の必要資材を取得する。英語・日本語以外の Languages/*.tar と *.debug を除外する。**初回でも約900MB級のダウンロードが発生し得る**。これは既存の validation_host.py が正しいCLR/ゲームDLL/Data/Assetsを必要とするためで、MODメタデータ照会だけの時には実施しない。
 
-prepare はゲーム本体を新たな私有スナップショットへコピーしSHAを記録する。スナップショットが既存ならチェックして再利用する。--refresh は**既存の不変スナップショットを改変しない**。更新ビルドは新しい --private-root を使用し、適格化の有効性を確認する。
+prepare はゲーム本体を新たな私有スナップショットへコピーしSHAを記録する。スナップショットが既存ならチェックして再利用する。--refresh は**既存の不変スナップショットを改変しない**。更新ビルドは新しい --private-root を使用し、結果の `qualification.state` で適格化の有効性を確認する（`reviewedRecord`：リポジトリの記録で適格、`privateRecord`：自動比較の私有記録あり（その Worker のビルドでだけ適格）、`notQualified`：実験扱い。手順は[ゲームの更新への追従](build-updates.md)、`unsupportedVersion`：1.7 以外）。
 
-新規準備の結果には、秒単位の `timings` が含まれる。`fetchSeconds` は R2 の一覧取得・選択・ダウンロード、`snapshotCopySeconds` はコピー、`snapshotHashSeconds` はコピー後のファイル列挙と SHA-256、`snapshotTotalSeconds` はコピー開始から書き込み保護・情報収集まで（メタデータ保存を除く）、`totalSeconds` は R2 取得開始からスナップショット作成完了までを示す。既存スナップショットを再利用した場合は、新規準備の時間を報告しない。私有 Linux 回帰の安全な要約にも同じ数値を含める。
+所有者のアップロードツールが `_manifests/game-linux/source-provenance.json.gz` に、そのビルドの全ファイルのサイズと SHA-256 を記録している。prepare はこれを先に読み、記録にない `Game-Linux/` の物（前のビルドの残り。1.7.5014 では `Brutal.Glfw.dll`・`libglfw.so`・`libglfw.so.debug`・`steamapps/appmanifest_294100.acf` の 4 件）を取得せず、取得した全ファイルの SHA-256 を照合する（結果の `gameSource`）。記録と `Version.txt`・一覧のサイズ・中身が合わなければ `gameUploadInconsistent`（アップロード途中など）、私有の game-source に別ビルドの残りがあれば `gameSourceStale`（新しい --private-root を使う）で止まる。記録がない・読めない場合は従来どおり一覧の全体（`gameSource.provenance` が `absent` / `unreadable`）。
+
+新規準備の結果には、秒単位の `timings` が含まれる。`fetchSeconds` は R2 の一覧取得・選択・ダウンロード、`provenanceVerifySeconds` はアップロード記録との SHA-256 照合、`snapshotCopySeconds` はコピー、`snapshotHashSeconds` はコピー後のファイル列挙と SHA-256、`snapshotTotalSeconds` はコピー開始から書き込み保護・情報収集まで（メタデータ保存を除く）、`totalSeconds` は R2 取得開始からスナップショット作成完了までを示す。既存スナップショットを再利用した場合は、新規準備の時間を報告しない。私有 Linux 回帰の安全な要約にも同じ数値を含める。
 
 2026-10-28 の[実 R2 計測](research/2026-10-28-initial-preparation-measurement.md)では、ランタイム初回準備707.831秒のうち取得が706.566秒。同じスナップショットの再利用と Harmony の A / Core / English の `passed / completed / qualified` を確認した。１回の実測であり、高速化率の実績ではない。
 

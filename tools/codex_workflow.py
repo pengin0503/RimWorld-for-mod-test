@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+import gzip
 import json
 import os
 from pathlib import Path
@@ -17,11 +18,12 @@ import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
 
 try:
-    from tools import r2_assets, validation_host, mod_load_plan
+    from tools import r2_assets, validation_host, mod_load_plan, game_builds
 except ImportError:
     import r2_assets
     import validation_host
     import mod_load_plan
+    import game_builds
 
 PRIVATE_INDEX_NAME = "mods.json"
 PRIVATE_MOD_INDEX_OBJECT = r2_assets.PRIVATE_INDEX_KEY
@@ -126,8 +128,9 @@ def r2_session(aws):
 
 
 def _fetch(r2: r2_assets.R2, prefix: str, dest: Path, *, runtime=False,
-           include=None, refresh=False) -> dict:
-    listed = r2.list_prefix(prefix)
+           include=None, refresh=False, listed=None) -> dict:
+    if listed is None:
+        listed = r2.list_prefix(prefix)
     items = listed
     if runtime:
         items = [item for item in items if game_runtime_asset(item["key"])]
@@ -227,6 +230,127 @@ def mod_validation_asset(key: str, *, folders: list[str], language: str = "Engli
     return relative.casefold() in {"about/about.xml", "loadfolders.xml"} or mod_load_plan.select_asset(relative, folders, language)
 
 
+GAME_VERSION_KEY = r2_assets.GAME_VERSION_KEY
+# Written by the owner's upload tool next to Game-Linux/ (not by this repository). When it
+# hashes the same Version.txt bytes as Game-Linux/ it lists exactly the files of that build
+# with their size and SHA-256; objects of an earlier build that the upload kept in place
+# (for 1.7.5014: Brutal.Glfw.dll, libglfw.so(.debug), steamapps/appmanifest_294100.acf) are
+# then left out of staging.
+PROVENANCE_KEY = r2_assets.GAME_PROVENANCE_KEY
+MAX_PROVENANCE_BYTES = 16 * 1024 * 1024
+
+
+def _read_version(path: Path) -> str:
+    raw = path.read_bytes()
+    if not 0 < len(raw) <= 256:
+        raise WorkflowError("game Version.txt is empty or too large", "invalidGameVersion")
+    try:
+        return raw.decode("ascii").strip()
+    except UnicodeError as exc:
+        raise WorkflowError("game Version.txt is not ASCII", "invalidGameVersion") from exc
+
+
+def planned_game_version(root: Path, r2) -> str:
+    """The build MOD load folders and dependencies are planned for.
+
+    The prepared snapshot's version when there is one, else Game-Linux/Version.txt (one small GET).
+    Only a supported family (1.7.x) is accepted, because the planner's rules are those of 1.7."""
+    snapshot = root / "game-snapshot" / "snapshot.json"
+    if snapshot.is_file():
+        version = json.loads(snapshot.read_text(encoding="utf-8"))["version"]
+    else:
+        dest = root / "game-version" / "Version.txt"
+        dest.parent.mkdir(mode=0o700, exist_ok=True)
+        listed = r2.list_exact_key(GAME_VERSION_KEY)
+        if len(listed) != 1:
+            raise WorkflowError("Game-Linux/Version.txt not found in R2", "invalidGameVersion")
+        r2.get(GAME_VERSION_KEY, dest, listed[0]["size"], refresh=True)
+        version = _read_version(dest)
+    if game_builds.family(version) is None:
+        raise WorkflowError(validation_host.unsupported_build_detail(version), "unsupportedGameVersion")
+    return version
+
+
+def parse_provenance(data: bytes):
+    """``{relative path: {"size", "sha256"}}`` from the gzip JSON rows, or None when unusable.
+
+    Rows: ``{"key": "Game-Linux/<path>", "size", "sha256", "hashMeaning": "source-bytes", ...}``.
+    A symbolic link row (``symlinkTarget``) is kept without a hash."""
+    try:
+        rows = json.loads(gzip.decompress(data).decode("utf-8"))
+    except (OSError, EOFError, ValueError, UnicodeError):
+        return None
+    if not isinstance(rows, list) or not rows:
+        return None
+    files = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        key, size = row.get("key"), row.get("size")
+        if not isinstance(key, str) or not key.startswith("Game-Linux/") or key.endswith("/"):
+            return None
+        try:
+            r2_assets.validate_key(key)
+        except r2_assets.AssetError:
+            return None
+        if isinstance(row.get("symlinkTarget"), str):
+            files[key[len("Game-Linux/"):]] = {"size": size if isinstance(size, int) else None, "sha256": None}
+            continue
+        digest = row.get("sha256")
+        if (not isinstance(size, int) or size < 0 or not isinstance(digest, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", digest) or row.get("hashMeaning") != "source-bytes"):
+            return None
+        files[key[len("Game-Linux/"):]] = {"size": size, "sha256": digest}
+    if (files.get("Version.txt") or {}).get("sha256") is None:
+        return None
+    return files
+
+
+def build_provenance(r2, scratch: Path):
+    """``(files, state)``: the parsed upload provenance (see parse_provenance) and "used", or
+    ``(None, "absent" | "tooLarge" | "unreadable")``. Whether it describes the build now in
+    Game-Linux/ is checked by the caller against the listing and Version.txt."""
+    listed = r2.list_exact_key(PROVENANCE_KEY)
+    if len(listed) != 1:
+        return None, "absent"
+    if listed[0]["size"] > MAX_PROVENANCE_BYTES:
+        return None, "tooLarge"
+    dest = scratch / "source-provenance.json.gz"
+    r2.get(PROVENANCE_KEY, dest, listed[0]["size"], refresh=True)
+    files = parse_provenance(dest.read_bytes())
+    return (files, "used") if files is not None else (None, "unreadable")
+
+
+def provenance_selection(listed: list[dict], provenance: dict) -> list[dict]:
+    """The Game-Linux/ objects the provenance names, after checking that every named object is
+    in the listing with the recorded size (otherwise the upload is incomplete or of another build)."""
+    by_rel = {item["key"][len("Game-Linux/"):]: item for item in listed}
+    missing = sorted(rel for rel in provenance if rel not in by_rel)
+    resized = sorted(rel for rel, row in provenance.items()
+                     if rel in by_rel and row["size"] is not None and by_rel[rel]["size"] != row["size"])
+    if missing or resized:
+        names = [f"{rel} (missing)" for rel in missing[:5]] + [f"{rel} (size differs)" for rel in resized[:5]]
+        raise WorkflowError("Game-Linux/ does not match the owner's upload provenance: " + ", ".join(names)
+                            + "; retry after the upload has finished", "gameUploadInconsistent")
+    return [item for rel, item in by_rel.items() if rel in provenance]
+
+
+def _verify_against_provenance(game: Path, provenance: dict) -> tuple[list[str], list[str]]:
+    """(files whose SHA-256 differs from the provenance, files the provenance does not name)."""
+    bad, extra = [], []
+    for path in sorted(game.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        rel = path.relative_to(game).as_posix()
+        if rel not in provenance:
+            extra.append(rel)
+            continue
+        expected = provenance[rel]["sha256"]
+        if expected is not None and validation_host.sha256_file(path) != expected:
+            bad.append(rel)
+    return bad, extra
+
+
 def prepare(args) -> dict:
     root = _safe_private(args.private_root)
     game, snapshot = root / "game-source", root / "game-snapshot"
@@ -234,27 +358,79 @@ def prepare(args) -> dict:
         if args.refresh:
             raise WorkflowError("snapshot is immutable; choose a new --private-root for a changed game build")
         info = validation_host.load_snapshot(snapshot)
-        return {"status": "snapshotReused", "version": info["version"], "adapter": info["adapter"]}
+        return {"status": "snapshotReused", "version": info["version"], "adapter": info["adapter"],
+                "qualification": qualification_state(info)}
     if game.is_symlink():
         raise WorkflowError("game source cannot be a symlink")
     game.mkdir(mode=0o700, exist_ok=True)
     started = time.monotonic()
+    scratch = root / "game-provenance"
+    scratch.mkdir(mode=0o700, exist_ok=True)
     with r2_session(args.aws) as client:
-        counts = _fetch(client, "Game-Linux/", game, runtime=True, refresh=args.refresh)
+        provenance, state = build_provenance(client, scratch)
+        listed = client.list_prefix("Game-Linux/")
+        include, not_in_provenance = None, []
+        if provenance is not None:
+            named = {item["key"] for item in provenance_selection(listed, provenance)}
+            include = lambda key: key in named
+            not_in_provenance = sorted(item["key"] for item in listed
+                                       if item["key"] not in named and game_runtime_asset(item["key"]))
+        counts = _fetch(client, "Game-Linux/", game, runtime=True, include=include, refresh=args.refresh,
+                        listed=listed)
     fetched = time.monotonic()
     if not (game / "Version.txt").is_file():
         raise WorkflowError("game Version.txt missing after R2 download")
+    source = {"provenance": state}
+    if provenance is not None:
+        if validation_host.sha256_file(game / "Version.txt") != provenance["Version.txt"]["sha256"]:
+            # Provenance of another build (e.g. an upload still in progress): stop rather than mix builds.
+            raise WorkflowError("the owner's upload provenance describes another build than Game-Linux/Version.txt; "
+                                "retry after the upload has finished", "gameUploadInconsistent")
+        mismatched, extra = _verify_against_provenance(game, provenance)
+        if mismatched:
+            raise WorkflowError("downloaded or cached game files differ from the owner's upload provenance: "
+                                + ", ".join(mismatched[:10]) + "; retry with --refresh after the upload has finished",
+                                "gameUploadInconsistent")
+        if extra:
+            # Left in this private game-source by an earlier fetch of another build.
+            raise WorkflowError("the private game-source holds files that are not part of this build: "
+                                + ", ".join(extra[:10]) + "; use a new --private-root", "gameSourceStale")
+        source["sha256Verified"] = True
+        source["notInProvenanceSkipped"] = not_in_provenance
+    verified = time.monotonic()
     try:
         info = validation_host.prepare_game(game, snapshot, log=lambda _message: None)
     except validation_host.Blocked as exc:
         raise WorkflowError(f"game snapshot blocked: {exc.code}") from exc
+    qualification = qualification_state(info)
     return {"status": "prepared", "version": info["version"], "adapter": info["adapter"],
-            "files": info["fileCount"], "r2": counts,
+            "qualification": qualification, "files": info["fileCount"], "r2": counts, "gameSource": source,
             "timings": {"fetchSeconds": round(fetched - started, 3),
+                        "provenanceVerifySeconds": round(verified - fetched, 3),
                         "snapshotCopySeconds": info["timings"]["copySeconds"],
                         "snapshotHashSeconds": info["timings"]["hashSeconds"],
                         "snapshotTotalSeconds": info["timings"]["totalSeconds"],
                         "totalSeconds": round(time.monotonic() - started, 3)}}
+
+
+def qualification_state(info) -> dict:
+    """What the next validation on this snapshot will be: qualified by a reviewed record,
+    possibly by a private automatic record, or experimental until qualify_build.py runs."""
+    name, adapter = validation_host.match_adapter(info["files"])
+    if adapter is not None:
+        return {"state": "reviewedRecord", "adapter": name}
+    if game_builds.family(info["version"]) is None:
+        return {"state": "unsupportedVersion",
+                "detail": validation_host.unsupported_build_detail(info["version"])}
+    records, _ = game_builds.private_records(None)
+    matching = [r for _, r in records if r["gameVersion"] == info["version"] and game_builds.identity_matches(info["files"], r)]
+    if matching:
+        return {"state": "privateRecord", "store": str(game_builds.store_directory(None)),
+                "workerSha256": sorted({(r.get("worker") or {}).get("sha256") or "" for r in matching}),
+                "detail": "qualified only with the Worker build the record names; another Worker build runs as experimental"}
+    return {"state": "notQualified",
+            "detail": "runs as experimental; qualify this build with "
+                      "experiments/official-comparison/qualify_build.py (docs/build-updates.md)"}
 
 
 def private_index(args, root: Path) -> Path:
@@ -295,22 +471,22 @@ def _local_metadata(root: Path):
     return raw, files, configs, meta, package_id
 
 
-def local_mod_plan(root: Path, active: set) -> dict:
+def local_mod_plan(root: Path, active: set, game=mod_load_plan.CURRENT) -> dict:
     """Plan a MOD built outside R2 (e.g. the user's own repository) with the same rules."""
     raw, files, configs, meta, package_id = _local_metadata(root)
     active = set(active) | {package_id.casefold()}
     try:
-        missing = mod_load_plan.missing_dependencies(meta, active)
+        missing = mod_load_plan.missing_dependencies(meta, active, game)
         if missing:
             raise WorkflowError("Missing required dependencies: " + ", ".join(missing), "missingDependencies")
         config = (raw / configs[0]).read_bytes() if configs else None
-        folders = mod_load_plan.load_folders(files, config, active)
+        folders = mod_load_plan.load_folders(files, config, active, game)
     except mod_load_plan.LoadPlanError as exc:
         raise WorkflowError(str(exc), exc.code) from exc
     return {"path": str(raw), "packageId": package_id, "loadFolders": folders}
 
 
-def resolve_mod_graph(index, roots, read_metadata, *, official=None, local=None):
+def resolve_mod_graph(index, roots, read_metadata, *, official=None, local=None, game=mod_load_plan.CURRENT):
     """Resolve metadata recursively and return a deterministic dependency order."""
     official = set(official or {'ludeon.rimworld'})
     official_names = {'ludeon.rimworld': 'Core', 'ludeon.rimworld.royalty': 'Royalty',
@@ -342,7 +518,7 @@ def resolve_mod_graph(index, roots, read_metadata, *, official=None, local=None)
         if actual != package:
             raise WorkflowError('private index and MOD metadata disagree on packageId', 'packageIdMismatch')
         try:
-            required = mod_load_plan.missing_dependencies(meta, set())
+            required = mod_load_plan.missing_dependencies(meta, set(), game)
         except mod_load_plan.LoadPlanError as error:
             raise WorkflowError(str(error), error.code) from error
         nodes[package] = mod
@@ -438,6 +614,8 @@ def fetch_mods(args, *, max_selected_bytes=None, max_selected_files=None, max_mo
     if explicit_targets is None:
         explicit_targets = {target_package}
     with r2_session(args.aws) as r2:
+        game_version = planned_game_version(root, r2)
+        game = game_builds.game_version_numbers(game_version)
         fetched = []
         prepared_by_id = {}
         def read_metadata(mod):
@@ -465,7 +643,7 @@ def fetch_mods(args, *, max_selected_bytes=None, max_selected_files=None, max_mo
         if local_target:
             local_node = {"packageId": local_id, "workshopId": None, "name": "local target"}
             roots.append(local_id)
-        graph = resolve_mod_graph(index, roots, read_metadata, official=official_ids, local=local_node)
+        graph = resolve_mod_graph(index, roots, read_metadata, official=official_ids, local=local_node, game=game)
         selected = [m for m in graph if m["workshopId"] is not None]
         active = {m["packageId"].casefold() for m in graph} | official_ids
         prepared = []
@@ -473,11 +651,11 @@ def fetch_mods(args, *, max_selected_bytes=None, max_selected_files=None, max_mo
             mod, destination, prefix, listed, metadata, counts, configs = prepared_by_id[mod["workshopId"]]
             try:
                 config = (destination / configs[0]["key"][len(prefix):]).read_bytes() if configs else None
-                folders = mod_load_plan.load_folders([i["key"][len(prefix):] for i in listed], config, active)
+                folders = mod_load_plan.load_folders([i["key"][len(prefix):] for i in listed], config, active, game)
             except mod_load_plan.LoadPlanError as exc:
                 raise WorkflowError(str(exc), exc.code) from exc
             prepared.append((mod, destination, prefix, listed, metadata, counts, folders))
-        local = local_mod_plan(local_target, active) if local_target else None
+        local = local_mod_plan(local_target, active, game) if local_target else None
         plans = []
         for mod, destination, prefix, listed, metadata, counts, folders in prepared:
             metadata_keys = {i["key"] for i in metadata}
@@ -518,7 +696,7 @@ def fetch_mods(args, *, max_selected_bytes=None, max_selected_files=None, max_mo
         req_path.write_text(json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.chmod(req_path, 0o600)
         return {"status": "modsReady", "fetched": fetched, "local": local, "request": str(req_path),
-                "validationLevel": "A",
+                "validationLevel": "A", "gameVersion": game_version,
                 "note": "Load folders and required dependencies checked against the complete request; "
                         "resources outside loader inputs still require explicit retrieval"}
 

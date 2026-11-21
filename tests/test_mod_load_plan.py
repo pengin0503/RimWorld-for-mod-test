@@ -96,3 +96,49 @@ class LoadPlanTests(unittest.TestCase):
         self.assertFalse(p.select_asset('AssetBundles/shaders.manifest',folders,'English'))
         self.assertTrue(p.select_asset('1.6/Shaders/Custom/Glow.wgsl',folders,'English'))
         self.assertFalse(p.select_asset('1.5/Shaders/Custom/Glow.wgsl',folders,'English'))
+
+
+class BuildDependentRuleTests(unittest.TestCase):
+    """Rules that depend on the game build being planned for (game=(major, minor, build))."""
+
+    def meta(self, supported, by_version, generic='<modDependencies><li><packageId>generic.dep</packageId></li></modDependencies>'):
+        versions = ''.join(f'<li>{v}</li>' for v in supported)
+        sections = ''.join(f'<v{v}><li><packageId>{dep}</packageId></li></v{v}>' for v, dep in by_version.items())
+        return ET.fromstring(f'<ModMetaData><supportedVersions>{versions}</supportedVersions>{generic}'
+                             f'<modDependenciesByVersion>{sections}</modDependenciesByVersion></ModMetaData>')
+
+    def test_versioned_dependencies_fall_back_to_highest_older_supported_version_since_5014(self):
+        meta = self.meta(['1.5', '1.6'], {'1.5': 'five.dep', '1.6': 'six.dep'})
+        self.assertEqual(p.missing_dependencies(meta, set(), (1, 7, 5014)), ['six.dep'])
+        self.assertEqual(p.missing_dependencies(meta, set(), (1, 7, 6000)), ['six.dep'])
+        # 1.7.4985 has no fallback: the generic list applies.
+        self.assertEqual(p.missing_dependencies(meta, set(), (1, 7, 4985)), ['generic.dep'])
+
+    def test_no_fallback_when_the_mod_supports_the_running_version_or_nothing_older(self):
+        # Supports 1.7 but has no v1.7 section: generic list, not the 1.6 section.
+        meta = self.meta(['1.6', '1.7'], {'1.6': 'six.dep'})
+        self.assertEqual(p.missing_dependencies(meta, set(), (1, 7, 5014)), ['generic.dep'])
+        # Only newer versions supported: nothing older to fall back to.
+        meta = self.meta(['1.8'], {'1.8': 'eight.dep'})
+        self.assertEqual(p.missing_dependencies(meta, set(), (1, 7, 5014)), ['generic.dep'])
+        # The fallback version must have its own section; 1.6 is supported but only 1.5 has one.
+        meta = self.meta(['1.5', '1.6'], {'1.5': 'five.dep'})
+        self.assertEqual(p.missing_dependencies(meta, set(), (1, 7, 5014)), ['generic.dep'])
+
+    def test_supported_versions_are_parsed_like_the_game(self):
+        meta = ET.fromstring('<ModMetaData><supportedVersions><li>1.6</li><li> 1.5.4069 </li><li>+1.4</li>'
+                             '<li>1</li><li>x.y</li><li>1.-1</li><li>1.6</li></supportedVersions></ModMetaData>')
+        self.assertEqual(p.supported_versions(meta), [(1, 6), (1, 5), (1, 4)])
+
+    def test_load_folders_follow_the_planned_build(self):
+        paths = ['1.6/Defs/A.xml', '1.7/Defs/B.xml', '1.8/Defs/C.xml']
+        self.assertEqual(p.load_folders(paths, None, set(), (1, 7, 5014)), ['1.7', ''])
+        self.assertEqual(p.load_folders(paths, None, set(), (1, 8, 1)), ['1.8', ''])
+        xml = b'<loadFolders><v1.7.5014><li>exact</li></v1.7.5014><v1.7><li>/</li></v1.7></loadFolders>'
+        self.assertEqual(p.load_folders(['Defs/A.xml'], xml, set(), (1, 7, 5014)), ['exact'])
+        self.assertEqual(p.load_folders(['Defs/A.xml'], xml, set(), (1, 7, 4985)), [''])
+
+    def test_game_version_must_be_three_numbers(self):
+        for bad in ((1, 7), '1.7.5014', (1, 7, -1), (1, 7, 5014.0)):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                p.load_folders([], None, set(), bad)

@@ -20,6 +20,19 @@ public static class Reflect
             ?? throw new AdapterMismatchException(assemblyQualifiedName);
     }
 
+    /// <summary>A type that only some game builds ship; null when this build has none.</summary>
+    public static Type? OptionalType(string assemblyQualifiedName)
+    {
+        try
+        {
+            return System.Type.GetType(assemblyQualifiedName, throwOnError: false);
+        }
+        catch (FileNotFoundException)
+        {
+            return null;  // the assembly itself is absent from this build
+        }
+    }
+
     public static MethodInfo StaticMethod(Type type, string name, params Type[] parameters)
     {
         return type.GetMethod(name, AnyStatic, binder: null, parameters, modifiers: null)

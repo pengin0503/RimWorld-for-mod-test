@@ -30,9 +30,12 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         "Prefs devMode=true so the official ErrorCheckAllDefs pass runs (default installs skip it)",
         "Prefs resetModsConfigOnCrash=false so a load exception is reported instead of silently retrying with Core only",
         "Shader prewarm disabled, as the official headless path also does",
+        "InputSystem.BeginFrame runs before each frame's event poll (the official 1.7.4985 headless order; 1.7.5014 calls it " +
+            "at the end of the frame instead); the headless platform delivers no input events, so both orders clear the same empty per-frame state",
     ];
 
     private readonly List<Stage> _stages = [];
+    private readonly List<string> _extraSkippedOfficialSteps = [];
     private object? _app;
     private object? _unityRuntime;
     private Action<float, float>? _beginFrame;
@@ -186,6 +189,26 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         _update = Reflect.Delegate<Action<float, float>>(Reflect.InstanceMethod(unityType, "Update", typeof(float), typeof(float)), _unityRuntime);
         var onUpdate = (Action?)api.AppOnUpdate.GetValue(app);
         api.AppOnUpdate.SetValue(app, (Action)Delegate.Combine(onUpdate, (Action)Tick));
+        string prepatcherCompat = "notInBuild";
+        if (api.Prepatcher is { } prepatcher)
+        {
+            if (PrepatcherCompatApi.RuntimeHasFieldInjection)
+            {
+                // Bootstrap order: frame handler, then Injection.ApplyPendingAtFrameBoundary, then Install + hook.
+                api.AppOnUpdate.SetValue(app, (Action)Delegate.Combine((Action?)api.AppOnUpdate.GetValue(app), prepatcher.ApplyPendingAtFrameBoundary));
+                prepatcher.InstallLikeOfficialBoot();
+                prepatcherCompat = "installed";
+            }
+            else
+            {
+                // Only the experimental standard .NET runtime gets here; the official boot cannot run on it at all.
+                prepatcherCompat = "skippedRuntimeLacksFieldInjection";
+                _extraSkippedOfficialSteps.Add("RimWorldWaylith.PrepatcherCompat.Install, ModLoadingHooks.AfterAssembliesLoaded and " +
+                    "Injection.ApplyPendingAtFrameBoundary: not executed because this runtime lacks WaylithClr field injection; " +
+                    "mods written for Prepatcher get no injected fields, components or free patches");
+            }
+        }
+        stage.Evidence["prepatcherCompat"] = prepatcherCompat;
         stage.Evidence["runtime"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
         Complete(stage);
     }
@@ -543,7 +566,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
                 JsonSerializer.Serialize(json, evidence);
             }
             json.WriteStartArray("skippedOfficialSteps");
-            foreach (string step in SkippedOfficialSteps)
+            foreach (string step in SkippedOfficialSteps.Concat(_extraSkippedOfficialSteps))
             {
                 json.WriteStringValue(step);
             }

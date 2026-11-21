@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <packageId>rwmodtest.prepatcherfield</packageId>
+  <name>RWMT fixture: prepatcherfield</name>
+  <author>RimWorld-for-mod-test fixtures</author>
+  <description>Self-made validation fixture. Adds one field to Verse.Def through a Prepatcher-style [PrepatcherField] accessor and logs its values; RimWorld 1.7.5014 and later builds provide the field at load.</description>
+  <supportedVersions>
+    <li>1.7</li>
+  </supportedVersions>
+</ModMetaData>

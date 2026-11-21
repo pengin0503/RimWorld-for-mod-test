@@ -45,6 +45,20 @@ class AssetTests(unittest.TestCase):
         with patch.object(r2, 'call', side_effect=AssertionError('unexpected lookup')):
             with self.assertRaises(ra.AssetError): r2.list_static_audit_key('Game-Linux/Data/secret')
 
+    def test_exact_listing_of_version_and_upload_provenance(self):
+        r2 = ra.R2(endpoint='https://abc.r2.cloudflarestorage.com', bucket='rimworld-17')
+        for key in (ra.GAME_VERSION_KEY, ra.GAME_PROVENANCE_KEY):
+            # A sibling with the same prefix (e.g. a temporary upload file) is neither listed nor validated.
+            contents = [{'Key': key, 'Size': 18}, {'Key': key + '.part', 'Size': 5}]
+            with self.subTest(key=key), patch.object(r2, 'call', return_value={'Contents': contents}):
+                self.assertEqual(r2.list_exact_key(key), [{'key': key, 'size': 18}])
+        with patch.object(r2, 'call', return_value={'Contents': []}):
+            self.assertEqual(r2.list_exact_key(ra.GAME_PROVENANCE_KEY), [])
+        with patch.object(r2, 'call', side_effect=AssertionError('unexpected lookup')):
+            for key in ('Game-Linux/', '_manifests/game-linux/upload-report.json', 'Workshop/1/About/About.xml'):
+                with self.subTest(key=key), self.assertRaises(ra.AssetError):
+                    r2.list_exact_key(key)
+
     def test_listing_cannot_escape_prefix(self):
         r2 = ra.R2(endpoint='https://abc.r2.cloudflarestorage.com', bucket='rimworld-17')
         with patch.object(r2, 'call', return_value={'Contents': [{'Key': 'Workshop/999/A.xml', 'Size': 3}]}):

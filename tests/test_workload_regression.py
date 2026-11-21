@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
 from tools import codex_workflow as cw
+from r2_fakes import with_game_files
 from tools import workload_regression as wr
 
 
@@ -94,7 +95,7 @@ class PayloadPreflightTests(unittest.TestCase):
                                    aws="aws", refresh=False, target="Example",
                                    local_target=None, dependency=[], official=["Core"],
                                    language="English", scope="validation")
-            fake = FakeR2()
+            fake = with_game_files(FakeR2)()
             with patch.object(cw, "r2_client", return_value=fake), self.assertRaises(cw.WorkflowError) as caught:
                 cw.fetch_mods(args, max_selected_bytes=len(xml), max_selected_files=10, max_mods=1)
             self.assertEqual(caught.exception.code, "modSelectionBudgetExceeded")

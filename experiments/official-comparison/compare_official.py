@@ -18,9 +18,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
+import math
 import os
 from pathlib import Path
+import random
 import re
 import shutil
 import statistics
@@ -200,18 +203,79 @@ def map_metrics(probes):
     return metrics
 
 
-def compare_distributions(product_runs, official_runs):
-    """Per metric: is the product's median inside the official runs' range, widened by a tolerance?
+# The map comparison is a permutation test over all judged metrics at once (docs/research/
+# 2026-11-21-build-1.7.5014.md#判定方法の変更). Fixed before the comparison it judges.
+MAP_ALPHA = 0.05
+EXACT_SPLITS_LIMIT = 20000   # enumerate every relabelling up to this many (5 + 5 runs: 252)
+RANDOM_SPLITS = 4999         # otherwise this many random relabellings (10 + 10 runs: of 184,756)
+SPLIT_SEED = 20261121
+_TIE = 1e-9
 
-    The median keeps one rare outcome (a ruin that happens to pick the same floor as a fixed
-    structure) from moving the comparison. The tolerance is the official range itself (at least
-    2 % of the official mean and at least 2), so a metric that does not vary in the official runs
-    must match within that small margin.
+
+def _splits(n_product, total):
+    """The relabellings compared with the observed one: which ``n_product`` of all runs are "product"."""
+    count = math.comb(total, n_product)
+    if count <= EXACT_SPLITS_LIMIT:
+        return list(itertools.combinations(range(total), n_product)), True
+    rng = random.Random(SPLIT_SEED)
+    return [tuple(sorted(rng.sample(range(total), n_product))) for _ in range(RANDOM_SPLITS)], False
+
+
+def permutation_test(columns, n_product, alpha=MAP_ALPHA):
+    """Westfall-Young single-step max-T test that the product and official runs come from one distribution.
+
+    ``columns`` maps a metric to its values, the product runs first. The statistic of a metric is
+    |mean of the product runs - mean of the official runs| / sample sd of all runs (the sd does not
+    depend on the labels); a metric with the same value in every run cannot differ and is left out.
+    Under the hypothesis the run labels are exchangeable, so the largest statistic over all metrics
+    is compared with its distribution over relabellings: the chance that any metric is reported as
+    different when nothing differs is at most ``alpha``, however the metrics depend on each other.
+    A metric's adjusted p-value is the share of relabellings whose largest statistic reaches its own.
+    """
+    total = len(next(iter(columns.values()), []))
+    n_official = total - n_product
+    if n_product < 1 or n_official < 1:
+        return {}, {'pValue': 1.0, 'splits': 0, 'exact': True, 'alpha': alpha, 'smallestPossibleP': 1.0, 'canDetect': False}
+    varying = {}
+    for name, values in columns.items():
+        if len(values) != total:
+            raise ValueError('every metric needs one value per run')
+        sd = statistics.stdev(values) if total > 1 else 0.0
+        if sd > 0:
+            varying[name] = (values, sum(values), sd)
+
+    def statistics_of(product_index):
+        out = {}
+        for name, (values, whole, sd) in varying.items():
+            product_sum = sum(values[i] for i in product_index)
+            out[name] = abs(product_sum / n_product - (whole - product_sum) / n_official) / sd
+        return out
+
+    observed = statistics_of(range(n_product))
+    splits, exact = _splits(n_product, total)
+    maxima = [max(statistics_of(split).values(), default=0.0) for split in splits]
+    extra = 0 if exact else 1  # a random reference set also counts the observed labelling
+    adjusted = {name: (sum(1 for m in maxima if m >= value - _TIE) + extra) / (len(maxima) + extra)
+                for name, value in observed.items()}
+    # With few runs even a complete separation is not rare among the relabellings (3 + 3 runs: 2 of 20),
+    # so the test could never report a difference; such a comparison must not count as equivalent.
+    smallest = ((1 if n_product != n_official else 2) / len(splits)) if exact else 1 / (len(splits) + 1)
+    summary = {'pValue': min(adjusted.values(), default=1.0), 'splits': len(splits), 'exact': exact, 'alpha': alpha,
+               'smallestPossibleP': round(smallest, 4), 'canDetect': smallest < alpha,
+               'statistic': 'max over metrics of |mean difference| / sd of all runs'}
+    return {name: {'statistic': round(observed[name], 4), 'adjustedP': round(adjusted[name], 4)} for name in observed}, summary
+
+
+def compare_distributions(product_runs, official_runs, alpha=MAP_ALPHA):
+    """Per-metric values and a single permutation test over all judged metrics (permutation_test).
+
+    Returns ``(rows, differing, test)``: the metrics whose adjusted p-value is below ``alpha``.
     A metric missing from a run counts as 0. Metrics present in some but not all runs of a side
     (intermittent kinds, e.g. which stone a ruin's floor happens to use) are not judged one by
     one: a handful of runs cannot tell a rare kind from a missing one. Their per-run sum per
     metric group is judged instead, so a side that drops or adds such content still shows.
-    A kind present in every run of one side and in none of the other is always judged.
+    A kind present in every run of one side and in none of the other is always judged; with
+    every run on its side it reaches the largest possible statistic.
     """
     names = sorted({k for run in product_runs + official_runs for k in run})
     values = {name: ([run.get(name, 0) for run in product_runs], [run.get(name, 0) for run in official_runs])
@@ -224,17 +288,20 @@ def compare_distributions(product_runs, official_runs):
         members = [name for name in intermittent if name.split(' ', 1)[0] == group]
         values[f'{group} (sum of intermittent kinds)'] = tuple(
             [sum(values[name][side][i] for name in members) for i in range(len(values[members[0]][side]))] for side in (0, 1))
-    rows, outside = {}, []
+    judged = {name: p + o for name, (p, o) in values.items() if name not in intermittent}
+    tested, test = permutation_test(judged, len(product_runs), alpha)
+    rows, differing = {}, []
     for name, (p, o) in values.items():
-        o_mean, p_median = sum(o) / len(o), statistics.median(p)
-        tolerance = max(max(o) - min(o), 0.02 * o_mean, 2)
-        judged = name not in intermittent
-        ok = min(o) - tolerance <= p_median <= max(o) + tolerance
-        rows[name] = {'product': p, 'official': o, 'productMedian': p_median, 'officialMedian': statistics.median(o),
-                      'tolerance': round(tolerance, 1), 'judged': judged, 'withinTolerance': ok}
-        if judged and not ok:
-            outside.append(name)
-    return rows, outside
+        row = {'product': p, 'official': o, 'judged': name in judged,
+               'productMean': round(statistics.fmean(p), 2) if p else None,
+               'officialMean': round(statistics.fmean(o), 2) if o else None}
+        if name in tested:
+            row.update(tested[name])
+            row['differs'] = tested[name]['adjustedP'] < alpha
+            if row['differs']:
+                differing.append(name)
+        rows[name] = row
+    return rows, sorted(differing), test
 
 
 def compare_map_case(name, request, official, case_dir, args):
@@ -293,8 +360,8 @@ def summarize_map_runs(name, runs, statuses):
     identity = {side: sorted({tuple(sorted(p for p in r['probes'] if MAP_IDENTITY.match(p))) for r in rs})
                 for side, rs in runs.items()}
     errors = {side: sorted({tuple(r['errors']) for r in rs}) for side, rs in runs.items()}
-    metrics, outside = compare_distributions([map_metrics(r['probes']) for r in runs['product']],
-                                             [map_metrics(r['probes']) for r in runs['official']])
+    metrics, differing, test = compare_distributions([map_metrics(r['probes']) for r in runs['product']],
+                                                     [map_metrics(r['probes']) for r in runs['official']])
     fingerprints = {side: len({tuple(p for p in r['probes'] if ' sha=' in p) for r in rs}) for side, rs in runs.items()}
     repeat = len(statuses)
     row = {
@@ -306,12 +373,12 @@ def summarize_map_runs(name, runs, statuses):
         'errorsMatch': len(errors['product']) == 1 and errors['product'] == errors['official'],
         'errors': {side: [list(x) for x in v] for side, v in errors.items()},
         'distinctFingerprints': fingerprints,
-        'metricsOutsideTolerance': outside, 'metrics': metrics,
+        'permutationTest': test, 'metricsDiffering': differing, 'metrics': metrics,
     }
     row['equivalent'] = all(row['mapGeneratedInAllRuns'].values()) and row['identityMatch'] and row['errorsMatch'] \
-        and not outside
+        and test['canDetect'] and test['pValue'] >= test['alpha']
     print(f'{name:24} equivalent={row["equivalent"]} generated={row["mapGeneratedInAllRuns"]} identity={row["identityMatch"]} errors={row["errorsMatch"]} '
-          f'outside={outside} distinct fingerprints product/official={fingerprints["product"]}/{fingerprints["official"]} '
+          f'p={test["pValue"]:.3f} differing={differing} distinct fingerprints product/official={fingerprints["product"]}/{fingerprints["official"]} '
           f'of {repeat}', flush=True)
     return row
 

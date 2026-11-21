@@ -12,7 +12,7 @@ for exactly its files when they all agree:
    (compare_official.py): errors/warnings and probe facts must be identical in all cases
    -> levels A and B;
 3. the map stage against the official ``-quicktest`` map, as distributions over repeated
-   runs (compare_official.py --map) -> feature ``map``;
+   runs judged by one permutation test over all metrics (compare_official.py --map) -> feature ``map``;
 4. the bounded tick (D) real-game acceptance (tests/integration/run_bounded_tick.py, the basis D
    had on 1.7.4985) and the D v2 smoke (tests/integration/run_bounded_tick_v2.py), run with a
    candidate record -> experimental features ``bounded-tick.v1`` / ``bounded-tick.v2`` (D stays
@@ -33,7 +33,7 @@ in throwaway layouts with their own HOME/XDG directories.
 
 Usage:
   python3 experiments/official-comparison/qualify_build.py --snapshot S --harmony-dll H --out O --store Q
-      [--worker W] [--map-repeat 5] [--skip-map] [--skip-ticks] [--force]
+      [--worker W] [--map-repeat 10] [--skip-map] [--skip-ticks] [--force]
 """
 from __future__ import annotations
 
@@ -191,7 +191,9 @@ def main(argv=None):
     parser.add_argument('--out', required=True, help='new private directory for the comparison evidence')
     parser.add_argument('--store', required=True, help='private qualification store the record is written to')
     parser.add_argument('--worker', default=str(REPO / 'worker' / 'bin'))
-    parser.add_argument('--map-repeat', type=int, default=5)
+    # 10 runs per side: the permutation test of the map stage then detects a shift of 3 sd in one
+    # metric most of the time (docs/research/2026-11-21-build-1.7.5014.md).
+    parser.add_argument('--map-repeat', type=int, default=10)
     parser.add_argument('--skip-map', action='store_true', help='do not qualify the map stage')
     parser.add_argument('--skip-ticks', action='store_true', help='do not enable the experimental D cases')
     parser.add_argument('--force', action='store_true', help='qualify even if a reviewed record already applies')
@@ -201,8 +203,9 @@ def main(argv=None):
     args.worker = Path(args.worker).resolve()
     if out.exists() and any(out.iterdir()):
         parser.error(f'{out} is not empty')
-    if not 1 <= args.map_repeat <= 20:
-        parser.error('--map-repeat must be 1..20')
+    if not 4 <= args.map_repeat <= 20:
+        # Fewer than 4 runs per side cannot show any difference at the 5 % level.
+        parser.error('--map-repeat must be 4..20')
     snapshot = validation_host.load_snapshot(args.snapshot, full=True)
     version = snapshot['version']
     if game_builds.family(version) is None:

@@ -128,7 +128,7 @@ def main():
                 wr = json.loads(worker_path.read_text())
                 print(json.dumps({'case': name, 'workerStatus': wr.get('executionStatus'),
                     'stages': [{'name': x.get('name'), 'status': x.get('status')} for x in wr.get('stages', [])],
-                    'tickErrorType': (wr.get('tick', {}).get('error') or '').split(':', 1)[0].split('\n', 1)[0]}))
+                    'tickErrorType': ((wr.get('tick') or {}).get('error') or '').split(':', 1)[0].split('\n', 1)[0]}))
         return ok
     # Stop the acceptance run early when the basic call path is not established.
     if not run('ticks-60', count=60): return 1

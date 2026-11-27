@@ -65,11 +65,10 @@ def inspect(r2, scratch: Path, target: str = SUPPORTED_TARGET):
 
 
 def main():
-    from tools import r2_assets
     try:
         with tempfile.TemporaryDirectory(prefix="rwmt-build-readiness-") as root:
             with r2_assets.R2(endpoint=os.environ.get("R2_ENDPOINT", ""),
-                              bucket="rimworld-17",
+                              bucket=os.environ.get("R2_BUCKET", "rimworld-17"),
                               transport=os.environ.get("RWMT_R2_TRANSPORT", "sdk")) as r2:
                 output = inspect(r2, Path(root))
     except (OSError, ValueError, r2_assets.AssetError):

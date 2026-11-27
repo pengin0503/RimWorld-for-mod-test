@@ -157,6 +157,7 @@ def main(argv=None):
     rows, ok = [], True
     for name in selected:
         request, expected_status, expected_codes, runtime = CASES[name]
+        request = json.loads(json.dumps(request))
         case_dir = out / 'cases' / name
         if case_dir.exists():
             shutil.rmtree(case_dir)

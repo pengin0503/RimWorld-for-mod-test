@@ -231,7 +231,25 @@ def run_gui(run_dir, memory_mib, environment, *, poll=0.5, lock_fd=None):
         if windows:
             job.terminate()
         else:
-            os.kill(process.pid, signal.SIGTERM)
+            try:
+                os.kill(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    def linux_tree_rss(root_pid):
+        try:
+            import gui_linux_supervisor as sup
+        except ImportError:
+            from tools import gui_linux_supervisor as sup
+        page_size = os.sysconf('SC_PAGE_SIZE')
+        total = 0
+        for pid in (root_pid, *sup.children_of(root_pid)):
+            try:
+                with open(f'/proc/{pid}/statm', 'rb') as stream:
+                    total += int(stream.read().split()[1]) * page_size
+            except (OSError, IndexError, ValueError):
+                continue
+        return total
 
     killed, peak, code = None, 0, None
     try:
@@ -240,7 +258,7 @@ def run_gui(run_dir, memory_mib, environment, *, poll=0.5, lock_fd=None):
                 over = 'memoryLimit' in job.poll_messages()
                 peak = job.peak_memory()
             else:
-                rss = vh._process_group_rss(process.pid)
+                rss = linux_tree_rss(process.pid)
                 peak = max(peak, rss)
                 over = rss > limit
             if over:
@@ -259,12 +277,22 @@ def run_gui(run_dir, memory_mib, environment, *, poll=0.5, lock_fd=None):
             if stray:
                 job.terminate()
             job.close()
+            status_ok = True
         else:
-            status = json.loads(status_file.read_text()) if status_file.is_file() else {}
+            status = {}
+            status_ok = False
+            if status_file.is_file():
+                try:
+                    loaded = json.loads(status_file.read_text(encoding='utf-8'))
+                    if isinstance(loaded, dict):
+                        status = loaded
+                        status_ok = True
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                    pass
             stray = status.get('strayProcessesKilled', False)
             code = status.get('exitCode', code)
     return {'exitCode': code, 'killedFor': killed, 'strayProcessesKilled': stray, 'peakBytes': peak,
-            'supervisionFailed': not windows and not status_file.is_file(),
+            'supervisionFailed': not windows and not status_ok,
             'seconds': round(time.monotonic() - started, 3)}
 
 

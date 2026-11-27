@@ -340,7 +340,7 @@ def public_summary(raw, identity):
                     if not isinstance(callsites, list) or len(callsites) > 4096: raise ValueError('invalid calls')
                     safe_edges = []
                     for call in callsites:
-                        if not isinstance(call, dict) or set(call) != {'offset', 'kind', 'target'} or type(call.get('offset')) is not int or not 0 <= call['offset'] < 65536 or call.get('kind') not in ('call', 'callvirt', 'newobj'):
+                        if not isinstance(call, dict) or set(call) != {'offset', 'kind', 'target'} or type(call.get('offset')) is not int or not 0 <= call['offset'] < 65536 or call.get('kind') not in ('call', 'callvirt', 'newobj') or not isinstance(call.get('target'), str):
                             raise ValueError('invalid call')
                         edge = allowed_edges.get(call.get('target'))
                         if edge: safe_edges.append({'typeId': edge[0], 'methodId': edge[1], 'kind': call['kind'], 'offset': call['offset']})

@@ -58,6 +58,8 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
     private int _tickErrorsBefore;
     private bool _ticksReady;
 
+    private readonly object _resultLock = new();
+
     public int ExitCode { get; private set; } = 3;
 
     private sealed class Stage(string name, double start)
@@ -80,10 +82,21 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         return stage;
     }
 
+    private void SetEvidence(Stage stage, string key, object? value)
+    {
+        lock (_stages)
+        {
+            stage.Evidence[key] = value;
+        }
+    }
+
     private void Complete(Stage stage, string status = "completed")
     {
-        stage.End = clock.Elapsed.TotalSeconds;
-        stage.Status = status;
+        lock (_stages)
+        {
+            stage.End = clock.Elapsed.TotalSeconds;
+            stage.Status = status;
+        }
     }
 
     public int Run()
@@ -109,9 +122,12 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         // Game code can hold the main thread for seconds (static constructors, atlas
         // baking), so the per-frame deadline check alone cannot always stop the run.
         // A dedicated thread, because the loader can keep the thread pool busy.
+        double deadline = double.IsFinite(request.DeadlineSeconds) && request.DeadlineSeconds > 0
+            ? request.DeadlineSeconds
+            : 180;
         new Thread(() =>
         {
-            Thread.Sleep(TimeSpan.FromSeconds(request.DeadlineSeconds + WatchdogGraceSeconds));
+            Thread.Sleep(TimeSpan.FromSeconds(deadline + WatchdogGraceSeconds));
             Watchdog();
         }) { IsBackground = true, Name = "rwmt-watchdog" }.Start();
         int rc = (int)api.EngineRun.Invoke(null, [options, init])!;
@@ -156,8 +172,8 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         string packPath = Path.Combine(request.HostDir, "Assets.zip");
         object? pack = api.AssetPackOpen.Invoke(null, [dataPath, commandLine, packPath]);
         int hashes = pack == null ? 0 : ((System.Collections.ICollection)Reflect.Member(pack, "ContentHashes")!).Count;
-        stage.Evidence["assetPackEntries"] = pack == null ? null : Reflect.Member(pack, "Count");
-        stage.Evidence["assetPackManifestEntries"] = hashes;
+        SetEvidence(stage, "assetPackEntries", pack == null ? null : Reflect.Member(pack, "Count"));
+        SetEvidence(stage, "assetPackManifestEntries", hashes);
         // Same rule as Bootstrap.ConfigureRuntime, minus the -NoAssetPack escape hatch.
         if (hashes == 0 && !Directory.Exists(Path.Combine(dataPath, "Resources", "Textures")))
         {
@@ -186,7 +202,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         _update = Reflect.Delegate<Action<float, float>>(Reflect.InstanceMethod(unityType, "Update", typeof(float), typeof(float)), _unityRuntime);
         var onUpdate = (Action?)api.AppOnUpdate.GetValue(app);
         api.AppOnUpdate.SetValue(app, (Action)Delegate.Combine(onUpdate, (Action)Tick));
-        stage.Evidence["runtime"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
+        SetEvidence(stage, "runtime", System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
         Complete(stage);
     }
 
@@ -266,8 +282,9 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
-            diagnostics.Record("error", "Worker", "worker frame failed", e);
-            Finish("failed", $"worker frame failed: {e.GetType().Name}: {e.Message}");
+            Exception unwrapped = Reflect.Unwrap(e);
+            diagnostics.Record("error", "Worker", "worker frame failed", unwrapped);
+            Finish("failed", $"worker frame failed: {unwrapped.GetType().Name}: {unwrapped.Message}");
         }
     }
 
@@ -282,9 +299,9 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         bool devMode = api.PrefsDevMode();
         bool reset = api.PrefsResetModsConfigOnCrash();
         string language = api.PrefsLangFolderName();
-        stage.Evidence["devMode"] = devMode;
-        stage.Evidence["resetModsConfigOnCrash"] = reset;
-        stage.Evidence["language"] = language;
+        SetEvidence(stage, "devMode", devMode);
+        SetEvidence(stage, "resetModsConfigOnCrash", reset);
+        SetEvidence(stage, "language", language);
         Type handlerType = api.LogMessageReceivedThreaded.EventHandlerType!;
         api.LogMessageReceivedThreaded.AddEventHandler(null, Delegate.CreateDelegate(handlerType, api.VerseLogNotifyThreaded));
         if (devMode)
@@ -325,7 +342,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         {
             if (_lateStage != null)
             {
-                _lateStage.Evidence["coreStaticAssetsLoaded"] = api.CoreStaticAssetsLoaded.GetValue(null);
+                SetEvidence(_lateStage, "coreStaticAssetsLoaded", api.CoreStaticAssetsLoaded.GetValue(null));
                 Complete(_lateStage, _loadStage?.Status == "completed" ? "completed" : "failed");
             }
             if (request.Map != null && mapApi != null && _lateStage?.Status == "completed")
@@ -363,7 +380,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
             Diagnostics.Stage = "map.observe";
             foreach ((string key, object? value) in _map.Evidence)
             {
-                _mapStage.Evidence[key] = value;
+                SetEvidence(_mapStage, key, value);
             }
             if (_mapException == null && _map.Map != null)
             {
@@ -490,7 +507,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
 
     private const double WatchdogGraceSeconds = 2;
 
-    private bool TryFinish() => Interlocked.CompareExchange(ref _finished, 1, 0) == 0;
+    public bool TryFinish() => Interlocked.CompareExchange(ref _finished, 1, 0) == 0;
 
     // Runs on a timer thread while the main thread is still inside game code. Only
     // the stage list and diagnostics counters are read; no game state is touched.
@@ -518,64 +535,68 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
 
     public void WriteResult(string executionStatus, string? failure, bool observeGame = true)
     {
-        string temp = request.ResultPath + ".tmp";
-        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write))
-        using (var json = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+        lock (_resultLock)
         {
-            json.WriteStartObject();
-            json.WriteString("recordType", "rwmtWorkerResult");
-            json.WriteNumber("schemaVersion", 1);
-            json.WriteString("runId", request.RunId);
-            json.WriteString("nonce", request.Nonce);
-            json.WriteString("executionStatus", executionStatus);
-            json.WriteString("failure", failure);
-            json.WriteNumber("frames", _frames);
-            json.WriteNumber("elapsedSeconds", Math.Round(clock.Elapsed.TotalSeconds, 3));
-            WriteRuntime(json);
-            WriteStages(json);
-            if (request.Tick != null)
+            string temp = request.ResultPath + ".tmp";
+            using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write))
+            using (var json = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
             {
-                json.WritePropertyName("tick");
-                Dictionary<string, object?> evidence = _ticksV2?.Evidence(_tickInitialization)
-                    ?? _ticks?.Evidence(_tickInitialization) ?? new();
-                evidence["camera"] = _tickApi?.CameraContext;
-                if (_tickError != null) { evidence["status"] = "incomplete"; evidence["error"] = _tickError; }
-                JsonSerializer.Serialize(json, evidence);
+                json.WriteStartObject();
+                json.WriteString("recordType", "rwmtWorkerResult");
+                json.WriteNumber("schemaVersion", 1);
+                json.WriteString("runId", request.RunId);
+                json.WriteString("nonce", request.Nonce);
+                json.WriteString("executionStatus", executionStatus);
+                json.WriteString("failure", failure);
+                json.WriteNumber("frames", _frames);
+                json.WriteNumber("elapsedSeconds", Math.Round(clock.Elapsed.TotalSeconds, 3));
+                WriteRuntime(json);
+                WriteStages(json);
+                if (request.Tick != null)
+                {
+                    json.WritePropertyName("tick");
+                    Dictionary<string, object?> evidence = _ticksV2?.Evidence(_tickInitialization)
+                        ?? _ticks?.Evidence(_tickInitialization) ?? new Dictionary<string, object?> { ["status"] = "incomplete" };
+                    evidence["camera"] = _tickApi?.CameraContext;
+                    if (_tickError != null) { evidence["status"] = "incomplete"; evidence["error"] = _tickError; }
+                    JsonSerializer.Serialize(json, evidence);
+                }
+                json.WriteStartArray("skippedOfficialSteps");
+                foreach (string step in SkippedOfficialSteps)
+                {
+                    json.WriteStringValue(step);
+                }
+                json.WriteEndArray();
+                json.WriteStartArray("deviations");
+                foreach (string deviation in Deviations)
+                {
+                    json.WriteStringValue(deviation);
+                }
+                json.WriteEndArray();
+                if (observeGame)
+                {
+                    WriteGameObservations(json, executionStatus);
+                }
+                else
+                {
+                    json.WriteBoolean("gameObserved", false);
+                }
+                Diagnostics.SummarySnapshot diag = diagnostics.Snapshot();
+                json.WriteStartObject("diagnosticsSummary");
+                json.WriteNumber("written", diag.Written);
+                json.WriteNumber("dropped", diag.Dropped);
+                json.WriteNumber("truncated", diag.Truncated);
+                json.WriteStartObject("byLevel");
+                foreach ((string level, int count) in diag.CountsByLevel)
+                {
+                    json.WriteNumber(level, count);
+                }
+                json.WriteEndObject();
+                json.WriteEndObject();
+                json.WriteEndObject();
             }
-            json.WriteStartArray("skippedOfficialSteps");
-            foreach (string step in SkippedOfficialSteps)
-            {
-                json.WriteStringValue(step);
-            }
-            json.WriteEndArray();
-            json.WriteStartArray("deviations");
-            foreach (string deviation in Deviations)
-            {
-                json.WriteStringValue(deviation);
-            }
-            json.WriteEndArray();
-            if (observeGame)
-            {
-                WriteGameObservations(json, executionStatus);
-            }
-            else
-            {
-                json.WriteBoolean("gameObserved", false);
-            }
-            json.WriteStartObject("diagnosticsSummary");
-            json.WriteNumber("written", diagnostics.Written);
-            json.WriteNumber("dropped", diagnostics.Dropped);
-            json.WriteNumber("truncated", diagnostics.Truncated);
-            json.WriteStartObject("byLevel");
-            foreach ((string level, int count) in diagnostics.CountsByLevel)
-            {
-                json.WriteNumber(level, count);
-            }
-            json.WriteEndObject();
-            json.WriteEndObject();
-            json.WriteEndObject();
+            File.Move(temp, request.ResultPath, overwrite: true);
         }
-        File.Move(temp, request.ResultPath, overwrite: true);
     }
 
     private void WriteGameObservations(Utf8JsonWriter json, string executionStatus)
@@ -587,36 +608,36 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         bool loaded = SafeBool(() => api.PlayDataLoaded());
         json.WriteBoolean("playDataLoaded", loaded);
         json.WriteBoolean("verseLogLimitReached", SafeBool(() => (bool)api.LogReachedMaxMessages.GetValue(null)!));
-        Guard(json, "activeLanguageError", () =>
+        Guard(json, "activeLanguageError", w =>
         {
             object? language = api.ActiveLanguage.GetValue(null);
-            json.WriteString("activeLanguage", language == null ? null : (string?)Reflect.Member(language, "folderName"));
+            w.WriteString("activeLanguage", language == null ? null : (string?)Reflect.Member(language, "folderName"));
         });
         if (loaded)
         {
-            Guard(json, "translationErrorsError", () =>
-                Checks.WriteTranslationErrors(json, api.ActiveLanguage.GetValue(null), request.MaxDiagnostics, request.MaxMessageBytes));
+            Guard(json, "translationErrorsError", w =>
+                Checks.WriteTranslationErrors(w, api.ActiveLanguage.GetValue(null), request.MaxDiagnostics, request.MaxMessageBytes));
         }
         if (executionStatus == "completed")
         {
             var checks = new Checks(api);
-            Guard(json, "runningModsError", () => checks.WriteRunningMods(json));
-            Guard(json, "modOrderError", () =>
+            Guard(json, "runningModsError", w => checks.WriteRunningMods(w));
+            Guard(json, "modOrderError", w =>
             {
                 List<string> actual = checks.RunningModIds();
-                json.WriteStartObject("modOrder");
-                json.WriteBoolean("matches", actual.SequenceEqual(request.ExpectedModOrder));
-                json.WriteStartArray("expected");
-                request.ExpectedModOrder.ToList().ForEach(json.WriteStringValue);
-                json.WriteEndArray();
-                json.WriteStartArray("actual");
-                actual.ForEach(json.WriteStringValue);
-                json.WriteEndArray();
-                json.WriteEndObject();
+                w.WriteStartObject("modOrder");
+                w.WriteBoolean("matches", actual.SequenceEqual(request.ExpectedModOrder));
+                w.WriteStartArray("expected");
+                request.ExpectedModOrder.ToList().ForEach(w.WriteStringValue);
+                w.WriteEndArray();
+                w.WriteStartArray("actual");
+                actual.ForEach(w.WriteStringValue);
+                w.WriteEndArray();
+                w.WriteEndObject();
             });
             if (loaded)
             {
-                Guard(json, "checksError", () => checks.WriteExpectations(json, request.Expectations, _eventChoice.Row));
+                Guard(json, "checksError", w => checks.WriteExpectations(w, request.Expectations, _eventChoice.Row));
             }
         }
         if (request.Map != null)
@@ -629,7 +650,7 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
     {
         json.WriteStartObject("map");
         json.WriteString("status", _mapStage?.Status ?? "notStarted");
-        Exception? error = _mapException is TargetInvocationException { InnerException: { } inner } ? inner : _mapException;
+        Exception? error = _mapException == null ? null : Reflect.Unwrap(_mapException);
         if (error != null)
         {
             json.WriteString("setupError", error is MapSetupException ? error.Message : null);
@@ -652,17 +673,28 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         json.WriteEndObject();
     }
 
-    // A failing observation must not lose the rest of the result.
-    private static void Guard(Utf8JsonWriter json, string errorProperty, Action write)
+    // A failing observation must not lose or corrupt the rest of the result.
+    private static void Guard(Utf8JsonWriter json, string errorProperty, Action<Utf8JsonWriter> write)
     {
-        int depth = json.CurrentDepth;
         try
         {
-            write();
+            using var buffer = new MemoryStream();
+            using (var inner = new Utf8JsonWriter(buffer))
+            {
+                inner.WriteStartObject();
+                write(inner);
+                inner.WriteEndObject();
+            }
+            buffer.Position = 0;
+            using JsonDocument doc = JsonDocument.Parse(buffer);
+            foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
+            {
+                prop.WriteTo(json);
+            }
         }
-        catch (Exception e) when (e is not OutOfMemoryException && json.CurrentDepth == depth)
+        catch (Exception e) when (e is not OutOfMemoryException)
         {
-            json.WriteString(errorProperty, e.ToString());
+            json.WriteString(errorProperty, Reflect.Unwrap(e).ToString());
         }
     }
 
@@ -681,12 +713,12 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
     private void WriteStages(Utf8JsonWriter json)
     {
         json.WriteStartArray("stages");
-        Stage[] stages;
+        (string Name, string Status, double Start, double? End, Dictionary<string, object?> Evidence)[] stages;
         lock (_stages)
         {
-            stages = _stages.ToArray();
+            stages = _stages.Select(s => (s.Name, s.Status, s.Start, s.End, new Dictionary<string, object?>(s.Evidence))).ToArray();
         }
-        foreach (Stage stage in stages)
+        foreach (var stage in stages)
         {
             json.WriteStartObject();
             json.WriteString("name", stage.Name);
@@ -719,11 +751,12 @@ public sealed class Host(WorkerRequest request, GameApi api, MapApi? mapApi, Dia
         json.WriteString("assemblyNameRedirects", AppContext.GetData("WaylithClr.AssemblyNameRedirects") as string);
         json.WriteEndObject();
         json.WriteStartArray("assemblies");
-        string hostDir = Path.GetFullPath(request.HostDir);
+        string hostDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.HostDir));
+        string hostPrefix = hostDir + Path.DirectorySeparatorChar;
         foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies().OrderBy(a => a.GetName().Name, StringComparer.Ordinal))
         {
             string location = assembly.IsDynamic ? "" : assembly.Location;
-            if (location.Length == 0 || !Path.GetFullPath(location).StartsWith(hostDir, StringComparison.Ordinal))
+            if (location.Length == 0 || !Path.GetFullPath(location).StartsWith(hostPrefix, StringComparison.Ordinal))
             {
                 continue;
             }

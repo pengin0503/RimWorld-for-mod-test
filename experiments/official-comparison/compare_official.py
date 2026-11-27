@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -118,13 +119,26 @@ def run_official(snapshot, target_run, mods, official, out, timeout=180, extra_a
            'LANG': 'C.UTF-8'}
     started = time.monotonic()
     with open(root / 'stdout.log', 'wb') as stdout:
+        proc = subprocess.Popen(['./RimWorld', '-headless', '-QuitAfterBoot', '-NoCrashDialog', *extra_args], cwd=root, env=env,
+                                stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            code = subprocess.run(['./RimWorld', '-headless', '-QuitAfterBoot', '-NoCrashDialog', *extra_args], cwd=root, env=env,
-                                  stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.STDOUT, timeout=timeout).returncode
+            code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             # When loading fails, the official boot never reaches QuitAfterBoot and keeps
-            # running its frame loop; subprocess.run has killed it at this point.
+            # running its frame loop; kill the entire process group below.
             code = 'timeout'
+        finally:
+            if proc.poll() is None:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait()
+            else:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
     seconds = time.monotonic() - started
     player_log = config.parent / 'Logs' / 'Player.log'
     return code, round(seconds, 3), player_log
@@ -330,13 +344,15 @@ def main(argv=None):
     parser.add_argument('--request', action='append', metavar='NAME=PATH',
                         help='compare a private request file (e.g. real mods) instead of the fixture cases')
     args = parser.parse_args(argv)
+    if args.repeat < 1:
+        parser.error('--repeat must be at least 1')
     for item in args.request or []:
         # The name becomes a directory under out/cases that is deleted and recreated.
         name, _, path = item.partition('=')
         if not CASE_NAME.fullmatch(name) or name in ('.', '..') or not path:
             parser.error(f'--request needs NAME=PATH with NAME made of letters, digits, ".", "_" or "-": {item!r}')
     out = Path(args.out).resolve()
-    if REPO in out.parents:
+    if out == REPO or REPO in out.parents:
         parser.error('--out must be outside the repository')
     out.mkdir(parents=True, exist_ok=True)
     if args.reanalyze:

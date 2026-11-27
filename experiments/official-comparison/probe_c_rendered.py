@@ -31,6 +31,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -191,8 +192,11 @@ def launch_official(root, display, shots):
         raise ValueError('virtual display number already in use')
     xvfb = subprocess.Popen(['Xvfb', f':{display}', '-screen', '0', '1600x900x24', '-nolisten', 'tcp'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    game = None
     try:
         for _ in range(200):
+            if xvfb.poll() is not None:
+                raise RuntimeError(f'virtual display exited early (code {xvfb.returncode})')
             if socket.exists(): break
             time.sleep(.05)
         else:
@@ -201,16 +205,33 @@ def launch_official(root, display, shots):
                'XDG_CONFIG_HOME': str(root/'xdg'), 'XDG_RUNTIME_DIR': str(runtime), 'LANG': 'C.UTF-8',
                'DISPLAY': f':{display}', 'VK_ICD_FILENAMES': str(LVP_ICD)}
         game = subprocess.Popen(['./RimWorld', '-NoCrashDialog'], cwd=root, env=env,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=True)
         taken = 0
         while game.poll() is None:
             if shots is not None and taken < 200 and shutil.which('import'):
-                subprocess.run(['import', '-display', f':{display}', '-window', 'root', str(shots/f'{taken:03}.png')],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20, env={'PATH': env['PATH']})
+                try:
+                    subprocess.run(['import', '-display', f':{display}', '-window', 'root', str(shots/f'{taken:03}.png')],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20, env={'PATH': env['PATH']})
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
                 taken += 1
             time.sleep(2)
         return game.returncode
     finally:
+        if game is not None and game.poll() is None:
+            try:
+                os.killpg(game.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                game.wait(5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(game.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                game.wait()
         xvfb.terminate()
         try: xvfb.wait(10)
         except subprocess.TimeoutExpired: xvfb.kill(); xvfb.wait()

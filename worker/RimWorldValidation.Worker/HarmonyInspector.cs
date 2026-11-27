@@ -32,7 +32,7 @@ public sealed class HarmonyInspector
             json.WriteString("name", type.Assembly.GetName().Name);
             json.WriteString("version", type.Assembly.GetName().Version?.ToString());
             json.WriteString("mvid", type.Assembly.ManifestModule.ModuleVersionId.ToString());
-            json.WriteString("location", type.Assembly.Location);
+            json.WriteString("location", type.Assembly.IsDynamic ? "" : type.Assembly.Location);
             json.WriteEndObject();
         }
         json.WriteEndArray();
@@ -51,15 +51,22 @@ public sealed class HarmonyInspector
             return;
         }
         json.WriteBoolean("available", true);
-        List<Registered> registered;
-        try
+        var registered = new List<Registered>();
+        var registryErrors = new List<string>();
+        foreach (Type harmonyType in harmonyTypes)
         {
-            registered = ReadRegistry(harmonyTypes[0]);
+            try
+            {
+                registered.AddRange(ReadRegistry(harmonyType));
+            }
+            catch (Exception e) when (e is not OutOfMemoryException)
+            {
+                registryErrors.Add(Reflect.Unwrap(e).ToString());
+            }
         }
-        catch (Exception e) when (e is not OutOfMemoryException)
+        if (registryErrors.Count > 0)
         {
-            json.WriteString("registryError", e.ToString());
-            registered = [];
+            json.WriteString("registryError", string.Join("\n", registryErrors));
         }
 
         var matched = new HashSet<Registered>();
@@ -87,7 +94,7 @@ public sealed class HarmonyInspector
             }
             catch (Exception e) when (e is not OutOfMemoryException)
             {
-                WriteOutcome(json, item, "error", e.Message);
+                WriteOutcome(json, item, "error", Reflect.Unwrap(e).Message);
             }
         }
         json.WriteEndArray();
@@ -126,7 +133,11 @@ public sealed class HarmonyInspector
             }
             foreach ((string kind, string member) in Kinds)
             {
-                foreach (object patch in (IEnumerable)Reflect.Member(patches, member)!)
+                if (Reflect.Member(patches, member) is not IEnumerable list)
+                {
+                    continue;
+                }
+                foreach (object patch in list)
                 {
                     result.Add(new Registered(target, kind, (string)Reflect.Member(patch, "owner")!, (MethodInfo)Reflect.Member(patch, "PatchMethod")!));
                 }

@@ -67,7 +67,7 @@ public static class Reflect
         return (T)System.Delegate.CreateDelegate(typeof(T), target, method);
     }
 
-    /// <summary>Reads a public field or property by name, whichever the type exposes.</summary>
+    /// <summary>Reads a public or non-public instance field or property by name, whichever the type exposes.</summary>
     public static object? Member(object target, string name)
     {
         Type type = target.GetType();
@@ -82,5 +82,25 @@ public static class Reflect
             return property.GetValue(target);
         }
         throw new MissingMemberException(type.FullName, name);
+    }
+
+    /// <summary>Unwraps TargetInvocationException and TypeInitializationException to expose the root cause.</summary>
+    public static Exception Unwrap(Exception error)
+    {
+        while (true)
+        {
+            if (error is TargetInvocationException { InnerException: { } tie })
+            {
+                error = tie;
+            }
+            else if (error is TypeInitializationException { InnerException: { } tye })
+            {
+                error = tye;
+            }
+            else
+            {
+                return error;
+            }
+        }
     }
 }

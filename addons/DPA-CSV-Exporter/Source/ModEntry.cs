@@ -44,7 +44,7 @@ public sealed class DpaCsvExporterMod : Mod
             "Export all rows in the active profiler, including rows hidden by its search filter.\n" +
             "CSV folder: RimWorld user data / AnalyzerExports");
         if (Widgets.ButtonText(new Rect(inner.x, inner.y + 75f, 250f, 34f), "Export all current measurements"))
-            ExportWithFeedback();
+            status = ExportWithFeedback();
         Widgets.Label(new Rect(inner.x, inner.y + 125f, inner.width, 75f), status);
     }
 
@@ -64,20 +64,22 @@ public sealed class DpaCsvExporterMod : Mod
         }
     }
 
-    private static void ExportWithFeedback()
+    private static string ExportWithFeedback()
     {
         try
         {
             var path = Exporter.ExportCurrent();
+            string message = "DPA CSV saved: " + System.IO.Path.GetFileName(path);
             Log.Message("[DPA CSV Exporter] Saved: " + path);
-            Messages.Message("DPA CSV saved: " + System.IO.Path.GetFileName(path),
-                MessageTypeDefOf.TaskCompletion, false);
+            Messages.Message(message, MessageTypeDefOf.TaskCompletion, false);
+            return message;
         }
         catch (Exception e)
         {
+            string message = "DPA CSV export failed: " + e.Message;
             Log.Warning("[DPA CSV Exporter] Export failed: " + e);
-            Messages.Message("DPA CSV export failed: " + e.Message,
-                MessageTypeDefOf.RejectInput, false);
+            Messages.Message(message, MessageTypeDefOf.RejectInput, false);
+            return message;
         }
     }
 }

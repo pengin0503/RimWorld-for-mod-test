@@ -17,6 +17,8 @@ def unsupported_positions(overloads, atoms):
     truncated = False
     if not isinstance(overloads, list):
         return {'items': rows, 'truncated': False}
+    if len(overloads) > 16:
+        truncated = True
     for item in overloads[:16]:
         if not isinstance(item, dict):
             continue
@@ -26,6 +28,8 @@ def unsupported_positions(overloads, atoms):
         roots = [(item.get('return'), {'token': token, 'site': 'return', 'path': []})]
         params = item.get('parameters')
         if isinstance(params, list):
+            if len(params) > 64:
+                truncated = True
             roots.extend((node, {'token': token, 'site': 'parameter', 'index': i, 'path': []})
                          for i, node in enumerate(params[:64]))
         stack = list(reversed(roots))
@@ -53,6 +57,8 @@ def unsupported_positions(overloads, atoms):
             if kind in ('byref', 'pointer', 'array', 'generic'):
                 children.append((node.get('element'), {**position, 'path': [*position['path'], 'element']}))
             if kind == 'generic' and isinstance(node.get('arguments'), list):
+                if len(node['arguments']) > 32:
+                    truncated = True
                 children.extend((arg, {**position, 'path': [*position['path'], i]})
                                 for i, arg in enumerate(node['arguments'][:32]))
             stack.extend(reversed(children))

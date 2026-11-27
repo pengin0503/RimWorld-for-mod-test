@@ -128,26 +128,39 @@ public static class Exporter
             + "_" + SafeName(category) + "_" + SafeName(entryName)
             + "_" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".csv";
         string path = Path.Combine(folder, fileName);
+        string tempPath = path + ".tmp";
+        string version = string.IsNullOrEmpty(VersionControl.CurrentVersionString) ? "1.7" : VersionControl.CurrentVersionString;
 
-        using var writer = new StreamWriter(path, false, new UTF8Encoding(true));
-        writer.WriteLine(CsvFormat.Line(Header));
-        for (int i = 0; i < rows.Count; i++)
+        try
         {
-            var row = rows[i];
-            string?[] fields = {
-                timestamp, "1.7", category, entryName, filter,
-                CsvFormat.Number(fps), CsvFormat.Number(tps), CsvFormat.Number(tpsTarget),
-                CsvFormat.Number(rootAverage), CsvFormat.Number(cycles), CsvFormat.Number(i+1),
-                row.Key, row.Label, row.Mod, row.Assembly, row.Type, row.Method,
-                CsvFormat.Number(row.Entries), CsvFormat.Number(row.Average),
-                CsvFormat.Number(row.Self), CsvFormat.Number(row.Max), CsvFormat.Number(row.Total),
-                CsvFormat.Number(row.Calls),
-                CsvFormat.Number(row.Entries == 0 ? 0 : row.Calls / row.Entries),
-                CsvFormat.Number(row.Fraction), CsvFormat.Number(row.Spikes),
-                CsvFormat.Number(row.Severity), CsvFormat.Number(row.Phase),
-                row.Pinned ? "1" : "0"
-            };
-            writer.WriteLine(CsvFormat.Line(fields, Numeric));
+            using (var writer = new StreamWriter(tempPath, false, new UTF8Encoding(true)))
+            {
+                writer.WriteLine(CsvFormat.Line(Header));
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    var row = rows[i];
+                    string?[] fields = {
+                        timestamp, version, category, entryName, filter,
+                        CsvFormat.Number(fps), CsvFormat.Number(tps), CsvFormat.Number(tpsTarget),
+                        CsvFormat.Number(rootAverage), CsvFormat.Number(cycles), CsvFormat.Number(i+1),
+                        row.Key, row.Label, row.Mod, row.Assembly, row.Type, row.Method,
+                        CsvFormat.Number(row.Entries), CsvFormat.Number(row.Average),
+                        CsvFormat.Number(row.Self), CsvFormat.Number(row.Max), CsvFormat.Number(row.Total),
+                        CsvFormat.Number(row.Calls),
+                        CsvFormat.Number(row.Entries == 0 ? 0 : row.Calls / row.Entries),
+                        CsvFormat.Number(row.Fraction), CsvFormat.Number(row.Spikes),
+                        CsvFormat.Number(row.Severity), CsvFormat.Number(row.Phase),
+                        row.Pinned ? "1" : "0"
+                    };
+                    writer.WriteLine(CsvFormat.Line(fields, Numeric));
+                }
+            }
+            File.Move(tempPath, path);
+        }
+        catch
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* best effort cleanup */ }
+            throw;
         }
         return path;
     }

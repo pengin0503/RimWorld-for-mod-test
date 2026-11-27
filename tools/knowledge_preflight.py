@@ -186,18 +186,27 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
             if not rel or "\\" in rel or any(p in (".", "..", "") for p in rel.split("/")):
                 raise KnowledgeError("unsafe relative path")
             files.append((rel, path))
-            if rel in ("About/About.xml", "LoadFolders.xml"):
+            if rel.casefold() in ("about/about.xml", "loadfolders.xml"):
                 metadata_bytes += path.stat().st_size
                 if metadata_bytes > MAX_INPUT_BYTES:
                     raise KnowledgeError("metadata exceeds bounded read budget")
         files.sort(key=lambda item: item[0])
         stats["filesConsidered"] = len(files)
         names = {p for p, _ in files}
-        if "About/About.xml" not in names:
+        active_base = set()
+        for item in active_packages:
+            if not isinstance(item, str) or not PACKAGE_ID.fullmatch(item):
+                raise KnowledgeError("invalid active package identifier")
+            active_base.add(item.casefold())
+        about_matches = [path for rel, path in files if rel.casefold() == "about/about.xml"]
+        load_matches = [path for rel, path in files if rel.casefold() == "loadfolders.xml"]
+        if not about_matches:
             _static_issue(issues, "missingAbout")
         else:
             try:
-                meta = _parse_xml_file(root / "About" / "About.xml")
+                if len(about_matches) > 1 or len(load_matches) > 1:
+                    raise KnowledgeError("duplicate metadata files differing only in case")
+                meta = _parse_xml_file(about_matches[0])
                 if meta.tag != "ModMetaData":
                     raise KnowledgeError("invalid metadata root")
                 pack_id = (meta.findtext("packageId") or "").strip()
@@ -209,11 +218,7 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                 if not versions:
                     _static_issue(issues, "versionNotDeclared", definite=False)
 
-                active = set()
-                for item in active_packages:
-                    if not isinstance(item, str) or not PACKAGE_ID.fullmatch(item):
-                        raise KnowledgeError("invalid active package identifier")
-                    active.add(item.casefold())
+                active = set(active_base)
                 if pack_id and PACKAGE_ID.fullmatch(pack_id):
                     active.add(pack_id.casefold())
                 try:
@@ -226,11 +231,11 @@ def inspect_mod(mod: Path, db: KnowledgeDatabase, *,
                     if (node.text or "").strip().casefold() in active:
                         _static_issue(issues, "incompatibleMod")
 
-                config = (root / "LoadFolders.xml")
-                if config.is_symlink():
-                    raise KnowledgeError("linked load-folder metadata")
                 load_data = None
-                if config.is_file():
+                if load_matches:
+                    config = load_matches[0]
+                    if config.is_symlink():
+                        raise KnowledgeError("linked load-folder metadata")
                     with config.open("rb") as stream:
                         load_data = stream.read(MAX_XML_BYTES + 1)
                     if len(load_data) > MAX_XML_BYTES:

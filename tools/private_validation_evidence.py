@@ -59,8 +59,8 @@ def inspect(kind, out):
     elif kind=='cow':
         data=read(out/'summary.json'); data=data if isinstance(data,dict) else {}
         rows=data.get('rows'); rows=rows if isinstance(rows,list) else []
-        result['complete']=(len(rows)==10 and all(isinstance(r,dict) and type(r.get('repeat')) is int for r in rows)
-                            and sorted((r.get('repeat'),r.get('mode','')) for r in rows)==[(n,m) for n in range(1,6) for m in ('copy','reflink')])
+        result['complete']=(len(rows)==10 and all(isinstance(r,dict) and type(r.get('repeat')) is int and isinstance(r.get('mode'),str) for r in rows)
+                            and sorted((r.get('repeat'),r.get('mode')) for r in rows)==[(n,m) for n in range(1,6) for m in ('copy','reflink')])
         result['accepted']=(result['complete'] and data.get('ok') is True and data.get('filesystem')=='dedicated-btrfs'
             and type(data.get('files')) is int and data['files']==516
             and type(data.get('sourceDataBytes')) is int and data['sourceDataBytes']>0

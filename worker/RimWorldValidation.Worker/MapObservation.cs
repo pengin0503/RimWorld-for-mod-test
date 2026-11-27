@@ -19,12 +19,13 @@ public sealed class MapObservation(MapApi api, MapStage stage, int maxListed)
         ["Pawn"] = 6, ["Building"] = 5, ["Item"] = 4, ["Plant"] = 3, ["Filth"] = 2,
     };
 
-    private sealed class ThingInfo(int index, object def, string category, int priority)
+    private sealed class ThingInfo(int index, object def, string category, int priority, bool isListed)
     {
         public int Index { get; } = index;
         public object Def { get; } = def;
         public string Category { get; } = category;
         public int Priority { get; } = priority;
+        public bool IsListed { get; } = isListed;
         public int Count { get; set; }
     }
 
@@ -50,6 +51,10 @@ public sealed class MapObservation(MapApi api, MapStage stage, int maxListed)
             if (!_terrain.TryGetValue(def, out int index))
             {
                 index = terrainDefs.Count;
+                if (index > ushort.MaxValue)
+                {
+                    throw new InvalidOperationException($"terrain palette exceeded {ushort.MaxValue + 1} distinct defs");
+                }
                 _terrain[def] = index;
                 terrainDefs.Add(def);
                 terrainCounts.Add(0);
@@ -71,6 +76,10 @@ public sealed class MapObservation(MapApi api, MapStage stage, int maxListed)
             }
             if (!_roofs.TryGetValue(def, out int index))
             {
+                if (roofDefs.Count >= byte.MaxValue)
+                {
+                    throw new InvalidOperationException($"roof palette exceeded {byte.MaxValue} distinct defs");
+                }
                 roofDefs.Add(def);
                 roofCounts.Add(0);
                 index = roofDefs.Count;
@@ -92,8 +101,12 @@ public sealed class MapObservation(MapApi api, MapStage stage, int maxListed)
             object def = Reflect.Member(thing, "def")!;
             if (!_things.TryGetValue(def, out ThingInfo? info))
             {
+                if (thingDefs.Count >= ushort.MaxValue)
+                {
+                    throw new InvalidOperationException($"thing palette exceeded {ushort.MaxValue} distinct defs");
+                }
                 string category = Reflect.Member(def, "category")!.ToString()!;
-                info = new ThingInfo(thingDefs.Count + 1, def, category, Priority.GetValueOrDefault(category));
+                info = new ThingInfo(thingDefs.Count + 1, def, category, Priority.GetValueOrDefault(category), ComputeIsListed(def, category));
                 _things[def] = info;
                 thingDefs.Add(info);
             }
@@ -116,7 +129,7 @@ public sealed class MapObservation(MapApi api, MapStage stage, int maxListed)
                     }
                 }
             }
-            if (!IsListed(info))
+            if (!info.IsListed)
             {
                 continue;
             }
@@ -221,13 +234,13 @@ public sealed class MapObservation(MapApi api, MapStage stage, int maxListed)
     }
 
     // Natural rock, plants and filth are summarized by the layers and counts only.
-    private static bool IsListed(ThingInfo info)
+    private static bool ComputeIsListed(object def, string category)
     {
-        if (info.Category is "Plant" or "Filth" or "Mote" or "Gas" or "Ethereal" or "Projectile" or "Attachment")
+        if (category is "Plant" or "Filth" or "Mote" or "Gas" or "Ethereal" or "Projectile" or "Attachment")
         {
             return false;
         }
-        object? building = Reflect.Member(info.Def, "building");
+        object? building = Reflect.Member(def, "building");
         return building == null || !(bool)Reflect.Member(building, "isNaturalRock")!;
     }
 

@@ -45,11 +45,15 @@ public sealed class BoundedTickRunnerV2
     {
         try
         {
-            StartTick = EndTick = readTick();
-            if (StartTick < 0 || (long)StartTick + _count > int.MaxValue)
+            int start = readTick();
+            lock (_gate)
+            {
+                StartTick = EndTick = start;
+            }
+            if (start < 0 || (long)start + _count > int.MaxValue)
                 throw new InvalidOperationException("unsupported game tick range");
             int index = 0;
-            void Observe(int relative)
+            void Observe(int relative, int gameTick)
             {
                 IReadOnlyDictionary<string, long> source = readObservers()
                     ?? throw new InvalidOperationException("observation source missing");
@@ -60,36 +64,45 @@ public sealed class BoundedTickRunnerV2
                 foreach (string id in _ids)
                     values.Add(id, source[id]);
                 lock (_gate)
-                    _observations.Add(new TickObservation(relative, EndTick, values));
+                    _observations.Add(new TickObservation(relative, gameTick, values));
                 checkpoint?.Invoke();
             }
-            if (_points[0] == 0) { Observe(0); index++; }
-            while (Advanced < _count)
+            if (_points[0] == 0) { Observe(0, start); index++; }
+            int current = start;
+            while (current - start < _count)
             {
                 if (shouldStop()) throw new OperationCanceledException("tick deadline reached");
                 int before = readTick();
-                if (before != EndTick)
+                if (before != current)
                     throw new InvalidOperationException("game tick changed outside the bounded step");
                 singleTick();
-                EndTick = readTick();
-                if ((long)EndTick - before != 1)
+                current = readTick();
+                lock (_gate) EndTick = current;
+                if ((long)current - before != 1)
                     throw new InvalidOperationException("one step did not advance exactly one tick");
-                if (index < _points.Length && Advanced == _points[index])
+                int advanced = current - start;
+                if (index < _points.Length && advanced == _points[index])
                 {
-                    Observe(Advanced);
+                    Observe(advanced, current);
                     index++;
                 }
             }
-            if (index != _points.Length || readTick() != EndTick)
+            if (index != _points.Length || readTick() != current)
                 throw new InvalidOperationException("observation sequence incomplete");
-            Status = "completed";
+            lock (_gate) Status = "completed";
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            try { EndTick = readTick(); }
+            int? confirmed = null;
+            try { confirmed = readTick(); }
             catch (Exception readError) when (readError is not OutOfMemoryException) { /* last confirmed tick */ }
-            Error = error.GetType().Name + ": " + error.Message;
-            Status = "incomplete";
+            Exception unwrapped = error is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : error;
+            lock (_gate)
+            {
+                if (confirmed is int tick) EndTick = tick;
+                Error = unwrapped.GetType().Name + ": " + unwrapped.Message;
+                Status = "incomplete";
+            }
         }
     }
 

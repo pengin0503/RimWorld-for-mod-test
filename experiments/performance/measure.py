@@ -39,6 +39,13 @@ def summary(values):
             'max': round(max(values), 2), 'values': [round(v, 2) for v in values]}
 
 
+def _rmtree_readonly(target: Path):
+    for path in [target, *target.rglob('*')]:
+        if path.is_dir() and not path.is_symlink():
+            path.chmod(0o755)
+    shutil.rmtree(target)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', required=True)
@@ -48,25 +55,28 @@ def main(argv=None):
     parser.add_argument('--worker', default=str(REPO / 'worker' / 'bin'))
     parser.add_argument('--repeat', type=int, default=5)
     args = parser.parse_args(argv)
+    if args.repeat < 1:
+        parser.error('--repeat must be at least 1')
     out = Path(args.out).resolve()
+    snapshot_root = Path(args.snapshot_root).resolve()
+    for label, candidate in (('--out', out), ('--snapshot-root', snapshot_root)):
+        if candidate == REPO or REPO in candidate.parents:
+            parser.error(f'{label} must be outside the repository')
     out.mkdir(parents=True, exist_ok=True)
     report = {'prepare': [], 'scenarios': {}}
 
     snapshot = None
     for index in range(args.repeat):
-        target = Path(args.snapshot_root) / f'snapshot-{index}'
+        target = snapshot_root / f'snapshot-{index}'
         if target.exists():
-            shutil.rmtree(target)
+            _rmtree_readonly(target)
         started = time.monotonic()
         validation_host.prepare_game(args.source, target, log=lambda *_: None)
         report['prepare'].append(time.monotonic() - started)
         if snapshot is None:
             snapshot = target
         else:
-            for path in [target, *target.rglob('*')]:
-                if path.is_dir() and not path.is_symlink():
-                    path.chmod(0o755)
-            shutil.rmtree(target)
+            _rmtree_readonly(target)
     report['prepare'] = summary(report['prepare'])
     print('prepare', report['prepare'], flush=True)
 

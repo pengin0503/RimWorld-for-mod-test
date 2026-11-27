@@ -245,24 +245,32 @@ def load_snapshot(snapshot, *, full=False, official=()):
     info_path = snapshot / 'snapshot.json'
     if not info_path.is_file():
         raise Blocked('snapshotMissing', f'{info_path} not found; run prepare-game first')
-    info = json.loads(info_path.read_text(encoding='utf-8'))
-    if info.get('recordType') != 'rwmtGameSnapshot' or info.get('schemaVersion') != 1:
+    try:
+        info = json.loads(info_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise Blocked('snapshotInvalid', f'unreadable snapshot manifest: {error}') from None
+    if (not isinstance(info, dict) or info.get('recordType') != 'rwmtGameSnapshot'
+            or type(info.get('schemaVersion')) is not int or info.get('schemaVersion') != 1
+            or not isinstance(info.get('files'), dict)):
         raise Blocked('snapshotInvalid', 'unsupported snapshot record')
     game = snapshot / 'game'
     manifest = info['files']
     problems = []
     for rel, entry in manifest.items():
+        if (not isinstance(rel, str) or not isinstance(entry, dict) or 'size' not in entry
+                or '\\' in rel or rel.startswith('/') or '..' in PurePosixPath(rel).parts):
+            raise Blocked('snapshotInvalid', f'unsafe snapshot manifest entry: {rel!r}')
         path = game / rel
         try:
             if path.is_symlink() or path.stat().st_size != entry['size']:
                 problems.append(rel)
-        except FileNotFoundError:
+        except OSError:
             problems.append(rel)
     info.setdefault('buildPlatform', detect_build_platform(manifest))
     if info['buildPlatform'] is None:
         raise Blocked('snapshotInvalid', 'the snapshot does not hold the runtime of exactly one supported platform')
     for rel in (manifest if full else [r for r in identity_files(info['buildPlatform']) if r in manifest]):
-        if rel not in problems and sha256_file(game / rel) != manifest[rel]['sha256']:
+        if rel not in problems and sha256_file(game / rel) != manifest[rel].get('sha256'):
             problems.append(rel)
     for folder in official:
         files, links = _walk_files(game / 'Data' / folder)
@@ -551,9 +559,13 @@ def _about_package_id(mod_dir):
     if not about.is_file():
         raise Blocked('modInvalid', f'{mod_dir} has no About/About.xml')
     try:
+        if about.stat().st_size > 2 * 1024 * 1024:
+            raise Blocked('modInvalid', f'{about} exceeds 2 MiB size limit')
         root = ET.fromstring(about.read_bytes())
-    except ET.ParseError as error:
+    except (OSError, ET.ParseError) as error:
         raise Blocked('modInvalid', f'{about}: {error}') from None
+    if root.tag != 'ModMetaData':
+        raise Blocked('modInvalid', f'{about} root tag is {root.tag!r}, expected ModMetaData')
     package_id = (root.findtext('packageId') or '').strip()
     if not package_id:
         raise Blocked('modInvalid', f'{about} has no packageId')
@@ -578,22 +590,31 @@ def extract_mod_archive(archive, dest, max_bytes):
         bundle = zipfile.ZipFile(archive)
     except (zipfile.BadZipFile, OSError) as error:
         raise Blocked('modInvalid', f'{archive} is not a readable ZIP: {error}') from None
-    top = dest / Path(archive).stem
+    stem = Path(archive).stem
+    safe_stem = stem if stem and stem not in ('.', '..') and '/' not in stem and '\\' not in stem else 'mod'
+    top = dest / safe_stem
     with bundle:
-        infos = [i for i in bundle.infolist() if not i.filename.replace('\\', '/').startswith('__MACOSX/')]
-        if len(infos) > MAX_ARCHIVE_ENTRIES:
+        all_infos = bundle.infolist()
+        if len(all_infos) > MAX_ARCHIVE_ENTRIES:
             raise Blocked('modInvalid', f'{archive} has more than {MAX_ARCHIVE_ENTRIES} entries')
+        infos = [i for i in all_infos if not i.filename.replace('\\', '/').startswith('__MACOSX/')]
         if sum(i.file_size for i in infos) > max_bytes:
             raise Blocked('modTooLarge', f'{archive} expands beyond the remaining mod size limit')
+        seen_entries = set()
         for info in infos:
             name = info.filename.replace('\\', '/')
-            parts = PurePosixPath(name).parts
-            if (name.startswith('/') or not parts or any(part in ('', '.', '..') for part in parts)
-                    or ':' in parts[0]):
+            trimmed = name.rstrip('/') if info.is_dir() else name
+            raw_parts = trimmed.split('/') if trimmed else []
+            if (name.startswith('/') or not raw_parts or any(part in ('', '.', '..') for part in raw_parts)
+                    or ':' in raw_parts[0]):
                 raise Blocked('modInvalid', f'{archive} has an unsafe entry path: {info.filename!r}')
+            norm_key = tuple(raw_parts)
+            if norm_key in seen_entries:
+                raise Blocked('modInvalid', f'{archive} has a duplicate or conflicting entry: {info.filename!r}')
+            seen_entries.add(norm_key)
             if stat.S_ISLNK(info.external_attr >> 16):
                 raise Blocked('modInvalid', f'{archive} contains a symbolic link: {info.filename!r}')
-            target = top.joinpath(*parts)
+            target = top.joinpath(*raw_parts)
             try:
                 if info.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
@@ -896,18 +917,19 @@ def _xml_text(value):
 
 def _process_group_rss(pgid):
     total = 0
-    for entry in os.scandir('/proc'):
-        if not entry.name.isdigit():
-            continue
-        try:
-            with open(f'/proc/{entry.name}/stat', 'rb') as stream:
-                fields = stream.read().rsplit(b')', 1)[1].split()
-            if int(fields[2]) != pgid:
+    with os.scandir('/proc') as entries:
+        for entry in entries:
+            if not entry.name.isdigit():
                 continue
-            with open(f'/proc/{entry.name}/statm', 'rb') as stream:
-                total += int(stream.read().split()[1]) * os.sysconf('SC_PAGE_SIZE')
-        except (OSError, IndexError, ValueError):
-            continue
+            try:
+                with open(f'/proc/{entry.name}/stat', 'rb') as stream:
+                    fields = stream.read().rsplit(b')', 1)[1].split()
+                if int(fields[2]) != pgid:
+                    continue
+                with open(f'/proc/{entry.name}/statm', 'rb') as stream:
+                    total += int(stream.read().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+            except (OSError, IndexError, ValueError):
+                continue
     return total
 
 
@@ -991,7 +1013,10 @@ def supervise(run_dir, limits, environment, *, poll=0.2, on_poll=None):
         if windows:
             job.terminate()
         else:
-            os.killpg(pgid, signal.SIGKILL)
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
     peak, killed, return_code, stray = 0, None, None, False
     try:
@@ -1040,7 +1065,13 @@ def supervise(run_dir, limits, environment, *, poll=0.2, on_poll=None):
             # The Worker exits with Environment.Exit; anything left in its group is a stray descendant.
             stray = _group_alive(pgid)
             if stray:
-                os.killpg(pgid, signal.SIGKILL)
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                deadline = time.monotonic() + 2.0
+                while _group_alive(pgid) and time.monotonic() < deadline:
+                    time.sleep(0.05)
     if windows:
         enforcement = {'timeout': 'TerminateJobObject', 'memory': 'Job Object JOB_MEMORY (committed bytes) + DOTNET_GCHeapHardLimit',
                        'memoryHard': True, 'memoryMeasure': 'jobCommit'}
@@ -1090,16 +1121,22 @@ def read_worker_output(run_dir, run_id, nonce, started_wall, max_events):
                 if len(events) >= max_events:
                     break
                 try:
-                    events.append(json.loads(line))
+                    event = json.loads(line)
                 except json.JSONDecodeError:
+                    events.append({'level': 'error', 'category': 'Controller', 'message': 'unreadable event line', 'stage': None})
+                    continue
+                if isinstance(event, dict):
+                    events.append(event)
+                else:
                     events.append({'level': 'error', 'category': 'Controller', 'message': 'unreadable event line', 'stage': None})
     if not result_path.is_file():
         return None, 'workerResultMissing', events
     try:
         result = json.loads(result_path.read_text(encoding='utf-8'))
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return None, 'workerResultUnreadable', events
-    if result.get('recordType') != 'rwmtWorkerResult' or result.get('schemaVersion') != 1:
+    if (not isinstance(result, dict) or result.get('recordType') != 'rwmtWorkerResult'
+            or type(result.get('schemaVersion')) is not int or result.get('schemaVersion') != 1):
         return None, 'workerResultInvalid', events
     if result.get('runId') != run_id or result.get('nonce') != nonce or result_path.stat().st_mtime < started_wall - 1:
         return None, 'workerResultStale', events
@@ -1290,17 +1327,23 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
 
     checks = (worker or {}).get('checks') if completed else None
     a_results = []
+    expected_a_count = (len(request['expectations'].get('defs', ()))
+                        + len(request['expectations'].get('defValues', ()))
+                        + len(request['expectations'].get('keyed', ())))
     if checks is not None:
         a_results = checks.get('defs', []) + checks.get('defValues', []) + checks.get('keyed', [])
     stage_a = {'status': 'incomplete', 'checks': len(a_results)}
     if completed and checks is not None:
-        bad = [c for c in a_results if c.get('outcome') == 'mismatch']
-        errors = [c for c in a_results if c.get('outcome') not in ('match', 'mismatch')]
+        bad = [c for c in a_results if isinstance(c, dict) and c.get('outcome') == 'mismatch']
+        errors = [c for c in a_results if not isinstance(c, dict) or c.get('outcome') not in ('match', 'mismatch')]
+        if len(a_results) < expected_a_count:
+            incomplete.append({'code': 'checkError',
+                               'detail': f'expected at least {expected_a_count} level A check results, got {len(a_results)}'})
         if errors:
             incomplete.append({'code': 'checkError', 'detail': f'{len(errors)} level A expectations could not be evaluated'})
         if bad:
             failed.append({'code': 'expectationMismatch', 'detail': f'{len(bad)} level A expectations did not match'})
-        stage_a['status'] = 'incomplete' if errors else 'failed' if bad else 'completed'
+        stage_a['status'] = 'incomplete' if (errors or len(a_results) < expected_a_count) else 'failed' if bad else 'completed'
     elif completed and worker.get('playDataLoaded') is False:
         stage_a['status'] = 'failed'
     stages['A'] = stage_a
@@ -1312,8 +1355,11 @@ def evaluate(request, mods, worker, worker_problem, events, baseline, baseline_p
         if not expected:
             incomplete.append({'code': 'noExpectedPatches', 'detail': 'level B needs fully specified expected Harmony patches'})
         elif harmony is not None:
-            outcomes = [p.get('outcome') for p in harmony.get('expected', [])]
-            if 'error' in outcomes or harmony.get('registryError'):
+            expected_rows = harmony.get('expected')
+            outcomes = [p.get('outcome') if isinstance(p, dict) else None for p in expected_rows] if isinstance(expected_rows, list) else []
+            if (len(outcomes) != len(expected)
+                    or any(o not in ('match', 'missing') for o in outcomes)
+                    or harmony.get('registryError')):
                 incomplete.append({'code': 'harmonyCheckError', 'detail': 'some expected patches could not be resolved'})
                 stage_b['status'] = 'incomplete'
             elif 'missing' in outcomes:
@@ -1592,7 +1638,7 @@ class EventTail:
         try:
             with open(self.path, 'rb') as events:
                 events.seek(self.offset)
-                data = events.read()
+                data = events.read(2 * 1024 * 1024)
         except OSError:
             return  # not written yet
         self.offset += len(data)
@@ -1602,6 +1648,8 @@ class EventTail:
             try:
                 event = json.loads(line)
             except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(event, dict):
                 continue
             if event.get('stage') and event['stage'] != self.stage:
                 self.stage = event['stage']
@@ -1653,7 +1701,8 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
         if request.get('tick'):
             result['request']['tick'] = request['tick']
         if request.get('tick') and (result['platform'] != 'linux-x64' or runtime != 'waylith'):
-            raise Blocked('boundedTickUnsupported', 'bounded-tick.v1 requires Linux x86_64 and bundled WaylithClr')
+            raise Blocked('boundedTickUnsupported',
+                          f'{bounded_tick.case_id(request["tick"])} requires Linux x86_64 and bundled WaylithClr')
         if result['platform'] not in BUILD_FILES:
             raise Blocked('platformUnsupported',
                           f'running the Worker is implemented for {" and ".join(BUILD_FILES)} only; this is {result["platform"]}')
@@ -1783,8 +1832,12 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
     cache_file = Path(baseline_cache) / f'{baseline_key}.json' if baseline_cache else None
     map_cache_file = cache_file.with_name(f'{baseline_key}.{MAP_OBSERVATION}') if cache_file else None
     if cache_file and cache_file.is_file():
-        baseline_run = json.loads(cache_file.read_text(encoding='utf-8'))
-        if request.get('tick') and not bounded_tick.evidence_complete(
+        try:
+            loaded = json.loads(cache_file.read_text(encoding='utf-8'))
+            baseline_run = loaded if isinstance(loaded, dict) else None
+        except (OSError, ValueError, TypeError):
+            baseline_run = None
+        if baseline_run is not None and request.get('tick') and not bounded_tick.evidence_complete(
                 request['tick'], (baseline_run.get('worker') or {}).get('tick')):
             baseline_run = None
     if baseline_run is not None:
@@ -1805,7 +1858,17 @@ def run_validation(snapshot_dir, request_path, out_dir, worker_dir, *, runtime='
             observation = Path(baseline_run['runDir']) / MAP_OBSERVATION
             if request['map'] and (baseline_run['worker'].get('map') or {}).get('status') == 'completed' \
                     and observation.is_file():
-                shutil.copyfile(observation, map_cache_file)
+                fd, tmp_name = tempfile.mkstemp(dir=cache_file.parent, prefix=f'.{map_cache_file.name}.', suffix='.tmp')
+                try:
+                    with os.fdopen(fd, 'wb') as dst, open(observation, 'rb') as src:
+                        shutil.copyfileobj(src, dst)
+                    os.replace(tmp_name, map_cache_file)
+                except BaseException:
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        pass
+                    raise
                 cached['mapObservationPath'] = str(map_cache_file)
             _write_json(cache_file, cached)
     timings['baselineSeconds'] = round(time.monotonic() - mark, 3)
@@ -1869,7 +1932,10 @@ def _scope(request, stages):
         checked.append('generation of one temporary world and map by the game code (gen steps, scenario map parts, '
                        'map components) with the requested seed; diagnostics compared with the baseline map')
     if 'C' in request['levels']:
-        checked.append('non-rendered new-bill ingredient option predicates (experimental); see stages.C')
+        if request.get('tests') == ['event-choice.v1']:
+            checked.append('non-rendered fixture event choice and map item stack delta (experimental); see stages.C')
+        else:
+            checked.append('non-rendered new-bill ingredient option predicates (experimental); see stages.C')
     if 'D' in request['levels']:
         checked.append('bounded real game ticks and registered fixture state (experimental); see stages.D')
     not_checked = [
@@ -1911,9 +1977,18 @@ def _now():
 
 
 def _write_json(path, value):
-    temp = Path(str(path) + '.tmp')
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    os.replace(temp, path)
+    path = Path(path)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            stream.write(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _summary(result):

@@ -124,13 +124,14 @@ def select_asset(relative, folders, language):
         if top=='assetbundles' and '.' not in parts[-1]: return True
         if top=='shaders': return True
         if top=='languages':
-            wanted={'english',language.casefold()}
+            base_lang=language.split(' (',1)[0].casefold()
+            wanted={'english',language.casefold(),base_lang}
             folder=parts[1].casefold()
             # The game reads Languages/<name>/ or the same name as a .tar archive.
             if len(parts)==2 and folder.endswith('.tar'):
                 folder=folder[:-len('.tar')]
             elif len(parts)<3 or not name.endswith(('.xml','.txt')):
-                return False
+                continue
             if any(folder==x or folder.startswith(x+' (') for x in wanted): return True
     return False
 

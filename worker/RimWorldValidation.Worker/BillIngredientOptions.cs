@@ -20,6 +20,7 @@ public static class BillIngredientOptions
         var rows = new List<Dictionary<string, object?>>();
         PropertyInfo? current = null;
         object? previous = null;
+        bool swapped = false;
         try
         {
             current = Reflect.StaticProperty(GameType("Verse.Current"), "Game");
@@ -29,6 +30,7 @@ public static class BillIngredientOptions
             // defines the initial undiscovered-item state. Never start/finalize/tick it.
             object game = Activator.CreateInstance(GameType("Verse.Game"))!;
             current.SetValue(null, game);
+            swapped = true;
             foreach (JsonElement item in items.EnumerateArray())
             {
                 try
@@ -51,7 +53,7 @@ public static class BillIngredientOptions
         }
         finally
         {
-            if (current != null)
+            if (swapped && current != null)
             {
                 current.SetValue(null, previous);
             }

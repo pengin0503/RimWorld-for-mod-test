@@ -116,7 +116,7 @@ def evidence_complete(config, evidence):
 
 def evaluate_tick(request, evidence, *, interrupted=False):
     stage = {'status': 'incomplete', 'fidelity': 'experimental', 'checks': [], 'evidence': evidence}
-    incomplete = [{'code': 'dNotQualified', 'detail': 'bounded-tick.v1 has no independent qualification'}]
+    incomplete = [{'code': 'dNotQualified', 'detail': f'{case_id(request["tick"])} has no independent qualification'}]
     failed = []
     actual = validated_prefix(request['tick'], evidence)
     unavailable = interrupted or not evidence_complete(request['tick'], evidence)

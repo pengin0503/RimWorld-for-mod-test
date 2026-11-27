@@ -488,31 +488,37 @@ public sealed class MapStage(MapRequest request, MapApi api)
         object world = api.World.GetValue(game)!;
         api.ClearCaches.Invoke(null, null);
         api.ProgramState.SetValue(null, api.ProgramStateMapInitializing);
-        int size = (int)api.InitMapSize.GetValue(init)!;
-        object mapSize = api.IntVec3Ctor.Invoke([size, 1, size]);
-        object player = api.FactionOfPlayer.GetValue(null)!;
-        object settlement = ((IEnumerable)api.Settlements.GetValue(api.WorldObjects.GetValue(world))!).Cast<object>()
-            .FirstOrDefault(s => ReferenceEquals(api.WorldObjectFaction.GetValue(s), player))
-            ?? throw new MapSetupException("the scenario created no player settlement on the world (needs a ScenPart_PlayerFaction)");
-        object tickManager = api.TickManager.GetValue(game)!;
-        api.GameStartAbsTick.SetValue(tickManager, api.ConfiguredTicksAbsAtGameStart.GetValue(null));
-        object info = api.GameInfo.GetValue(game)!;
-        api.InfoStartingTile.SetValue(info, api.InitStartingTile.GetValue(init));
-        api.InfoPawns.SetValue(info, api.InitPawns.GetValue(init));
-        object generator = api.InitMapGeneratorDef.GetValue(init) ?? api.ParentMapGeneratorDef.GetValue(settlement)!;
-        IList extra = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(api.GenStepWithParams))!;
-        foreach (object step in (IEnumerable)api.ParentExtraGenStepDefs.GetValue(settlement)!)
+        try
         {
-            extra.Add(step);
+            int size = (int)api.InitMapSize.GetValue(init)!;
+            object mapSize = api.IntVec3Ctor.Invoke([size, 1, size]);
+            object player = api.FactionOfPlayer.GetValue(null)!;
+            object settlement = ((IEnumerable)api.Settlements.GetValue(api.WorldObjects.GetValue(world))!).Cast<object>()
+                .FirstOrDefault(s => ReferenceEquals(api.WorldObjectFaction.GetValue(s), player))
+                ?? throw new MapSetupException("the scenario created no player settlement on the world (needs a ScenPart_PlayerFaction)");
+            object tickManager = api.TickManager.GetValue(game)!;
+            api.GameStartAbsTick.SetValue(tickManager, api.ConfiguredTicksAbsAtGameStart.GetValue(null));
+            object info = api.GameInfo.GetValue(game)!;
+            api.InfoStartingTile.SetValue(info, api.InitStartingTile.GetValue(init));
+            api.InfoPawns.SetValue(info, api.InitPawns.GetValue(init));
+            object generator = api.InitMapGeneratorDef.GetValue(init) ?? api.ParentMapGeneratorDef.GetValue(settlement)!;
+            IList extra = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(api.GenStepWithParams))!;
+            foreach (object step in (IEnumerable)api.ParentExtraGenStepDefs.GetValue(settlement)!)
+            {
+                extra.Add(step);
+            }
+            foreach (string name in request.ExtraGenSteps)
+            {
+                extra.Add(Activator.CreateInstance(api.GenStepWithParams, Def(api.GenStepDef, name, "gen step"), Activator.CreateInstance(api.GenStepParams)));
+            }
+            Evidence["mapGenerator"] = DefName(generator);
+            Map = api.GenerateMap.Invoke(null, [mapSize, settlement, generator, extra, null, false, false]);
+            api.InitialMapSize.SetValue(api.WorldInfo.GetValue(world), mapSize);
         }
-        foreach (string name in request.ExtraGenSteps)
+        finally
         {
-            extra.Add(Activator.CreateInstance(api.GenStepWithParams, Def(api.GenStepDef, name, "gen step"), Activator.CreateInstance(api.GenStepParams)));
+            api.ProgramState.SetValue(null, api.ProgramStateEntry);
         }
-        Evidence["mapGenerator"] = DefName(generator);
-        Map = api.GenerateMap.Invoke(null, [mapSize, settlement, generator, extra, null, false, false]);
-        api.InitialMapSize.SetValue(api.WorldInfo.GetValue(world), mapSize);
-        api.ProgramState.SetValue(null, api.ProgramStateEntry);
     }
 
     /// <summary>Run order of the gen steps of the last generated map (MapGenerator keeps it until the next map).</summary>

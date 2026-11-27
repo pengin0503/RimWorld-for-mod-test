@@ -51,30 +51,39 @@ def main():
     snapshot = root / 'game-snapshot'
     request = root / 'request.json'
     results = []
-    for name, cache in [('uncached-1', False), ('uncached-2', False), ('cache-fill', True),
-                        ('cached-1', True), ('cached-2', True)]:
-        r = vh.run_validation(snapshot, request, root / name, a.worker,
-            baseline_cache=root / 'baseline-cache' if cache else None,
-            hash_cache=root / 'hash-cache.json' if cache else None)
-        wanted = [m['packageId'].casefold() for m in json.loads(request.read_text())['mods']]
-        ok = r['status'] == 'passed' and loader_order_matches(r.get('modOrder'), wanted)
-        results.append({'case': name, 'ok': ok, 'status': r['status'],
-            'reasons': [x['code'] for x in r.get('reasons', [])],
-            'baselineCached': r.get('diagnostics', {}).get('baselineCached'),
-            'timings': r.get('timings'),
-            'copyModes': r.get('process', {}).get('target', {}).get('modCopyModes')})
-    summary = {'preparation': json.loads((root / 'preparation-summary.json').read_text()), 'runs': results}
-    for label, script in [('event', 'run_event_choice.py'), ('materials', 'run_bill_ingredients.py')]:
-        cmd = [sys.executable, str(REPO / 'tests/integration' / script), '--snapshot', str(snapshot),
-               '--worker', str(Path(a.worker).resolve()), '--out', str(root / label)]
-        with (root / (label + '.log')).open('w') as log:
-            completed = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
-        summary[label + 'Regression'] = completed.returncode == 0
-    ok = (all(x['ok'] for x in results) and all(x['baselineCached'] for x in results[-2:])
-          and summary['eventRegression'] and summary['materialsRegression'])
-    summary['ok'] = ok
-    (root / 'safe-summary.json').write_text(json.dumps(summary, indent=2))
-    return 0 if ok else 1
+    try:
+        for name, cache in [('uncached-1', False), ('uncached-2', False), ('cache-fill', True),
+                            ('cached-1', True), ('cached-2', True)]:
+            r = vh.run_validation(snapshot, request, root / name, a.worker,
+                baseline_cache=root / 'baseline-cache' if cache else None,
+                hash_cache=root / 'hash-cache.json' if cache else None)
+            wanted = [m['packageId'].casefold() for m in json.loads(request.read_text())['mods']]
+            ok = r['status'] == 'passed' and loader_order_matches(r.get('modOrder'), wanted)
+            results.append({'case': name, 'ok': ok, 'status': r['status'],
+                'reasons': [x['code'] for x in r.get('reasons', [])],
+                'baselineCached': r.get('diagnostics', {}).get('baselineCached'),
+                'timings': r.get('timings'),
+                'copyModes': r.get('process', {}).get('target', {}).get('modCopyModes')})
+        summary = {'preparation': json.loads((root / 'preparation-summary.json').read_text()), 'runs': results}
+        for label, script in [('event', 'run_event_choice.py'), ('materials', 'run_bill_ingredients.py')]:
+            cmd = [sys.executable, str(REPO / 'tests/integration' / script), '--snapshot', str(snapshot),
+                   '--worker', str(Path(a.worker).resolve()), '--out', str(root / label)]
+            with (root / (label + '.log')).open('w') as log:
+                try:
+                    completed = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=600)
+                    summary[label + 'Regression'] = completed.returncode == 0
+                except subprocess.TimeoutExpired:
+                    summary[label + 'Regression'] = False
+        ok = (all(x['ok'] for x in results) and all(x['baselineCached'] for x in results[-2:])
+              and summary['eventRegression'] and summary['materialsRegression'])
+        summary['ok'] = ok
+        (root / 'safe-summary.json').write_text(json.dumps(summary, indent=2))
+        return 0 if ok else 1
+    except Exception as error:
+        (root / 'safe-summary.json').write_text(json.dumps({
+            'ok': False, 'runs': results, 'errorType': type(error).__name__,
+        }, indent=2))
+        return 1
 
 
 if __name__ == '__main__':

@@ -216,6 +216,7 @@ def check_profile(profile):
                 continue
             if key in resolved:
                 audit.add('activeMods', 'multiple active identifiers resolve to one package', key)
+                continue
             resolved.append(key)
         report['activeMods'] = resolved
         positions = {p: i for i, p in enumerate(resolved)}
@@ -250,7 +251,7 @@ def check_profile(profile):
                 audit.add('loadFolders', error, folder, incomplete=True)
                 continue
             for content in folders:
-                for category in ('Defs', 'Patches', 'Assemblies'):
+                for category, expected_suffix in (('Defs', '.xml'), ('Patches', '.xml'), ('Assemblies', '.dll')):
                     base = content / category
                     if not base.exists():
                         continue
@@ -266,7 +267,7 @@ def check_profile(profile):
                         for name in sorted(files):
                             path = Path(parent) / name
                             suffix = path.suffix.lower()
-                            if suffix not in ('.xml', '.dll'):
+                            if suffix != expected_suffix:
                                 continue
                             if len(fingerprints) >= 100_000:
                                 raise ValueError('file count limit exceeded')
@@ -280,7 +281,11 @@ def check_profile(profile):
                             except (OSError, ValueError, LookupError, expat.ExpatError, ET.ParseError) as error:
                                 audit.add('xmlSyntax' if suffix == '.xml' else 'fileRead', error, path)
         for path, identity in observed.items():
-            current = path.stat()
+            try:
+                current = path.stat()
+            except FileNotFoundError:
+                audit.add('inputChanged', 'input changed during preflight', path, incomplete=True)
+                continue
             if (current.st_size, current.st_mtime_ns) != identity:
                 audit.add('inputChanged', 'input changed during preflight', path, incomplete=True)
     except (OSError, ValueError, KeyError, TypeError, LookupError, expat.ExpatError, ET.ParseError) as error:

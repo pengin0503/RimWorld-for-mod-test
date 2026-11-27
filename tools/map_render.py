@@ -48,17 +48,34 @@ class ObservationError(ValueError):
 
 
 def decode(observation):
-    if observation.get('recordType') != 'rwmtMapObservation' or observation.get('schemaVersion') != 1:
+    if (not isinstance(observation, dict) or observation.get('recordType') != 'rwmtMapObservation'
+            or type(observation.get('schemaVersion')) is not int or observation.get('schemaVersion') != 1):
         raise ObservationError('not a rwmtMapObservation v1')
-    width, height = observation['width'], observation['height']
+    width, height = observation.get('width'), observation.get('height')
+    if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
+        raise ObservationError('map dimensions must be positive integers')
     cells = width * height
-    layers = observation['layers']
+    layers = observation.get('layers')
+    palettes = observation.get('palettes')
+    if not isinstance(layers, dict) or not isinstance(palettes, dict):
+        raise ObservationError('missing layers or palettes')
+    for key in ('terrain', 'roof', 'thing'):
+        if not isinstance(palettes.get(key), list):
+            raise ObservationError(f'missing {key} palette')
     terrain = base64.b64decode(layers['terrain'])
     roof = base64.b64decode(layers['roof'])
     thing = base64.b64decode(layers['thing'])
     if len(terrain) != 2 * cells or len(roof) != cells or len(thing) != 2 * cells:
         raise ObservationError('layer sizes do not match the map size')
-    return (width, height, struct.unpack(f'<{cells}H', terrain), roof, struct.unpack(f'<{cells}H', thing))
+    terrain_idx = struct.unpack(f'<{cells}H', terrain)
+    thing_idx = struct.unpack(f'<{cells}H', thing)
+    if terrain_idx and max(terrain_idx) >= len(palettes['terrain']):
+        raise ObservationError('terrain palette index out of range')
+    if roof and max(roof) > len(palettes['roof']):
+        raise ObservationError('roof palette index out of range')
+    if thing_idx and max(thing_idx) > len(palettes['thing']):
+        raise ObservationError('thing palette index out of range')
+    return (width, height, terrain_idx, roof, thing_idx)
 
 
 def _named_color(name):
@@ -108,13 +125,18 @@ def thing_class(entry, listed_player):
 
 def _terrain_color(entry, cls):
     if cls == 'constructedFloor' and entry.get('color') and entry['color'][:3] != [1.0, 1.0, 1.0]:
-        return tuple(int(40 + 180 * c) for c in entry['color'][:3])
+        return tuple(max(0, min(255, int(40 + 180 * c))) for c in entry['color'][:3])
     color = COLORS[cls]
     return color if color is not None else _named_color(entry['defName'] or '?')
 
 
 def _blend(base, top, amount):
-    return tuple(int(b + (t - b) * amount) for b, t in zip(base, top))
+    return tuple(max(0, min(255, int(b + (t - b) * amount))) for b, t in zip(base, top))
+
+
+def _mod_matches(entry, targets):
+    mod = entry.get('mod')
+    return isinstance(mod, str) and mod.lower() in targets
 
 
 def render(observation, targets, scale=2):
@@ -122,22 +144,23 @@ def render(observation, targets, scale=2):
     width, height, terrain, roof, thing = decode(observation)
     palettes = observation['palettes']
     targets = {t.lower() for t in targets}
+    things = [None] + palettes['thing']
     player_pawns = {}
     for listed in observation.get('things', []):
-        x0, z0, x1, z1 = listed['rect']
-        if listed.get('playerFaction'):
+        entry = things[listed['def']]
+        if listed.get('playerFaction') and entry is not None and entry.get('category') == 'Pawn':
+            x0, z0, x1, z1 = listed['rect']
             for z in range(z0, z1 + 1):
                 for x in range(x0, x1 + 1):
                     player_pawns[z * width + x] = True
     terrain_info = []
     for entry in palettes['terrain']:
-        if entry.get('mod') in targets:
+        if _mod_matches(entry, targets):
             terrain_info.append(('targetTerrain', TARGET_TERRAIN))
         else:
             cls = terrain_class(entry)
             terrain_info.append((cls, _terrain_color(entry, cls)))
     roofs = [None] + palettes['roof']
-    things = [None] + palettes['thing']
     counts = {}
     rows = []
     for z in range(height - 1, -1, -1):  # z=0 is the south edge: the bottom of the image
@@ -147,7 +170,7 @@ def render(observation, targets, scale=2):
             cls, color = terrain_info[terrain[cell]]
             entry = things[thing[cell]]
             if entry is not None:
-                if entry.get('mod') in targets:
+                if _mod_matches(entry, targets):
                     cls, color = 'targetThing', TARGET_THING
                 else:
                     tcls = thing_class(entry, player_pawns.get(cell, False))
@@ -175,7 +198,7 @@ def png(width, height, rows):
         return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
     raw = b''.join(b'\x00' + row for row in rows)
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
-            + chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b''))
+            + chunk(b'IDAT', zlib.compress(raw, 6)) + chunk(b'IEND', b''))
 
 
 def summarize(observation, targets, max_listed=200):
@@ -191,24 +214,24 @@ def summarize(observation, targets, max_listed=200):
             stats[key] += amount
     things = [None] + palettes['thing']
     target_things = [{'defName': e['defName'], 'mod': e['mod'], 'category': e['category'], 'count': e['count']}
-                     for e in palettes['thing'] if e.get('mod') in targets]
+                     for e in palettes['thing'] if _mod_matches(e, targets)]
     target_terrain = [{'defName': e['defName'], 'mod': e['mod'], 'cells': e['cells']}
-                      for e in palettes['terrain'] if e.get('mod') in targets]
+                      for e in palettes['terrain'] if _mod_matches(e, targets)]
     placed = []
     for listed in observation.get('things', []):
         entry = things[listed['def']]
-        if entry.get('mod') in targets and len(placed) < max_listed:
+        if _mod_matches(entry, targets) and len(placed) < max_listed:
             placed.append({'defName': entry['defName'], 'mod': entry['mod'], 'x': listed['x'], 'z': listed['z'],
                            'rect': listed['rect'], 'rotation': listed['rotation'], 'faction': listed.get('faction'),
                            'stuff': listed.get('stuff')})
-    listed_target = sum(1 for l in observation.get('things', []) if things[l['def']].get('mod') in targets)
+    listed_target = sum(1 for l in observation.get('things', []) if _mod_matches(things[l['def']], targets))
     return {
         'byMod': dict(sorted(by_mod.items())),
         'targetThings': target_things,
         'targetTerrain': target_terrain,
         'targetPlacements': placed,
         'targetPlacementsOmitted': max(0, listed_target - len(placed)),
-        'genStepsFromTargets': [g for g in observation.get('genSteps', []) if g.get('mod') in targets],
+        'genStepsFromTargets': [g for g in observation.get('genSteps', []) if _mod_matches(g, targets)],
     }
 
 

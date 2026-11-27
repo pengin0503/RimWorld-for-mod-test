@@ -64,7 +64,7 @@ def parse_lines(lines, *, worker=False):
             try:
                 event = json.loads(line)
                 if not isinstance(event, dict): raise ValueError()
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, RecursionError):
                 if not observed: errors.append('invalid worker record')
                 continue
             text = event.get('message', '')
@@ -85,7 +85,7 @@ def parse_lines(lines, *, worker=False):
             continue
         try:
             row = json.loads(text.split(MARKER, 1)[1])
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             errors.append('invalid context JSON')
             continue
         if len(rows) >= 16:

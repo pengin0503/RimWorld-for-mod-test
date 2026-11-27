@@ -63,7 +63,11 @@ def load_index(archive: Path) -> dict:
             member = z.getinfo(names[0])
             if member.file_size > 25 * 1024 * 1024:
                 raise WorkflowError("uncompressed index exceeds 25 MiB")
-            data = json.loads(z.read(member).decode("utf-8"))
+            with z.open(member) as stream:
+                raw = stream.read(25 * 1024 * 1024 + 1)
+            if len(raw) > 25 * 1024 * 1024:
+                raise WorkflowError("uncompressed index exceeds 25 MiB")
+            data = json.loads(raw.decode("utf-8"))
     except (OSError, BadZipFile, ValueError, UnicodeError, KeyError) as error:
         raise WorkflowError("cannot load private MOD index ZIP") from error
     if not isinstance(data, dict) or not isinstance(data.get("mods"), list):
@@ -321,13 +325,19 @@ def resolve_mod_graph(index, roots, read_metadata, *, official=None, local=None)
     def by_package(package):
         if local and local["packageId"].casefold() == package.casefold():
             return local
-        found = [m for m in index.get('mods', []) if isinstance(m.get('package_id'), str)
+        found = [m for m in index.get('mods', []) if isinstance(m, dict)
+                 and isinstance(m.get('package_id'), str)
                  and m['package_id'].casefold() == package.casefold()]
         if not found:
             raise WorkflowError(f'dependency package {package} missing from private index', 'missingDependencies')
         if len(found) != 1:
             raise WorkflowError(f'dependency package {package} ambiguous in private index', 'dependencyUnresolved')
-        return resolve(index, found[0]['workshop_id'])
+        mod = found[0]
+        workshop_id = mod.get('workshop_id')
+        if not isinstance(workshop_id, str) or not WORKSHOP_ID.fullmatch(workshop_id):
+            raise WorkflowError('index contains an unsafe Workshop ID', 'dependencyUnresolved')
+        return {"workshopId": workshop_id, "packageId": mod.get("package_id", ""),
+                "name": mod.get("name", ""), "supportedVersions": mod.get("supported_versions", [])}
     while queue:
         package = queue.pop(0).casefold()
         if package in nodes or package in official:

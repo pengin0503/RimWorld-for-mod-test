@@ -21,6 +21,7 @@ public sealed class Diagnostics : ILoggerProvider
     private readonly long _maxBytes;
     private long _bytes;
     private int _sequence;
+    private bool _disposed;
 
     public Diagnostics(string path, Stopwatch clock, int maxEvents, int maxMessageBytes, long maxBytes)
     {
@@ -39,6 +40,16 @@ public sealed class Diagnostics : ILoggerProvider
     public int Truncated { get; private set; }
     public Dictionary<string, int> CountsByLevel { get; } = new();
 
+    public sealed record SummarySnapshot(int Written, int Dropped, int Truncated, Dictionary<string, int> CountsByLevel);
+
+    public SummarySnapshot Snapshot()
+    {
+        lock (_lock)
+        {
+            return new SummarySnapshot(Written, Dropped, Truncated, new Dictionary<string, int>(CountsByLevel));
+        }
+    }
+
     public int ErrorCount { get { lock (_lock) return CountsByLevel.GetValueOrDefault("error"); } }
 
     public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
@@ -54,6 +65,10 @@ public sealed class Diagnostics : ILoggerProvider
         }
         lock (_lock)
         {
+            if (_disposed)
+            {
+                return;
+            }
             CountsByLevel[level] = CountsByLevel.GetValueOrDefault(level) + 1;
             if (Written >= _maxEvents || _bytes >= _maxBytes)
             {
@@ -96,16 +111,29 @@ public sealed class Diagnostics : ILoggerProvider
     {
         lock (_lock)
         {
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
             _stream.Dispose();
         }
     }
 
     internal static string TruncateUtf8(string text, int maxBytes)
     {
+        if (string.IsNullOrEmpty(text) || maxBytes <= 0)
+        {
+            return "";
+        }
         int length = Math.Min(text.Length, maxBytes);
         while (length > 0 && Encoding.UTF8.GetByteCount(text.AsSpan(0, length)) > maxBytes)
         {
             length = (int)(length * 0.9);
+        }
+        if (length > 0 && char.IsHighSurrogate(text[length - 1]))
+        {
+            length--;
         }
         return text[..length];
     }

@@ -64,10 +64,23 @@ public static class Program
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             // Last chance: keep the evidence. The process terminates after this handler.
-            diagnostics.Record("error", "Worker", "unhandled exception", e.ExceptionObject as Exception);
+            Exception? ex = e.ExceptionObject as Exception;
             try
             {
-                host.WriteResult("failed", $"unhandled exception: {(e.ExceptionObject as Exception)?.GetType().FullName}");
+                diagnostics.Record("error", "Worker", "unhandled exception", ex);
+            }
+            catch (Exception)
+            {
+                // Best-effort evidence only.
+            }
+            if (!host.TryFinish())
+            {
+                return;
+            }
+            try
+            {
+                Exception? unwrapped = ex == null ? null : Reflect.Unwrap(ex);
+                host.WriteResult("failed", $"unhandled exception: {unwrapped?.GetType().FullName}", observeGame: false);
             }
             catch (Exception)
             {
@@ -81,8 +94,26 @@ public static class Program
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
-            diagnostics.Record("error", "Worker", "worker failed before the engine loop ended", e);
-            host.WriteResult("failed", $"worker failed: {e.GetType().Name}: {e.Message}");
+            Exception unwrapped = Reflect.Unwrap(e);
+            try
+            {
+                diagnostics.Record("error", "Worker", "worker failed before the engine loop ended", unwrapped);
+            }
+            catch (Exception)
+            {
+                // Best-effort diagnostics.
+            }
+            if (host.TryFinish())
+            {
+                try
+                {
+                    host.WriteResult("failed", $"worker failed: {unwrapped.GetType().Name}: {unwrapped.Message}", observeGame: false);
+                }
+                catch (Exception)
+                {
+                    // The Controller treats a missing result as a crash.
+                }
+            }
             code = 3;
         }
         diagnostics.Dispose();

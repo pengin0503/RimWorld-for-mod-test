@@ -12,14 +12,15 @@ import time
 def children_of(pid):
     """Collect descendants from /proc, deepest first; disappearing processes are normal."""
     parents = {}
-    for entry in os.scandir('/proc'):
-        if not entry.name.isdigit():
-            continue
-        try:
-            data = Path(entry.path, 'stat').read_bytes().rsplit(b')', 1)[1].split()
-            parents[int(entry.name)] = int(data[1])
-        except (OSError, ValueError, IndexError):
-            continue
+    with os.scandir('/proc') as entries:
+        for entry in entries:
+            if not entry.name.isdigit():
+                continue
+            try:
+                data = Path(entry.path, 'stat').read_bytes().rsplit(b')', 1)[1].split()
+                parents[int(entry.name)] = int(data[1])
+            except (OSError, ValueError, IndexError):
+                continue
     found = set()
     ordered = []
     frontier = {pid}
@@ -28,6 +29,13 @@ def children_of(pid):
         found.update(frontier)
         ordered.extend(frontier)
     return list(reversed(ordered))
+
+
+def _write_json_atomic(path, payload):
+    target = Path(path)
+    tmp = Path(f'{path}.{os.getpid()}.tmp')
+    tmp.write_text(json.dumps(payload), encoding='utf-8')
+    os.replace(tmp, target)
 
 
 def is_zombie(pid):
@@ -59,7 +67,7 @@ def signal_owned(pid, owner):
 def inner(status_path, lock_fd, command):
     gui = subprocess.Popen(command, pass_fds=(lock_fd,) if lock_fd >= 0 else ())
     code = gui.wait()
-    Path(status_path).write_text(json.dumps({'exitCode': code}))
+    _write_json_atomic(status_path, {'exitCode': code})
     return 0
 
 
@@ -107,8 +115,13 @@ def main(status_path, lock_fd, command):
         time.sleep(.02)
     code = child.wait()
     if Path(inner_status).is_file():
-        code = json.loads(Path(inner_status).read_text())['exitCode']
-    Path(status_path).write_text(json.dumps({'exitCode': code, 'strayProcessesKilled': bool(killed)}))
+        try:
+            loaded = json.loads(Path(inner_status).read_text(encoding='utf-8'))
+            if isinstance(loaded, dict) and 'exitCode' in loaded:
+                code = loaded['exitCode']
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            pass
+    _write_json_atomic(status_path, {'exitCode': code, 'strayProcessesKilled': bool(killed)})
     return 0
 
 

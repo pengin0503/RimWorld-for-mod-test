@@ -48,13 +48,20 @@ def validate_key(key: str) -> str:
 
 
 def ensure_safe_destination(root: Path, relative: str) -> Path:
-    """Reject symlink components to prevent writes escaping the private destination."""
-    path = root / PurePosixPath(relative)
+    """Reject traversal and symlink components to prevent writes escaping the private destination."""
+    if "\\" in relative:
+        raise AssetError("unsafe destination relative path")
+    rel_path = PurePosixPath(relative)
+    if rel_path.is_absolute() or any(part in ("..", "") for part in rel_path.parts):
+        raise AssetError("destination relative path escapes root")
+    path = root / rel_path
     for part in (root, *path.parents):
         if part.is_symlink():
             raise AssetError("destination contains a symbolic link")
     if path.is_symlink():
         raise AssetError("destination file is a symbolic link")
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise AssetError("destination escapes private root")
     return path
 
 
@@ -104,9 +111,11 @@ class R2:
         child_env.pop("AWS_PROFILE", None)
         child_env.pop("AWS_DEFAULT_PROFILE", None)
         try:
-            result = subprocess.run(cmd, text=True, capture_output=True, check=False, env=child_env)
+            result = subprocess.run(cmd, text=True, capture_output=True, check=False, env=child_env, timeout=180)
         except FileNotFoundError as exc:
             raise AssetError("AWS CLI not found (install awscli)") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise AssetError("R2 operation timed out (AWS CLI)") from exc
         if result.returncode != 0:
             # Do not echo the complete AWS CLI command or error, which may include private paths.
             raise AssetError(f"R2 operation failed (AWS CLI exit {result.returncode}); check endpoint, permissions and key")
@@ -157,7 +166,9 @@ class R2:
     def get(self, key: str, dest: Path, expected_size: int | None, *, refresh: bool = False) -> str:
         validate_key(key)
         ensure_safe_destination(dest.parent, dest.name)
-        if dest.exists() and not refresh and (expected_size is None or dest.stat().st_size == expected_size):
+        if dest.is_dir():
+            raise AssetError("destination path is a directory")
+        if dest.is_file() and not refresh and (expected_size is None or dest.stat().st_size == expected_size):
             return "cached"
         dest.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=".r2-", dir=dest.parent, delete=False) as temp:

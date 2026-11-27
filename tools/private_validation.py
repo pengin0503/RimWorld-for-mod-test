@@ -46,9 +46,20 @@ def read_json(path):
 
 
 def write_json(path, value):
+    path = Path(path)
+    if path.is_symlink():
+        raise ValueError('refusing to overwrite symbolic link')
     temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(value, allow_nan=False), encoding='utf-8')
-    temporary.replace(path)
+    if temporary.is_symlink():
+        raise ValueError('refusing to overwrite symbolic link')
+    fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            stream.write(json.dumps(value, allow_nan=False))
+        temporary.replace(path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def public_summary(raw, identity):
@@ -119,10 +130,14 @@ def init_session(root, selection):
     suites = resolve_suites(selection)
     identity = current_identity()
     session = session_path(root)
-    if session.exists():
-        write_json(session / 'summary.json', {**identity, 'selection': selection, 'suites': []})
-        manifest = read_json(session / 'session.json'); manifest['invalidated'] = True
-        write_json(session / 'session.json', manifest)
+    if session.exists() or session.is_symlink():
+        if session.is_dir() and not session.is_symlink():
+            write_json(session / 'summary.json', {**identity, 'selection': selection, 'suites': []})
+            manifest = read_json(session / 'session.json')
+            if not isinstance(manifest, dict):
+                manifest = {}
+            manifest['invalidated'] = True
+            write_json(session / 'session.json', manifest)
         raise ValueError('session already initialized')
     session.mkdir(parents=True, mode=0o700)
     write_json(session / 'session.json', {**identity, 'selection': selection,

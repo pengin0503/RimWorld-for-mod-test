@@ -73,7 +73,7 @@ def evaluate_events(lines, expectations) -> dict:
             break
         try:
             event = json.loads(line, object_pairs_hook=_unique_keys)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             invalid = True
             continue
         if not isinstance(event, dict):
@@ -88,7 +88,7 @@ def evaluate_events(lines, expectations) -> dict:
             continue
         try:
             probe = json.loads(message[len(MARKER):], object_pairs_hook=_unique_keys)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             invalid = True
             continue
         if (not isinstance(probe, dict)
@@ -119,10 +119,18 @@ def evaluate_events(lines, expectations) -> dict:
             "checks": checks, "observed": len(observations), "invalidEvidence": invalid}
 
 
-def _read_bounded(path: Path, limit: int):
-    if path.stat().st_size > limit:
+def _read_bounded_bytes(path: Path, limit: int) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("private input must be a regular file")
+    with path.open("rb") as stream:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
         raise ValueError("private input exceeds safe size")
-    return path.read_text(encoding="utf-8").splitlines()
+    return raw
+
+
+def _read_bounded(path: Path, limit: int):
+    return _read_bounded_bytes(path, limit).decode("utf-8").splitlines()
 
 
 def main(argv=None):
@@ -131,12 +139,9 @@ def main(argv=None):
     p.add_argument("--expectations", type=Path, required=True, help="private JSON array of assertions")
     a = p.parse_args(argv)
     try:
-        raw = a.expectations
-        if raw.stat().st_size > 64 * 1024:
-            raise ValueError("expectations too large")
-        checks = json.loads(raw.read_text(encoding="utf-8"), object_pairs_hook=_unique_keys)
+        checks = json.loads(_read_bounded_bytes(a.expectations, 64 * 1024).decode("utf-8"), object_pairs_hook=_unique_keys)
         output = evaluate_events(_read_bounded(a.events, MAX_LOG_BYTES), checks)
-    except (OSError, UnicodeError, ValueError, TypeError):
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError):
         print('{"status":"incomplete","fidelity":"experimental","invalidEvidence":true}')
         return 2
     print(json.dumps(output, sort_keys=True, ensure_ascii=True, allow_nan=False))

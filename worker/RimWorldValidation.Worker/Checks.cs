@@ -65,7 +65,7 @@ public sealed class Checks(GameApi api)
         json.WriteStartArray("items");
         foreach (string error in errors.Take(maxItems))
         {
-            json.WriteStringValue(Diagnostics.TruncateUtf8(error, maxBytes));
+            json.WriteStringValue(Diagnostics.TruncateUtf8(error ?? "", maxBytes));
         }
         json.WriteEndArray();
         json.WriteEndObject();
@@ -128,7 +128,7 @@ public sealed class Checks(GameApi api)
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             json.WriteString("outcome", "error");
-            json.WriteString("error", e.Message);
+            json.WriteString("error", Reflect.Unwrap(e).Message);
         }
         json.WriteEndObject();
     }
@@ -158,7 +158,7 @@ public sealed class Checks(GameApi api)
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             json.WriteString("outcome", "error");
-            json.WriteString("error", e.Message);
+            json.WriteString("error", Reflect.Unwrap(e).Message);
         }
         json.WriteEndObject();
     }
@@ -185,7 +185,7 @@ public sealed class Checks(GameApi api)
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             json.WriteString("outcome", "error");
-            json.WriteString("error", e.Message);
+            json.WriteString("error", Reflect.Unwrap(e).Message);
         }
         json.WriteEndObject();
     }
